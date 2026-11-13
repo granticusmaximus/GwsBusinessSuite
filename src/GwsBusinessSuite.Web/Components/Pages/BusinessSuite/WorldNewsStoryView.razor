@@ -69,6 +69,58 @@ else
             <p class="story-original">Original headline: @e.Title</p>
         }
         <p class="story-numbers">@EventDocument.KeyNumbers(e, at => at.ToLocalGwsDateTime())</p>
+        @if (_story.Trust is { } trust)
+        {
+            @* How far to trust it (World News trust plan 1.2/1.3/1.8, 13-11-26). *@
+            <section class="story-trust story-trust-@trust.Confidence.Level.ToString().ToLowerInvariant()" aria-label="How far to trust this story">
+                <div class="story-trust-head">
+                    <span class="story-trust-label">@trust.Confidence.Label</span>
+                    <span class="story-trust-reason">@trust.Confidence.Reason</span>
+                </div>
+                <p class="story-trust-sources">
+                    @Count(trust.Independence.Outlets, "outlet") · <strong>@Count(trust.Independence.Independent, "independent source")</strong>
+                    @if (trust.Independence.Origins.Any(origin => origin.Outlets.Count > 1))
+                    {
+                        <details class="story-trust-origins">
+                            <summary>Who repeated whom</summary>
+                            <ul>
+                                @foreach (var origin in trust.Independence.Origins.Where(origin => origin.Outlets.Count > 1))
+                                {
+                                    <li><strong>@origin.Name</strong> (@OriginKind(origin.Kind)): @string.Join(", ", origin.Outlets)</li>
+                                }
+                            </ul>
+                        </details>
+                    }
+                </p>
+                @if (trust.FactChecks is { Count: > 0 } checks)
+                {
+                    <ul class="story-trust-checks">
+                        @foreach (var check in checks)
+                        {
+                            <li>
+                                Fact-checked by <strong>@check.Outlet</strong>@(check.Verdict is null ? "" : $" ({check.Verdict})"):
+                                <a href="@check.Url" target="_blank" rel="noopener noreferrer">@check.Title</a>
+                            </li>
+                        }
+                    </ul>
+                }
+                @if (trust.Edits.Count > 0)
+                {
+                    <details class="story-trust-edits">
+                        <summary>@Count(trust.Edits.Count, "headline change") after publication@(trust.Edits.Any(edit => edit.Kind == "correction") ? ", including a correction" : string.Empty)</summary>
+                        <ul>
+                            @foreach (var edit in trust.Edits)
+                            {
+                                <li>
+                                    <span class="story-trust-edit-kind">@edit.Kind</span> @edit.SeenAt.ToLocalGwsDateTime():
+                                    <del>@edit.Before</del> → <ins>@edit.After</ins>
+                                </li>
+                            }
+                        </ul>
+                    </details>
+                }
+            </section>
+        }
         @if (_mostRead.Count > 0)
         {
             @* What people looked up yesterday that the headlines name (07-11-26). *@
@@ -430,6 +482,8 @@ else
 }
 
 @code {
+    private static string OriginKind(string kind) => kind switch { "wire" => "wire copy", "owner" => "same owner", _ => "same text" };
+
     // The event whose story this shows.
     [Parameter, EditorRequired] public string EventId { get; set; } = string.Empty;
 
@@ -488,6 +542,14 @@ else
         if (id != EventId || _disposed) return;
         _story = story;
         _gone = story is null;
+        // A primary source can confirm it (World News trust plan 1.13); checked after it shows.
+        if (story is not null)
+        {
+            StateHasChanged();
+            var confirmed = await News.ConfirmWithPrimarySourcesAsync(story);
+            if (id != EventId || _disposed) return;
+            if (!ReferenceEquals(confirmed, story)) { _story = confirmed; StateHasChanged(); }
+        }
         // Seen: the next "what changed since you last read" starts from this analysis.
         if (_username is { } username && story?.Analysis is { } analysis)
             await Task.Run(() => News.MarkStoryRead(username, id, analysis.CreatedAt));

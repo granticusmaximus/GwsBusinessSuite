@@ -18,12 +18,19 @@ public sealed record WorldNewsOptions
     public TimeSpan FirstLookback { get; init; } = TimeSpan.FromHours(6);
     public IReadOnlyList<NewsEdition> Editions { get; init; } = GoogleNewsFeed.Editions;
     public IReadOnlyList<NewsOutlet> Outlets { get; init; } = OutletFeeds.Outlets;
+    // Feeds added on the sources page and feeds paused there (13-11-26), asked for each read.
+    public Func<IReadOnlyList<NewsOutlet>>? AddedOutlets { get; init; }
+    public Func<IReadOnlySet<string>>? PausedFeeds { get; init; }
     // Outlet feeds are read this many at a time (several share a host, such as the BBC's).
     public int OutletConcurrency { get; init; } = 6;
     // WHO's Disease Outbreak News (WhoOutbreakNews), read with the outlets' feeds. Off unless the
     // host turns it on, so a test's pipeline asks no one it wasn't told to.
     public bool ReadWhoOutbreakNews { get; init; }
+    // Wikipedia's Current events portal as an early signal (13-11-26). Off unless the host turns it on.
+    public bool ReadWikipediaCurrentEvents { get; init; }
     public IReadOnlyList<string> GdeltQueries { get; init; } = [];
+    // Searches for stories that are surging (FollowUpQueries, 13-11-26), asked for each read.
+    public Func<IReadOnlyList<string>>? FollowUpQueries { get; init; }
     public int EmbedBatchSize { get; init; } = 64;
     // Taken for each embedding batch and released after it, so a host can queue embedding with its
     // other model work (the server's one-at-a-time Ollama scheduler) instead of running alongside it.
@@ -74,30 +81,45 @@ public sealed class WorldNewsPipeline(WorldNewsStore store, HttpClient http, Gde
             }
         }
 
-        var outletReads = new (IReadOnlyList<WorldArticle>? Articles, string? Note)[options.Outlets.Count];
-        await Parallel.ForEachAsync(Enumerable.Range(0, options.Outlets.Count),
+        // Only the feeds that are due (FeedSchedule, 13-11-26): a quiet feed is read less often, a
+        // refusing one is left alone for a day, and an unchanged one answers 304 for almost nothing.
+        var readAt = time.GetUtcNow();
+        var health = store.FeedHealth();
+        var paused = options.PausedFeeds?.Invoke() ?? new HashSet<string>();
+        var outlets = options.Outlets.Concat(options.AddedOutlets?.Invoke() ?? []).DistinctBy(outlet => outlet.Url)
+            .Where(outlet => !paused.Contains(outlet.Url)).ToList();
+        var due = outlets.Where(outlet => FeedSchedule.ShouldRead(health.GetValueOrDefault(outlet.Url), readAt)).ToList();
+        var outletReads = new (IReadOnlyList<WorldArticle>? Articles, string? Note, FeedHealth Health, int Status, string? ETag, string? Modified)[due.Count];
+        await Parallel.ForEachAsync(Enumerable.Range(0, due.Count),
             new ParallelOptions { MaxDegreeOfParallelism = options.OutletConcurrency, CancellationToken = ct }, async (i, token) =>
             {
-                var outlet = options.Outlets[i];
+                var outlet = due[i];
+                var state = health.GetValueOrDefault(outlet.Url) ?? new FeedHealth(outlet.Url);
                 try
                 {
-                    using var body = new MemoryStream(await http.GetByteArrayAsync(outlet.Url, token));
-                    outletReads[i] = (OutletFeeds.Parse(body, outlet, time.GetUtcNow()), null);
+                    var read = await ReadOutletAsync(outlet, state, token);
+                    outletReads[i] = (read.Articles, null, state, read.Status, read.ETag, read.Modified);
                 }
                 catch (Exception ex) when (ex is HttpRequestException or XmlException or TaskCanceledException && !token.IsCancellationRequested)
                 {
-                    outletReads[i] = (null, $"{outlet.Name} ({outlet.Language}): {ex.Message}");
+                    var status = ex is HttpRequestException { StatusCode: { } code } ? (int)code : (int?)null;
+                    outletReads[i] = (null, $"{outlet.Name} ({outlet.Language}): {ex.Message}", FeedSchedule.AfterFailure(state, status, ex.Message, readAt), status ?? 0, null, null);
                 }
             });
-        foreach (var (articles, note) in outletReads)
+        var healthAfter = new List<FeedHealth>(due.Count);
+        foreach (var (articles, note, state, status, etag, modified) in outletReads)
         {
             sourcesAttempted++;
             if (note is not null) notes.Add(note);
-            if (articles is null) continue;
+            if (articles is null) { healthAfter.Add(state); continue; }
             sourcesSucceeded++;
             fetched += articles.Count;
-            added += store.AddArticles(articles);
+            var newHere = store.AddArticles(articles);
+            added += newHere;
+            healthAfter.Add(FeedSchedule.AfterSuccess(state, status, newHere, etag, modified, readAt));
         }
+        store.SaveFeedHealth(healthAfter);
+        if (due.Count < outlets.Count) notes.Add($"{outlets.Count - due.Count} quiet or paused feeds skipped this read.");
 
         if (options.ReadWhoOutbreakNews)
         {
@@ -115,7 +137,44 @@ public sealed class WorldNewsPipeline(WorldNewsStore store, HttpClient http, Gde
             }
         }
 
-        foreach (var query in options.GdeltQueries)
+        if (options.ReadWikipediaCurrentEvents)
+        {
+            sourcesAttempted++;
+            var wikiHealth = store.FeedHealth().GetValueOrDefault(WikipediaCurrentEvents.Url) ?? new FeedHealth(WikipediaCurrentEvents.Url);
+            if (FeedSchedule.ShouldRead(wikiHealth, readAt))
+            {
+                try
+                {
+                    using var request = new HttpRequestMessage(HttpMethod.Get, WikipediaCurrentEvents.Url);
+                    FeedSchedule.AddValidators(request, wikiHealth);
+                    using var response = await http.SendAsync(request, ct);
+                    if (FeedSchedule.IsNotModified(response.StatusCode))
+                        store.SaveFeedHealth([FeedSchedule.AfterSuccess(wikiHealth, 304, 0, null, null, readAt)]);
+                    else if (!response.IsSuccessStatusCode)
+                        store.SaveFeedHealth([FeedSchedule.AfterFailure(wikiHealth, (int)response.StatusCode, $"HTTP {(int)response.StatusCode}", readAt)]);
+                    else
+                    {
+                        var entries = WikipediaCurrentEvents.Parse(await response.Content.ReadAsStringAsync(ct), readAt);
+                        var newHere = store.AddArticles(entries);
+                        sourcesSucceeded++;
+                        fetched += entries.Count;
+                        added += newHere;
+                        store.SaveFeedHealth([FeedSchedule.AfterSuccess(wikiHealth, (int)response.StatusCode, newHere,
+                            response.Headers.ETag?.ToString(), response.Content.Headers.LastModified?.ToString("R"), readAt)]);
+                    }
+                }
+                catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException && !ct.IsCancellationRequested)
+                {
+                    notes.Add($"Wikipedia Current events: {ex.Message}");
+                    store.SaveFeedHealth([FeedSchedule.AfterFailure(wikiHealth, null, ex.Message, readAt)]);
+                }
+            }
+        }
+
+        // Surging stories are followed with their own searches, at most three a read, after the
+        // configured ones (GDELT allows one request every five seconds).
+        var followUps = (options.FollowUpQueries?.Invoke() ?? []).Take(WorldNewsKit.FollowUpQueries.MaxPerRead).ToList();
+        foreach (var query in options.GdeltQueries.Concat(followUps).Distinct(StringComparer.OrdinalIgnoreCase))
         {
             sourcesAttempted++;
             var feed = "gdelt:" + query;
@@ -168,6 +227,33 @@ public sealed class WorldNewsPipeline(WorldNewsStore store, HttpClient http, Gde
         return new CycleReport(fetched, added, embedded, grouped.Clustering.Created, grouped.Clustering.Touched.Count - grouped.Clustering.Created,
             grouped.Merged, notes, grouped.Linked, sourcesAttempted, sourcesSucceeded, store.RecentEmbeddingBacklog(retainedSince),
             store.LatestReportAt(retainedSince));
+    }
+
+    // One outlet feed, conditionally: 304 means nothing changed. A sitemap index is followed to its
+    // first three sitemaps.
+    private async Task<(int Status, IReadOnlyList<WorldArticle> Articles, string? ETag, string? Modified)> ReadOutletAsync(
+        NewsOutlet outlet, FeedHealth health, CancellationToken ct)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, outlet.Url);
+        FeedSchedule.AddValidators(request, health);
+        using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
+        if (FeedSchedule.IsNotModified(response.StatusCode)) return (304, [], null, null);
+        if (!response.IsSuccessStatusCode)
+            throw new HttpRequestException($"HTTP {(int)response.StatusCode}", null, response.StatusCode);
+        var etag = response.Headers.ETag?.ToString();
+        var modified = response.Content.Headers.LastModified?.ToString("R");
+        var now = time.GetUtcNow();
+        using var body = new MemoryStream(await response.Content.ReadAsByteArrayAsync(ct));
+        var document = OutletFeeds.Load(body);
+        var children = OutletFeeds.SitemapChildren(document);
+        if (children.Count == 0) return ((int)response.StatusCode, OutletFeeds.Parse(document, outlet, now), etag, modified);
+        var articles = new List<WorldArticle>();
+        foreach (var child in children.Take(3))
+        {
+            using var childBody = new MemoryStream(await http.GetByteArrayAsync(child, ct));
+            articles.AddRange(OutletFeeds.Parse(OutletFeeds.Load(childBody), outlet, now));
+        }
+        return ((int)response.StatusCode, articles, etag, modified);
     }
 
     // Groups the embedded reports not yet in an event, merges twin events and places events in

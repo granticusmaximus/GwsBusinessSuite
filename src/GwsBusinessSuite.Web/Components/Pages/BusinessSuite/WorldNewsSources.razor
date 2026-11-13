@@ -1,0 +1,224 @@
+@page "/admin/world-news/sources"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = "AdminOnly")]
+@using Microsoft.AspNetCore.Authorization
+@using GwsBusinessSuite.Application.Abstractions
+@using GwsBusinessSuite.Infrastructure.Services
+@using GwsBusinessSuite.WorldNewsKit
+@inject WorldNewsService News
+@inject ICurrentUserAccessor CurrentUserAccessor
+
+@* World News trust plan 1.15-1.18 (13-11-26): the crawler's numbers, coverage by region, every
+   feed with its health, adding an outlet by its homepage, and outlets' records. *@
+
+<PageTitle>World News sources</PageTitle>
+
+<PageHeader Title="Sources" Icon="bi-broadcast" Description="Where World News reads from: every feed's health, the crawl's numbers and where coverage is thin.">
+    <Actions>
+        <a class="btn btn-outline-secondary" href="admin/world-news"><i class="bi bi-arrow-left me-1" aria-hidden="true"></i>World News</a>
+        <button type="button" class="btn btn-outline-primary" @onclick="Load" disabled="@_busy"><i class="bi bi-arrow-clockwise me-1" aria-hidden="true"></i>Refresh</button>
+    </Actions>
+</PageHeader>
+
+@if (_dashboard is null)
+{
+    <LoadingIndicator Message="Reading the crawler's numbers…" />
+}
+else
+{
+    var d = _dashboard;
+    <section class="sources-numbers" aria-label="The crawl">
+        <div class="sources-number"><span>@d.ReportsLastHour.ToString("N0")</span><small>reports in the last hour</small></div>
+        <div class="sources-number"><span>@d.ReportsLastDay.ToString("N0")</span><small>reports in the last day</small></div>
+        <div class="sources-number"><span>@d.NewStoriesLastDay.ToString("N0")</span><small>new stories in the last day</small></div>
+        <div class="sources-number"><span>@d.Feeds.Count(f => f.State == "ok")</span><small>of @d.Feeds.Count feeds answering</small></div>
+        <div class="sources-number @(Failing > 0 ? "is-warn" : "")"><span>@Failing</span><small>failing or refusing</small></div>
+        <div class="sources-number"><span>@d.Feeds.Count(f => f.State is "quiet" or "paused")</span><small>quiet or paused</small></div>
+    </section>
+
+    @if (d.Silences.Count > 0)
+    {
+        <p class="sources-silence" role="status">
+            <i class="bi bi-volume-mute me-1" aria-hidden="true"></i><strong>Unusually quiet:</strong>
+            @string.Join(", ", d.Silences.Select(s => $"{s.Country} ({s.Recent} reports in 6 hours, usually about {s.Usual:0})")).
+        </p>
+    }
+
+    <section class="card border-0 shadow-sm mb-3" aria-labelledby="sources-regions">
+        <div class="card-header"><strong id="sources-regions">Coverage by region</strong> <small class="text-secondary">thinnest first; add regional outlets below to fill a gap</small></div>
+        <div class="table-responsive">
+            <table class="table align-middle mb-0">
+                <thead><tr><th>Region</th><th class="text-end">Outlets</th><th class="text-end">Reports, last 7 days</th></tr></thead>
+                <tbody>
+                    @foreach (var region in d.Regions)
+                    {
+                        <tr class="@(region.Outlets <= 2 ? "sources-thin" : "")">
+                            <td>@region.Region @if (region.Outlets <= 2) { <span class="sources-badge">thin</span> }</td>
+                            <td class="text-end">@region.Outlets</td>
+                            <td class="text-end">@region.Reports.ToString("N0")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <section class="card border-0 shadow-sm mb-3" aria-labelledby="sources-add">
+        <div class="card-header"><strong id="sources-add">Add an outlet</strong></div>
+        <div class="card-body">
+            <form class="sources-add-form" @onsubmit="FindAsync" @onsubmit:preventDefault>
+                <input class="form-control" type="url" placeholder="https://outlet.example" aria-label="Outlet homepage" @bind="_homepage" @bind:event="oninput" />
+                <input class="form-control" placeholder="Name (as the outlet calls itself)" aria-label="Outlet name" @bind="_name" @bind:event="oninput" />
+                <input class="form-control" placeholder="Country it's based in" aria-label="Country" @bind="_country" @bind:event="oninput" />
+                <input class="form-control" placeholder="Language" aria-label="Language" @bind="_language" @bind:event="oninput" />
+                <button type="submit" class="btn btn-primary" disabled="@(_busy || string.IsNullOrWhiteSpace(_homepage))">Find its feeds</button>
+            </form>
+            <p class="small text-secondary mt-2 mb-0">Only feeds the site publishes for readers are used. A site that refuses the app is left alone.</p>
+            @if (_findProblem is not null) { <p class="text-danger small mt-2 mb-0" role="alert">@_findProblem</p> }
+            @if (_candidates.Count > 0)
+            {
+                <ul class="sources-candidates">
+                    @foreach (var candidate in _candidates)
+                    {
+                        <li>
+                            <div>
+                                <code>@candidate.Url</code>
+                                <small class="d-block text-secondary">@(candidate.Kind == "sitemap" ? "news sitemap" : "feed") · @candidate.Items stories@(candidate.Sample is null ? "" : $" · latest: {candidate.Sample}")</small>
+                            </div>
+                            <button type="button" class="btn btn-sm btn-outline-primary" disabled="@(!CanAdd)" @onclick="() => AddAsync(candidate)">Add</button>
+                        </li>
+                    }
+                </ul>
+                @if (!CanAdd) { <p class="small text-secondary mb-0">Fill in the name, country and language to add one.</p> }
+            }
+        </div>
+    </section>
+
+    <section class="card border-0 shadow-sm mb-3" aria-labelledby="sources-feeds">
+        <div class="card-header d-flex flex-wrap gap-2 justify-content-between align-items-center">
+            <strong id="sources-feeds">Feeds</strong>
+            <select class="form-select form-select-sm sources-filter" aria-label="Show feeds" @bind="_state">
+                <option value="">All (@d.Feeds.Count)</option>
+                @foreach (var state in d.Feeds.Select(f => f.State).Distinct().Order())
+                {
+                    <option value="@state">@state (@d.Feeds.Count(f => f.State == state))</option>
+                }
+            </select>
+        </div>
+        <div class="table-responsive">
+            <table class="table align-middle mb-0 sources-table">
+                <thead><tr><th>Outlet</th><th>State</th><th>Last answer</th><th class="text-end">New reports</th><th></th></tr></thead>
+                <tbody>
+                    @foreach (var feed in d.Feeds.Where(f => string.IsNullOrEmpty(_state) || f.State == _state))
+                    {
+                        <tr>
+                            <td>
+                                <strong>@feed.Outlet.Name</strong> <small class="text-secondary">@feed.Outlet.Language · @feed.Outlet.Country@(feed.Outlet.Kind == "rss" ? "" : $" · {feed.Outlet.Kind}")@(feed.Added ? " · added" : "")</small>
+                                <small class="d-block text-secondary sources-url">@feed.Outlet.Url</small>
+                            </td>
+                            <td><span class="sources-state sources-state-@feed.State.Replace(' ', '-')">@feed.State</span></td>
+                            <td class="text-nowrap">
+                                @if (feed.Health?.LastAttempt is { } attempt)
+                                {
+                                    <span>@attempt.ToLocalGwsDateTime()</span>
+                                    <small class="d-block text-secondary">@(feed.Health.LastStatus is { } status ? $"HTTP {status}" : feed.Health.LastError)</small>
+                                }
+                                else { <span class="text-secondary">—</span> }
+                            </td>
+                            <td class="text-end">@((feed.Health?.Added ?? 0).ToString("N0"))</td>
+                            <td class="text-end text-nowrap">
+                                <button type="button" class="btn btn-sm btn-link" @onclick="() => TogglePausedAsync(feed)">@(feed.Paused ? "Resume" : "Pause")</button>
+                                @if (feed.Added) { <button type="button" class="btn btn-sm btn-link text-danger" @onclick="() => RemoveAsync(feed)">Remove</button> }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <section class="card border-0 shadow-sm mb-3" aria-labelledby="sources-records">
+        <div class="card-header"><strong id="sources-records">Outlets' records</strong> <small class="text-secondary">last 7 days</small></div>
+        <div class="table-responsive">
+            <table class="table align-middle mb-0">
+                <thead><tr><th>Outlet</th><th class="text-end">Reports</th><th class="text-end">First to a story</th><th class="text-end">Headlines changed</th><th class="text-end">Corrections</th></tr></thead>
+                <tbody>
+                    @foreach (var record in d.Records.Take(40))
+                    {
+                        <tr>
+                            <td>@record.Outlet@(OutletNames.IsStateMedia(record.Outlet) ? " (state media)" : "")</td>
+                            <td class="text-end">@record.Reports.ToString("N0")</td>
+                            <td class="text-end">@record.FirstReports.ToString("N0")</td>
+                            <td class="text-end">@record.HeadlineChanges.ToString("N0")</td>
+                            <td class="text-end">@record.Corrections.ToString("N0")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </section>
+}
+
+@code {
+    private CrawlDashboard? _dashboard;
+    private bool _busy;
+    private string _state = string.Empty;
+    private string _homepage = string.Empty;
+    private string _name = string.Empty;
+    private string _country = string.Empty;
+    private string _language = "English";
+    private string? _findProblem;
+    private IReadOnlyList<FeedCandidate> _candidates = [];
+
+    private int Failing => _dashboard?.Feeds.Count(f => f.State is "failing" or "refused") ?? 0;
+    private bool CanAdd => !string.IsNullOrWhiteSpace(_name) && !string.IsNullOrWhiteSpace(_country) && !string.IsNullOrWhiteSpace(_language);
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private Task Load() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _busy = true;
+        try { _dashboard = await Task.Run(() => News.Dashboard(DateTimeOffset.UtcNow)); }
+        finally { _busy = false; }
+    }
+
+    private async Task FindAsync()
+    {
+        _busy = true;
+        _findProblem = null;
+        _candidates = [];
+        try
+        {
+            var (feeds, problem) = await News.DiscoverFeedsAsync(_homepage);
+            _candidates = feeds;
+            _findProblem = problem;
+            if (string.IsNullOrWhiteSpace(_name) && Uri.TryCreate(_homepage, UriKind.Absolute, out var page)) _name = page.Host.StartsWith("www.", StringComparison.Ordinal) ? page.Host[4..] : page.Host;
+        }
+        finally { _busy = false; }
+    }
+
+    private async Task AddAsync(FeedCandidate candidate)
+    {
+        if (!CanAdd) return;
+        var user = await CurrentUserAccessor.GetCurrentUsernameAsync();
+        var feed = new NewsOutlet(_name.Trim(), _language.Trim(), _country.Trim(), candidate.Url, candidate.Kind);
+        await Task.Run(() => News.Store.AddCustomFeed(feed, user, DateTimeOffset.UtcNow));
+        _candidates = [];
+        _homepage = _name = _country = string.Empty;
+        await LoadAsync();
+    }
+
+    private async Task TogglePausedAsync(CrawlFeed feed)
+    {
+        await Task.Run(() => News.Store.SetFeedPaused(feed.Outlet.Url, !feed.Paused));
+        await LoadAsync();
+    }
+
+    private async Task RemoveAsync(CrawlFeed feed)
+    {
+        await Task.Run(() => News.Store.RemoveCustomFeed(feed.Outlet.Url));
+        await LoadAsync();
+    }
+}

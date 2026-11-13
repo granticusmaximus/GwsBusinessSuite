@@ -987,3 +987,15 @@
         transition: none;
     }
 }
+
+/* Watchlists (World News trust plan 1.11, 13-11-26). */
+.world-news-list-head { flex-wrap: wrap; gap: .5rem; }
+.world-news-watchlist { margin: .5rem 0 .75rem; padding: .75rem; border-radius: .85rem; background: var(--gws-neu-raised, rgba(127, 127, 127, .08)); box-shadow: var(--gws-neu-raised-shadow-sm, none); }
+.world-news-watchlist-add { display: flex; gap: .5rem; }
+.world-news-watchlist-help { margin: .4rem 0; font-size: .8rem; color: var(--gws-text-soft); }
+.world-news-watchlist-items { list-style: none; margin: 0; padding: 0; display: grid; gap: .25rem; }
+.world-news-watchlist-items li { display: flex; justify-content: space-between; align-items: center; gap: .5rem; color: var(--gws-text-strong); }
+
+/* Unusual silence (World News trust plan 1.12). */
+.world-news-silence { margin: 0 0 1rem; padding: .6rem .9rem; border-radius: .75rem; background: var(--gws-neu-inset, rgba(127, 127, 127, .08)); color: var(--gws-text-strong); font-size: .9rem; }
+.world-news-silence a { margin-left: .35rem; }

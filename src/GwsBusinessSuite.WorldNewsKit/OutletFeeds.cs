@@ -7,9 +7,12 @@ namespace GwsBusinessSuite.WorldNewsKit;
 
 // One newsroom's own feed. Country is where the outlet is based; BBC language services are
 // "United Kingdom" whatever language they write in.
-public sealed record NewsOutlet(string Name, string Language, string Country, string Url)
+// Kind: "rss" (RSS/RDF/Atom), "sitemap" (a Google News sitemap, 13-11-26) or "factcheck" (a
+// fact-checker's feed: its reports are verdicts on claims, shown as such on a story).
+public sealed record NewsOutlet(string Name, string Language, string Country, string Url, string Kind = "rss")
 {
     public string Feed => "outlet:" + Url;
+    public bool IsFactCheck => Kind == "factcheck";
 }
 
 // Outlets' own RSS feeds, which Google News can't give: the real article URL and the outlet's
@@ -133,15 +136,47 @@ public static partial class OutletFeeds
         new("El Tiempo", "Spanish", "Colombia", "https://www.eltiempo.com/rss/mundo.xml"),
         new("El Universal", "Spanish", "Mexico", "https://www.eluniversal.com.mx/rss/mundo.xml"),
         new("MercoPress", "English", "Uruguay", "https://en.mercopress.com/rss/"),
+        // News sitemaps (13-11-26, World News trust plan 1.6): each newsroom's last two days of articles,
+        // usually updated within minutes. Checked that day; AP, Reuters and AFP answer the app 401/403,
+        // so they're left out.
+        new("The Guardian", "English", "United Kingdom", "https://www.theguardian.com/sitemaps/news.xml", "sitemap"),
+        new("BBC News", "English", "United Kingdom", "https://www.bbc.com/sitemaps/https-index-com-news.xml", "sitemap"),
+        new("Al Jazeera", "English", "Qatar", "https://www.aljazeera.com/news-sitemap.xml", "sitemap"),
+        new("DW", "English", "Germany", "https://www.dw.com/en/news-sitemap.xml", "sitemap"),
+        // Fact-checkers (1.7): their reports are verdicts on claims; a story they cover shows the verdict.
+        new("Snopes", "English", "United States", "https://www.snopes.com/feed/", "factcheck"),
+        new("FactCheck.org", "English", "United States", "https://www.factcheck.org/feed/", "factcheck"),
+        new("PolitiFact", "English", "United States", "https://www.politifact.com/rss/factchecks/", "factcheck"),
+        new("Lead Stories", "English", "United States", "https://leadstories.com/atom.xml", "factcheck"),
+        new("Full Fact", "English", "United Kingdom", "https://fullfact.org/feed/", "factcheck"),
     ];
 
     // Bytes rather than a string, so the XML declaration picks the encoding (some feeds are
     // ISO-8859-1). A DOCTYPE is skipped, not fetched. Dates later than now are taken as now.
-    public static IReadOnlyList<WorldArticle> Parse(Stream xml, NewsOutlet outlet, DateTimeOffset now)
+    public static IReadOnlyList<WorldArticle> Parse(Stream xml, NewsOutlet outlet, DateTimeOffset now) => Parse(Load(xml), outlet, now);
+
+    public static XDocument Load(Stream xml)
     {
         using var reader = XmlReader.Create(xml, new XmlReaderSettings { DtdProcessing = DtdProcessing.Ignore, XmlResolver = null });
+        return XDocument.Load(reader);
+    }
+
+    // A sitemap index lists the sitemaps to read (BBC's news sitemap is one).
+    public static IReadOnlyList<string> SitemapChildren(XDocument document) =>
+        document.Root?.Name.LocalName == "sitemapindex"
+            ? document.Root.Elements().Where(e => e.Name.LocalName == "sitemap")
+                .Select(e => Child(e, "loc")?.Value.Trim()).OfType<string>()
+                .Where(url => Uri.TryCreate(url, UriKind.Absolute, out var uri) && uri.Scheme == Uri.UriSchemeHttps).ToList()
+            : [];
+
+    // How far back a news sitemap's entries are taken (Google News sitemaps hold two days).
+    public static readonly TimeSpan SitemapWindow = TimeSpan.FromHours(48);
+
+    public static IReadOnlyList<WorldArticle> Parse(XDocument document, NewsOutlet outlet, DateTimeOffset now)
+    {
+        if (document.Root?.Name.LocalName == "urlset") return ParseSitemap(document, outlet, now);
         var articles = new List<WorldArticle>();
-        foreach (var item in XDocument.Load(reader).Descendants().Where(e => e.Name.LocalName is "item" or "entry"))
+        foreach (var item in document.Descendants().Where(e => e.Name.LocalName is "item" or "entry"))
         {
             var link = Link(item);
             var title = ArticleNormalizer.CleanTitle(Child(item, "title")?.Value ?? string.Empty);
@@ -151,6 +186,25 @@ public static partial class OutletFeeds
             var snippet = ArticleNormalizer.CleanSnippet(Child(item, "description", "summary", "content")?.Value, title);
             articles.Add(new WorldArticle(ArticleNormalizer.IdFor(link), link, title, outlet.Name, outlet.Language, outlet.Country,
                 seenAt, outlet.Feed, Snippet: snippet));
+        }
+        return articles;
+    }
+
+    // A Google News sitemap: each <url> has <loc> and <news:news> with the title and publication
+    // date. No description, so these reports carry none (as Google News reports don't).
+    private static IReadOnlyList<WorldArticle> ParseSitemap(XDocument document, NewsOutlet outlet, DateTimeOffset now)
+    {
+        var articles = new List<WorldArticle>();
+        foreach (var url in document.Root!.Elements().Where(e => e.Name.LocalName == "url"))
+        {
+            var news = url.Elements().FirstOrDefault(e => e.Name.LocalName == "news");
+            var link = Child(url, "loc")?.Value.Trim();
+            if (news is null || !Uri.TryCreate(link, UriKind.Absolute, out var uri) || uri.Scheme is not ("http" or "https")) continue;
+            var title = ArticleNormalizer.CleanTitle(Child(news, "title")?.Value ?? string.Empty);
+            var published = ParseDate(Child(news, "publication_date")?.Value);
+            if (title.Length == 0 || published is null || published < now - SitemapWindow) continue;
+            articles.Add(new WorldArticle(ArticleNormalizer.IdFor(uri.AbsoluteUri), uri.AbsoluteUri, title, outlet.Name, outlet.Language, outlet.Country,
+                published.Value < now ? published.Value : now, outlet.Feed));
         }
         return articles;
     }

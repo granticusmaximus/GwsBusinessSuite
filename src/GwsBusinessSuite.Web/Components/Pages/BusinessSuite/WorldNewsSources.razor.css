@@ -1,0 +1,29 @@
+/* World News sources (trust plan 1.15-1.18, 13-11-26). */
+.sources-numbers { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: .75rem; margin-bottom: 1rem; }
+.sources-number { padding: .85rem 1rem; border-radius: .9rem; background: var(--gws-neu-raised, rgba(127, 127, 127, .08)); box-shadow: var(--gws-neu-raised-shadow-sm, none); }
+.sources-number span { display: block; font-size: 1.5rem; font-weight: 700; color: var(--gws-text-strong); }
+.sources-number small { color: var(--gws-text-soft); }
+.sources-number.is-warn span { color: var(--bs-warning); }
+.sources-silence { margin: 0 0 1rem; padding: .6rem .9rem; border-radius: .75rem; background: var(--gws-neu-inset, rgba(127, 127, 127, .08)); color: var(--gws-text-strong); }
+.sources-badge { margin-left: .4rem; padding: .05rem .45rem; border-radius: 999px; font-size: .72rem; background: var(--bs-warning); color: #17130c; }
+.sources-add-form { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 1fr) auto; gap: .5rem; }
+.sources-candidates { list-style: none; margin: .75rem 0 0; padding: 0; display: grid; gap: .5rem; }
+.sources-candidates li { display: flex; justify-content: space-between; align-items: center; gap: .75rem; }
+.sources-candidates code { word-break: break-all; }
+.sources-filter { width: auto; }
+.sources-url { word-break: break-all; max-width: 32rem; }
+.sources-state { display: inline-block; padding: .1rem .55rem; border-radius: 999px; font-size: .75rem; background: var(--gws-neu-inset, rgba(127, 127, 127, .12)); color: var(--gws-text-soft); white-space: nowrap; }
+.sources-state-ok { color: var(--bs-success); }
+.sources-state-failing, .sources-state-refused { color: var(--bs-danger); }
+.sources-state-quiet, .sources-state-paused { color: var(--bs-warning-text-emphasis); }
+
+@container gws-main (max-width: 1099.98px) {
+    .sources-numbers { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .sources-add-form { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+    .sources-add-form button { grid-column: 1 / -1; }
+}
+
+@container gws-main (max-width: 575.98px) {
+    .sources-numbers { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+    .sources-add-form { grid-template-columns: minmax(0, 1fr); }
+}

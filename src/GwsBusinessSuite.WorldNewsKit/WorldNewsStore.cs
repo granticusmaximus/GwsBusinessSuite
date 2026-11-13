@@ -29,6 +29,9 @@ public sealed record WorldNewsAlert(Guid Id, string Username, string SituationId
 // Hidden to keep it off the globe.
 public sealed record SituationPlacement(string SituationId, string? CountryCode, string? City, bool Hidden,
     string UpdatedBy, DateTimeOffset UpdatedAt);
+// A watchlist entry (1.11): a search a person follows.
+public sealed record KeywordWatch(string Id, string Username, string Query, DateTimeOffset CreatedAt);
+
 public sealed record WorldStory(EventOverview Event, int RecentReports, int RecentOutlets, string? SituationId);
 public sealed record WorldCountry(string Name, int ReportCount, int EventCount, int OutletCount, IReadOnlyList<WorldStory> TopStories);
 public sealed record WorldSnapshot(DateTimeOffset Since, IReadOnlyList<WorldCountry> Countries, IReadOnlyList<WorldStory> BiggestStories);
@@ -84,6 +87,22 @@ public sealed class WorldNewsStore
                 PRIMARY KEY (username, event_id));
             CREATE TABLE IF NOT EXISTS article_translations (article_id TEXT PRIMARY KEY, english TEXT NOT NULL, created_at INTEGER NOT NULL);
             CREATE TABLE IF NOT EXISTS surge_alerts_sent (situation_id TEXT PRIMARY KEY, sent_at INTEGER NOT NULL);
+            CREATE TABLE IF NOT EXISTS custom_feeds (
+                url TEXT PRIMARY KEY, name TEXT NOT NULL, language TEXT NOT NULL, country TEXT NOT NULL, kind TEXT NOT NULL,
+                added_by TEXT NOT NULL, added_at INTEGER NOT NULL);
+            CREATE TABLE IF NOT EXISTS paused_feeds (url TEXT PRIMARY KEY);
+            CREATE TABLE IF NOT EXISTS outlet_days (outlet TEXT NOT NULL, day INTEGER NOT NULL, reports INTEGER NOT NULL, PRIMARY KEY (outlet, day));
+            CREATE TABLE IF NOT EXISTS country_hours (country TEXT NOT NULL, hour INTEGER NOT NULL, reports INTEGER NOT NULL, PRIMARY KEY (country, hour));
+            CREATE TABLE IF NOT EXISTS keyword_watches (
+                id TEXT PRIMARY KEY, username TEXT NOT NULL, query TEXT NOT NULL, created_at INTEGER NOT NULL);
+            CREATE INDEX IF NOT EXISTS ix_keyword_watches_user ON keyword_watches (username);
+            CREATE TABLE IF NOT EXISTS keyword_watch_hits (watch_id TEXT NOT NULL, situation_id TEXT NOT NULL, PRIMARY KEY (watch_id, situation_id));
+            CREATE TABLE IF NOT EXISTS feed_health (
+                url TEXT PRIMARY KEY, etag TEXT, last_modified TEXT, last_status INTEGER, last_attempt INTEGER, last_success INTEGER,
+                last_error TEXT, failures INTEGER NOT NULL, empty_reads INTEGER NOT NULL, added INTEGER NOT NULL, skip_until INTEGER);
+            CREATE TABLE IF NOT EXISTS article_edits (
+                article_id TEXT NOT NULL, field TEXT NOT NULL, before TEXT NOT NULL, after TEXT NOT NULL,
+                kind TEXT NOT NULL, seen_at INTEGER NOT NULL, PRIMARY KEY (article_id, field, seen_at));
             """);
         // Databases from before outlet feeds (21-10-26) have no snippet column.
         using var columns = connection.CreateCommand();
@@ -104,6 +123,49 @@ public sealed class WorldNewsStore
         // takes minutes, so that's EnsureCoveringIndex's job, off the startup path.
         columns.CommandText = $"SELECT COUNT(*) FROM (SELECT 1 FROM articles LIMIT {SmallArticleTable + 1})";
         if (!HasCoveringIndex(connection) && (long)columns.ExecuteScalar()! <= SmallArticleTable) CreateCoveringIndex(connection);
+        // Full-text search over headlines and descriptions (World News trust plan 1.10, 13-11-26).
+        // The triggers keep it current from now on; a big database's existing reports are added by
+        // EnsureFullTextIndex, off the startup path, and a small one's straight away.
+        Execute(connection, FullTextSchema);
+        if (!IsFullTextBuilt(connection) && (long)columns.ExecuteScalar()! <= SmallArticleTable) BuildFullText(connection);
+    }
+
+    private const string FullTextSchema = """
+        CREATE VIRTUAL TABLE IF NOT EXISTS articles_fts USING fts5(title, snippet, content='articles', content_rowid='rowid',
+            tokenize='unicode61 remove_diacritics 2');
+        CREATE TRIGGER IF NOT EXISTS articles_fts_insert AFTER INSERT ON articles BEGIN
+            INSERT INTO articles_fts(rowid, title, snippet) VALUES (new.rowid, new.title, new.snippet); END;
+        CREATE TRIGGER IF NOT EXISTS articles_fts_delete AFTER DELETE ON articles BEGIN
+            INSERT INTO articles_fts(articles_fts, rowid, title, snippet) VALUES ('delete', old.rowid, old.title, old.snippet); END;
+        CREATE TRIGGER IF NOT EXISTS articles_fts_update AFTER UPDATE OF title, snippet ON articles BEGIN
+            INSERT INTO articles_fts(articles_fts, rowid, title, snippet) VALUES ('delete', old.rowid, old.title, old.snippet);
+            INSERT INTO articles_fts(rowid, title, snippet) VALUES (new.rowid, new.title, new.snippet); END;
+        CREATE TABLE IF NOT EXISTS store_flags (name TEXT PRIMARY KEY, value INTEGER NOT NULL);
+        """;
+
+    private static bool IsFullTextBuilt(SqliteConnection connection)
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT COUNT(*) FROM store_flags WHERE name = 'fts_built' AND value = 1";
+        return (long)command.ExecuteScalar()! > 0;
+    }
+
+    private static void BuildFullText(SqliteConnection connection) =>
+        Execute(connection, "INSERT INTO articles_fts(articles_fts) VALUES ('rebuild'); INSERT OR REPLACE INTO store_flags (name, value) VALUES ('fts_built', 1);");
+
+    // Adds the existing reports to the full-text index once (minutes on the droplet's database).
+    public bool EnsureFullTextIndex()
+    {
+        using var connection = Open();
+        if (IsFullTextBuilt(connection)) return false;
+        BuildFullText(connection);
+        return true;
+    }
+
+    public bool FullTextReady()
+    {
+        using var connection = Open();
+        return IsFullTextBuilt(connection);
     }
 
     // The event lists read each report's outlet, country and language. With an index on event_id
@@ -143,10 +205,28 @@ public sealed class WorldNewsStore
     }
 
     // New reports only (a report already stored, by canonical URL, is skipped). Returns how many were new.
+    // Press releases and listicles are dropped (NewsNoise, 13-11-26). A report seen again with a
+    // different headline keeps its first-seen headline, and the change is recorded in article_edits
+    // (corrections and quiet edits, World News trust plan 1.8/1.9).
     public int AddArticles(IEnumerable<WorldArticle> articles)
     {
         using var connection = Open();
         using var transaction = connection.BeginTransaction();
+        using var existing = connection.CreateCommand();
+        existing.CommandText = "SELECT title, (SELECT after FROM article_edits WHERE article_id = $id AND field = 'title' ORDER BY seen_at DESC LIMIT 1) FROM articles WHERE id = $id";
+        var existingId = existing.Parameters.Add(new SqliteParameter { ParameterName = "$id" });
+        using var edit = connection.CreateCommand();
+        edit.CommandText = "INSERT OR IGNORE INTO article_edits (article_id, field, before, after, kind, seen_at) VALUES ($id, 'title', $before, $after, $kind, $seen)";
+        var editParameters = new[] { "$id", "$before", "$after", "$kind", "$seen" }
+            .Select(name => edit.Parameters.Add(new SqliteParameter { ParameterName = name })).ToArray();
+        using var hours = connection.CreateCommand();
+        hours.CommandText = "INSERT INTO country_hours (country, hour, reports) VALUES ($country, $hour, 1) ON CONFLICT(country, hour) DO UPDATE SET reports = reports + 1";
+        var hourCountry = hours.Parameters.Add(new SqliteParameter { ParameterName = "$country" });
+        var hourStart = hours.Parameters.Add(new SqliteParameter { ParameterName = "$hour" });
+        using var days = connection.CreateCommand();
+        days.CommandText = "INSERT INTO outlet_days (outlet, day, reports) VALUES ($outlet, $day, 1) ON CONFLICT(outlet, day) DO UPDATE SET reports = reports + 1";
+        var dayOutlet = days.Parameters.Add(new SqliteParameter { ParameterName = "$outlet" });
+        var dayStart = days.Parameters.Add(new SqliteParameter { ParameterName = "$day" });
         using var command = connection.CreateCommand();
         command.CommandText = """
             INSERT OR IGNORE INTO articles (id, url, title, outlet, language, country, seen_at, feed, group_hint, snippet)
@@ -155,14 +235,321 @@ public sealed class WorldNewsStore
         var parameters = new[] { "$id", "$url", "$title", "$outlet", "$language", "$country", "$seen", "$feed", "$hint", "$snippet" }
             .Select(name => command.Parameters.Add(new SqliteParameter { ParameterName = name })).ToArray();
         var added = 0;
-        foreach (var a in articles)
+        foreach (var a in articles.Where(article => !NewsNoise.IsNoise(article)))
         {
             object?[] values = [a.Id, a.Url, a.Title, a.Outlet, a.Language, a.Country, a.SeenAt.ToUnixTimeSeconds(), a.Feed, a.GroupHint, a.Snippet];
             for (var i = 0; i < values.Length; i++) parameters[i].Value = values[i] ?? DBNull.Value;
-            added += command.ExecuteNonQuery();
+            var inserted = command.ExecuteNonQuery();
+            added += inserted;
+            if (inserted > 0)
+            {
+                hourCountry.Value = a.Country;
+                hourStart.Value = a.SeenAt.ToUnixTimeSeconds() / 3600 * 3600;
+                hours.ExecuteNonQuery();
+                dayOutlet.Value = a.Outlet;
+                dayStart.Value = a.SeenAt.ToUnixTimeSeconds() / 86400 * 86400;
+                days.ExecuteNonQuery();
+                continue;
+            }
+            existingId.Value = a.Id;
+            using var reader = existing.ExecuteReader();
+            if (!reader.Read()) continue;
+            var first = reader.GetString(0);
+            var latest = reader.IsDBNull(1) ? first : reader.GetString(1);
+            reader.Close();
+            if (!ArticleEdits.IsChanged(latest, a.Title)) continue;
+            object[] editValues = [a.Id, latest, a.Title, ArticleEdits.KindOf(a.Title), a.SeenAt.ToUnixTimeSeconds()];
+            for (var i = 0; i < editValues.Length; i++) editParameters[i].Value = editValues[i];
+            edit.ExecuteNonQuery();
         }
         transaction.Commit();
         return added;
+    }
+
+    // New stories (events) first seen since then, for the crawl dashboard.
+    public int CountNewEvents(DateTimeOffset since)
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT COUNT(*) FROM events WHERE first_seen >= $since";
+        command.Parameters.AddWithValue("$since", since.ToUnixTimeSeconds());
+        return Convert.ToInt32(command.ExecuteScalar());
+    }
+
+    // Feeds added on the sources page (1.15) and feeds paused there, built-in or added.
+    public IReadOnlyList<NewsOutlet> CustomFeeds()
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT name, language, country, url, kind FROM custom_feeds ORDER BY added_at";
+        using var reader = command.ExecuteReader();
+        var feeds = new List<NewsOutlet>();
+        while (reader.Read()) feeds.Add(new NewsOutlet(reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3), reader.GetString(4)));
+        return feeds;
+    }
+
+    public void AddCustomFeed(NewsOutlet feed, string addedBy, DateTimeOffset now)
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "INSERT OR REPLACE INTO custom_feeds (url, name, language, country, kind, added_by, added_at) VALUES ($url, $name, $language, $country, $kind, $by, $at)";
+        command.Parameters.AddWithValue("$url", feed.Url);
+        command.Parameters.AddWithValue("$name", feed.Name);
+        command.Parameters.AddWithValue("$language", feed.Language);
+        command.Parameters.AddWithValue("$country", feed.Country);
+        command.Parameters.AddWithValue("$kind", feed.Kind);
+        command.Parameters.AddWithValue("$by", addedBy);
+        command.Parameters.AddWithValue("$at", now.ToUnixTimeSeconds());
+        command.ExecuteNonQuery();
+    }
+
+    public void RemoveCustomFeed(string url)
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "DELETE FROM custom_feeds WHERE url = $url; DELETE FROM paused_feeds WHERE url = $url";
+        command.Parameters.AddWithValue("$url", url);
+        command.ExecuteNonQuery();
+    }
+
+    public IReadOnlySet<string> PausedFeeds()
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT url FROM paused_feeds";
+        using var reader = command.ExecuteReader();
+        var urls = new HashSet<string>(StringComparer.Ordinal);
+        while (reader.Read()) urls.Add(reader.GetString(0));
+        return urls;
+    }
+
+    public void SetFeedPaused(string url, bool paused)
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = paused ? "INSERT OR IGNORE INTO paused_feeds (url) VALUES ($url)" : "DELETE FROM paused_feeds WHERE url = $url";
+        command.Parameters.AddWithValue("$url", url);
+        command.ExecuteNonQuery();
+    }
+
+    // Each outlet's last week (1.18): reports from the daily counts, first reports from events, and
+    // headline changes from article_edits. Bounded by the week's events, never a scan of articles.
+    public IReadOnlyList<OutletRecord> OutletRecords(DateTimeOffset since)
+    {
+        using var connection = Open();
+        var reports = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var first = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var changes = new Dictionary<string, (int All, int Corrections)>(StringComparer.OrdinalIgnoreCase);
+        using (var command = connection.CreateCommand())
+        {
+            command.CommandText = "SELECT outlet, SUM(reports) FROM outlet_days WHERE day >= $since GROUP BY outlet";
+            command.Parameters.AddWithValue("$since", since.ToUnixTimeSeconds() / 86400 * 86400);
+            using var reader = command.ExecuteReader();
+            while (reader.Read()) reports[reader.GetString(0)] = reader.GetInt32(1);
+        }
+        using (var command = connection.CreateCommand())
+        {
+            command.CommandText = "SELECT a.outlet, COUNT(DISTINCT e.id) FROM events e JOIN articles a ON a.event_id = e.id AND a.seen_at = e.first_seen "
+                + "WHERE e.first_seen >= $since GROUP BY a.outlet";
+            command.Parameters.AddWithValue("$since", since.ToUnixTimeSeconds());
+            using var reader = command.ExecuteReader();
+            while (reader.Read()) first[reader.GetString(0)] = reader.GetInt32(1);
+        }
+        using (var command = connection.CreateCommand())
+        {
+            command.CommandText = "SELECT a.outlet, COUNT(*), SUM(CASE WHEN ae.kind = 'correction' THEN 1 ELSE 0 END) FROM article_edits ae "
+                + "JOIN articles a ON a.id = ae.article_id WHERE ae.seen_at >= $since GROUP BY a.outlet";
+            command.Parameters.AddWithValue("$since", since.ToUnixTimeSeconds());
+            using var reader = command.ExecuteReader();
+            while (reader.Read()) changes[reader.GetString(0)] = (reader.GetInt32(1), reader.GetInt32(2));
+        }
+        return reports.Keys.Union(first.Keys, StringComparer.OrdinalIgnoreCase)
+            .Select(outlet => new OutletRecord(outlet, reports.GetValueOrDefault(outlet), first.GetValueOrDefault(outlet),
+                changes.GetValueOrDefault(outlet).All, changes.GetValueOrDefault(outlet).Corrections))
+            .OrderByDescending(record => record.Reports)
+            .ToList();
+    }
+
+    // Reports per country per hour (1.12), kept as reports arrive so silence is found without
+    // scanning the articles table.
+    public IReadOnlyList<(string Country, DateTimeOffset Hour, int Reports)> CountryHours(DateTimeOffset since)
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT country, hour, reports FROM country_hours WHERE hour >= $since";
+        command.Parameters.AddWithValue("$since", since.ToUnixTimeSeconds());
+        using var reader = command.ExecuteReader();
+        var rows = new List<(string, DateTimeOffset, int)>();
+        while (reader.Read()) rows.Add((reader.GetString(0), DateTimeOffset.FromUnixTimeSeconds(reader.GetInt64(1)), reader.GetInt32(2)));
+        return rows;
+    }
+
+    public IReadOnlyList<CoverageSilence> Silences(DateTimeOffset now) =>
+        CoverageSilenceRules.Find(CountryHours(now - CoverageSilenceRules.Window - CoverageSilenceRules.Baseline), now);
+
+    // Watchlists (World News trust plan 1.11, 13-11-26): a person's topics, places, people and
+    // companies, each a search (FullTextQuery syntax) run against the last day's reports.
+    public const int MaxKeywordWatches = 50;
+    public static readonly TimeSpan KeywordWatchWindow = TimeSpan.FromHours(24);
+
+    public IReadOnlyList<KeywordWatch> KeywordWatches(string username)
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT id, username, query, created_at FROM keyword_watches WHERE username = $user ORDER BY created_at";
+        command.Parameters.AddWithValue("$user", username);
+        return ReadKeywordWatches(command);
+    }
+
+    // The new watch, or null when the query has nothing to search for or the person has the maximum.
+    public KeywordWatch? AddKeywordWatch(string username, string query, DateTimeOffset now)
+    {
+        query = query.Trim();
+        if (query.Length is 0 or > 200 || FullTextQuery.From(query) is null) return null;
+        var existing = KeywordWatches(username);
+        if (existing.FirstOrDefault(w => string.Equals(w.Query, query, StringComparison.OrdinalIgnoreCase)) is { } same) return same;
+        if (existing.Count >= MaxKeywordWatches) return null;
+        var watch = new KeywordWatch(Guid.NewGuid().ToString("N"), username, query, now);
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "INSERT INTO keyword_watches (id, username, query, created_at) VALUES ($id, $user, $query, $created)";
+        command.Parameters.AddWithValue("$id", watch.Id);
+        command.Parameters.AddWithValue("$user", username);
+        command.Parameters.AddWithValue("$query", query);
+        command.Parameters.AddWithValue("$created", now.ToUnixTimeSeconds());
+        command.ExecuteNonQuery();
+        return watch;
+    }
+
+    public void RemoveKeywordWatch(string username, string id)
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "DELETE FROM keyword_watch_hits WHERE watch_id IN (SELECT id FROM keyword_watches WHERE id = $id AND username = $user); "
+            + "DELETE FROM keyword_watches WHERE id = $id AND username = $user";
+        command.Parameters.AddWithValue("$id", id);
+        command.Parameters.AddWithValue("$user", username);
+        command.ExecuteNonQuery();
+    }
+
+    // One alert per watch per story, once the story passes mayAlert (the breaking-news gate). A story
+    // held back is looked at again on later reads while its reports are within the last day.
+    public IReadOnlyList<WorldNewsAlert> CreateKeywordAlerts(DateTimeOffset now, Func<string, bool>? mayAlert = null)
+    {
+        using var connection = Open();
+        List<KeywordWatch> watches;
+        using (var all = connection.CreateCommand())
+        {
+            all.CommandText = "SELECT id, username, query, created_at FROM keyword_watches";
+            watches = ReadKeywordWatches(all);
+        }
+        if (watches.Count == 0) return [];
+        var fullText = IsFullTextBuilt(connection);
+        var alerts = new List<WorldNewsAlert>();
+        foreach (var watch in watches)
+        {
+            var since = Math.Max(watch.CreatedAt.ToUnixTimeSeconds(), (now - KeywordWatchWindow).ToUnixTimeSeconds());
+            var query = fullText ? FullTextQuery.From(watch.Query) : watch.Query;
+            if (query is null) continue;
+            var match = fullText
+                ? "a.rowid IN (SELECT rowid FROM articles_fts WHERE articles_fts MATCH $q)"
+                : "instr(lower(a.title || ' ' || COALESCE(a.snippet, '')), lower($q)) > 0";
+            using var find = connection.CreateCommand();
+            find.CommandText = "SELECT DISTINCT e.situation_id FROM articles a JOIN events e ON e.id = a.event_id "
+                + $"WHERE a.seen_at > $since AND e.situation_id IS NOT NULL AND {match} "
+                + "AND NOT EXISTS (SELECT 1 FROM keyword_watch_hits h WHERE h.watch_id = $watch AND h.situation_id = e.situation_id) LIMIT 20";
+            find.Parameters.AddWithValue("$q", query);
+            find.Parameters.AddWithValue("$since", since);
+            find.Parameters.AddWithValue("$watch", watch.Id);
+            var situations = new List<string>();
+            using (var reader = find.ExecuteReader()) while (reader.Read()) situations.Add(reader.GetString(0));
+            foreach (var situationId in situations)
+            {
+                if (mayAlert is not null && !mayAlert(situationId)) continue;
+                var title = Situation(situationId)?.Title ?? "A story";
+                var alert = new WorldNewsAlert(Guid.NewGuid(), watch.Username, situationId, title, $"Matches your watchlist: {watch.Query}", now, false);
+                using var insert = connection.CreateCommand();
+                insert.CommandText = "INSERT INTO world_news_alerts (id, username, situation_id, title, message, created_at) VALUES ($id, $user, $situation, $title, $message, $created); "
+                    + "INSERT OR IGNORE INTO keyword_watch_hits (watch_id, situation_id) VALUES ($watch, $situation)";
+                insert.Parameters.AddWithValue("$id", alert.Id.ToString("N"));
+                insert.Parameters.AddWithValue("$user", watch.Username);
+                insert.Parameters.AddWithValue("$situation", situationId);
+                insert.Parameters.AddWithValue("$title", title);
+                insert.Parameters.AddWithValue("$message", alert.Message);
+                insert.Parameters.AddWithValue("$created", now.ToUnixTimeSeconds());
+                insert.Parameters.AddWithValue("$watch", watch.Id);
+                insert.ExecuteNonQuery();
+                alerts.Add(alert);
+            }
+        }
+        return alerts;
+    }
+
+    private static List<KeywordWatch> ReadKeywordWatches(SqliteCommand command)
+    {
+        using var reader = command.ExecuteReader();
+        var watches = new List<KeywordWatch>();
+        while (reader.Read())
+            watches.Add(new KeywordWatch(reader.GetString(0), reader.GetString(1), reader.GetString(2), DateTimeOffset.FromUnixTimeSeconds(reader.GetInt64(3))));
+        return watches;
+    }
+
+    // Every feed's health (FeedSchedule), by URL.
+    public IReadOnlyDictionary<string, FeedHealth> FeedHealth()
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT url, etag, last_modified, last_status, last_attempt, last_success, last_error, failures, empty_reads, added, skip_until FROM feed_health";
+        using var reader = command.ExecuteReader();
+        var health = new Dictionary<string, FeedHealth>(StringComparer.Ordinal);
+        static DateTimeOffset? Time(SqliteDataReader r, int i) => r.IsDBNull(i) ? null : DateTimeOffset.FromUnixTimeSeconds(r.GetInt64(i));
+        while (reader.Read())
+        {
+            health[reader.GetString(0)] = new FeedHealth(reader.GetString(0),
+                reader.IsDBNull(1) ? null : reader.GetString(1), reader.IsDBNull(2) ? null : reader.GetString(2),
+                reader.IsDBNull(3) ? null : reader.GetInt32(3), Time(reader, 4), Time(reader, 5),
+                reader.IsDBNull(6) ? null : reader.GetString(6), reader.GetInt32(7), reader.GetInt32(8), reader.GetInt64(9), Time(reader, 10));
+        }
+        return health;
+    }
+
+    public void SaveFeedHealth(IEnumerable<FeedHealth> feeds)
+    {
+        using var connection = Open();
+        using var transaction = connection.BeginTransaction();
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            INSERT INTO feed_health (url, etag, last_modified, last_status, last_attempt, last_success, last_error, failures, empty_reads, added, skip_until)
+            VALUES ($url, $etag, $modified, $status, $attempt, $success, $error, $failures, $empty, $added, $skip)
+            ON CONFLICT(url) DO UPDATE SET etag = excluded.etag, last_modified = excluded.last_modified, last_status = excluded.last_status,
+                last_attempt = excluded.last_attempt, last_success = excluded.last_success, last_error = excluded.last_error,
+                failures = excluded.failures, empty_reads = excluded.empty_reads, added = excluded.added, skip_until = excluded.skip_until
+            """;
+        var names = new[] { "$url", "$etag", "$modified", "$status", "$attempt", "$success", "$error", "$failures", "$empty", "$added", "$skip" };
+        var parameters = names.Select(name => command.Parameters.Add(new SqliteParameter { ParameterName = name })).ToArray();
+        foreach (var feed in feeds)
+        {
+            object?[] values = [feed.Url, feed.ETag, feed.LastModified, feed.LastStatus, feed.LastAttempt?.ToUnixTimeSeconds(), feed.LastSuccess?.ToUnixTimeSeconds(),
+                feed.LastError is { Length: > 300 } error ? error[..300] : feed.LastError, feed.Failures, feed.EmptyReads, feed.Added, feed.SkipUntil?.ToUnixTimeSeconds()];
+            for (var i = 0; i < values.Length; i++) parameters[i].Value = values[i] ?? DBNull.Value;
+            command.ExecuteNonQuery();
+        }
+        transaction.Commit();
+    }
+
+    // Every recorded change to the given reports' headlines, oldest first.
+    public IReadOnlyList<ArticleEdit> Edits(IReadOnlyCollection<string> articleIds)
+    {
+        if (articleIds.Count == 0) return [];
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        var names = articleIds.Select((id, i) => { command.Parameters.AddWithValue($"$a{i}", id); return $"$a{i}"; });
+        command.CommandText = $"SELECT article_id, before, after, kind, seen_at FROM article_edits WHERE article_id IN ({string.Join(',', names)}) ORDER BY seen_at";
+        using var reader = command.ExecuteReader();
+        var edits = new List<ArticleEdit>();
+        while (reader.Read())
+            edits.Add(new ArticleEdit(reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3), DateTimeOffset.FromUnixTimeSeconds(reader.GetInt64(4))));
+        return edits;
     }
 
     public IReadOnlyList<WorldArticle> ArticlesToEmbed(int limit) =>
@@ -179,7 +566,17 @@ public sealed class WorldNewsStore
     {
         var conditions = new List<string> { "seen_at >= $since" };
         var parameters = new List<(string Name, object Value)> { ("$since", since.ToUnixTimeSeconds()) };
-        AddTextFilter("title || ' ' || COALESCE(snippet, '')", text, "$text");
+        // Full text when the index is built (phrases, AND/OR/NOT, prefix*); before that, or for a
+        // query FTS can't read, the substring match.
+        if (!string.IsNullOrWhiteSpace(text) && FullTextReady())
+        {
+            if (FullTextQuery.From(text) is { } fullText)
+            {
+                conditions.Add("rowid IN (SELECT rowid FROM articles_fts WHERE articles_fts MATCH $fts)");
+                parameters.Add(("$fts", fullText));
+            }
+        }
+        else AddTextFilter("title || ' ' || COALESCE(snippet, '')", text, "$text");
         AddTextFilter("country", country, "$country");
         AddTextFilter("language", language, "$language");
         AddTextFilter("outlet", outlet, "$outlet");
@@ -697,7 +1094,9 @@ public sealed class WorldNewsStore
     }
 
     // Called after a read has linked new events. One alert covers all events added since the last read.
-    public IReadOnlyList<WorldNewsAlert> CreateWatchAlerts(DateTimeOffset now)
+    // mayAlert (the breaking-news gate, 13-11-26) can hold a situation back: its count isn't
+    // updated, so it alerts on a later read once the gate lets it through.
+    public IReadOnlyList<WorldNewsAlert> CreateWatchAlerts(DateTimeOffset now, Func<string, bool>? mayAlert = null)
     {
         using var connection = Open();
         using var transaction = connection.BeginTransaction();
@@ -714,8 +1113,10 @@ public sealed class WorldNewsStore
             while (reader.Read()) pending.Add((reader.GetString(0), reader.GetString(1), reader.GetInt32(2), reader.GetInt32(3), reader.GetString(4)));
         }
         var alerts = new List<WorldNewsAlert>();
+        var allowed = new Dictionary<string, bool>(StringComparer.Ordinal);
         foreach (var item in pending)
         {
+            if (mayAlert is not null && !(allowed.TryGetValue(item.SituationId, out var ok) ? ok : allowed[item.SituationId] = mayAlert(item.SituationId))) continue;
             var alert = new WorldNewsAlert(Guid.NewGuid(), item.Username, item.SituationId, item.Title,
                 $"{item.Current - item.Before:N0} new {(item.Current - item.Before == 1 ? "event" : "events")} in this watched situation.", now, false);
             using var insert = connection.CreateCommand();
@@ -1252,6 +1653,8 @@ public sealed class WorldNewsStore
         using var command = connection.CreateCommand();
         command.CommandText = """
             DELETE FROM articles WHERE seen_at < $before;
+            DELETE FROM country_hours WHERE hour < $before;
+            DELETE FROM outlet_days WHERE day < $before;
             DELETE FROM events WHERE last_seen < $before;
             DELETE FROM summaries WHERE event_id NOT IN (SELECT id FROM events);
             DELETE FROM analyses WHERE event_id NOT IN (SELECT id FROM events);

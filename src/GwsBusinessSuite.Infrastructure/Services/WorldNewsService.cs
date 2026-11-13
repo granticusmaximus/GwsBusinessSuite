@@ -46,6 +46,7 @@ public sealed partial class WorldNewsService : IDisposable
     private readonly bool _serverHasNoModel;
 
     private readonly IServiceScopeFactory _scopes;
+    private readonly IHttpClientFactory _httpClientFactory;
     private readonly string _model;
     private readonly WorldNewsArticleReader? _articleReader;
     private readonly WebCrawler? _webCrawler;
@@ -57,6 +58,7 @@ public sealed partial class WorldNewsService : IDisposable
         WebCrawler? webCrawler = null)
     {
         _scopes = scopes;
+        _httpClientFactory = httpClientFactory;
         _articleReader = articleReader;
         _webCrawler = webCrawler;
         _maxCrawlPagesPerCycle = Math.Clamp(configuration.GetValue("WorldNews:MaxCrawlPagesPerCycle", 500), 1, 2000);
@@ -77,7 +79,12 @@ public sealed partial class WorldNewsService : IDisposable
             MaxEmbedPerCycle = configuration.GetValue("WorldNews:MaxEmbedPerCycle", 1500),
             // WHO's own outbreak reports alongside the outlets' (07-11-26).
             ReadWhoOutbreakNews = configuration.GetValue("WorldNews:ReadWhoOutbreakNews", true),
+            // Wikipedia's Current events portal as an early signal (World News trust plan 1.19).
+            ReadWikipediaCurrentEvents = configuration.GetValue("WorldNews:ReadWikipediaCurrentEvents", true),
             EmbedElsewhere = () => EmbedRelayActive(DateTimeOffset.UtcNow),
+            FollowUpQueries = FollowUpSearches,
+            AddedOutlets = () => Store.CustomFeeds(),
+            PausedFeeds = () => Store.PausedFeeds(),
             EmbedSlot = workloads is null ? null : ct => workloads.AcquireAsync(OllamaWorkloadPriority.Background, ct).AsTask()
         };
         _pipeline = new WorldNewsPipeline(Store, http, new GdeltDocClient(http, TimeProvider.System), _ollama, TimeProvider.System, _options);
@@ -147,6 +154,8 @@ public sealed partial class WorldNewsService : IDisposable
         {
             var started = System.Diagnostics.Stopwatch.StartNew();
             var indexed = Store.EnsureCoveringIndex();
+            // The full-text index too (World News trust plan 1.10), off the startup path.
+            if (Store.EnsureFullTextIndex()) _logger.LogInformation("World News: full-text index built.");
             var released = Store.ReleaseGroupedEmbeddings(betweenBatches: () => Thread.Sleep(50));
             // Compacting holds off writers for minutes, so it takes the read's turn: a read due
             // meanwhile is skipped rather than failing on a locked database.
@@ -219,7 +228,8 @@ public sealed partial class WorldNewsService : IDisposable
                 };
             }
             await ClassifySituationsAsync(ct);
-            var alerts = Store.CreateWatchAlerts(DateTimeOffset.UtcNow).Concat(CreateSurgeAlerts(DateTimeOffset.UtcNow));
+            var alerts = Store.CreateWatchAlerts(DateTimeOffset.UtcNow, MayAlert).Concat(CreateSurgeAlerts(DateTimeOffset.UtcNow))
+                .Concat(Store.CreateKeywordAlerts(DateTimeOffset.UtcNow, MayAlert));
             foreach (var alert in alerts) AlertCreated?.Invoke(alert.Username, alert);
             LastRefreshed = DateTimeOffset.UtcNow;
             Store.SetLastFetched(LastReadKey, LastRefreshed.Value);
@@ -415,16 +425,36 @@ public sealed partial class WorldNewsService : IDisposable
 
     // Alerts for people who asked about surging stories (World News > Situations). Only the kinds
     // Overwatch shows by default: a cup final going viral isn't operational news.
+    // Surging stories' titles from the last read, searched for on the next one (trust plan 1.14).
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> _surgingTitles = new();
+
+    private IReadOnlyList<string> FollowUpSearches() =>
+        _surgingTitles.Values.Select(FollowUpQueries.From).OfType<string>().Take(FollowUpQueries.MaxPerRead).ToList();
+
     private IReadOnlyList<WorldNewsAlert> CreateSurgeAlerts(DateTimeOffset now)
     {
+        _surgingTitles.Clear();
         var growth = Store.SituationGrowth(now - SituationSurge.Window);
         var surging = Store.TopSituations(now - SituationSurge.Window, MaxEvents)
             .Where(s => s.Kind is not null && SituationKinds.Operational.Contains(s.Kind))
             .Select(s => (Situation: s, Growth: growth.GetValueOrDefault(s.Id)))
             .Where(item => SituationSurge.IsSurging(item.Growth.Outlets, item.Growth.OutletsBefore))
+            .Where(item => { _surgingTitles[item.Situation.Id] = item.Situation.Title; return true; })
+            .Where(item => MayAlert(item.Situation.Id))
             .Select(item => (item.Situation.Id, item.Situation.Title, SituationSurge.Message(item.Growth.Outlets, item.Growth.OutletsBefore)))
             .ToList();
         return Store.CreateSurgeAlerts(surging, now);
+    }
+
+    // The breaking-news gate (World News trust plan 1.4, 13-11-26): nobody is alerted to a story that
+    // is still one source, however many outlets repeat it. It alerts on a later read once a second
+    // independent source has it. Only the situation's latest events are read, so a long-running
+    // story costs a bounded number of rows.
+    private bool MayAlert(string situationId)
+    {
+        var articles = Store.EventsForSituation(situationId).OrderByDescending(e => e.LastSeen).Take(5)
+            .SelectMany(e => Store.ArticlesForEvent(e.Id)).ToList();
+        return StoryConfidenceRules.MayAlert(SourceIndependence.Assess(articles));
     }
 
     // SentinelGPT's search_world_news: the last week's events that match the question by meaning,
@@ -504,7 +534,122 @@ public sealed partial class WorldNewsService : IDisposable
             && read.AnalysisAt.ToUnixTimeSeconds() < analysis.CreatedAt.ToUnixTimeSeconds())
             changes = StoryChangesFinder.Find(analysis, Store.AnalysisAt(eventId, read.AnalysisAt), read.ReadAt, articles);
         return EventDocument.Build(e, articles, Store.LatestSummary(eventId), analysis, Store.TranslationsForEvent(eventId),
-            Store.ReadInFull(eventId), changes);
+            Store.ReadInFull(eventId), changes, Store.Edits(articles.Select(article => article.Id).ToList()));
+    }
+
+    // Confirmed by a primary source (World News trust plan 1.13, 13-11-26): WHO's own notice among the
+    // reports, or a USGS/GDACS/NHC/NASA record of the same kind of event near the story's place within
+    // two days of its first report. Asked after the story shows, so a slow hazard feed never holds it up.
+    public async Task<StoryDocument> ConfirmWithPrimarySourcesAsync(StoryDocument story, CancellationToken cancellationToken = default)
+    {
+        if (story.Trust is not { } trust || trust.PrimarySource is not null) return story;
+        var headline = story.Event.Headline ?? story.Event.Title;
+        var primary = PrimarySources.InReports(story.Sources.Select(source => source.Report));
+        if (primary is null && PrimarySources.KindOf(headline) is not null && WorldNewsPlaces.Instance.Locate(headline) is { } place)
+        {
+            try
+            {
+                using var scope = _scopes.CreateScope();
+                var hazards = scope.ServiceProvider.GetRequiredService<GwsBusinessSuite.Application.Hazards.HazardLayerService>();
+                var box = new GwsBusinessSuite.Application.CameraIntel.BoundingBox(
+                    Math.Min(85, place.Latitude + 14), Math.Max(-85, place.Latitude - 14), Math.Min(180, place.Longitude + 14), Math.Max(-180, place.Longitude - 14));
+                var result = await hazards.GetHazardsAsync(box, cancellationToken);
+                var match = PrimarySources.Match(headline, place.Latitude, place.Longitude, story.Event.FirstSeen,
+                    result.Features.Select(f => new PrimarySignal(SourceName(f.Url), f.Kind, f.Title, f.Latitude, f.Longitude, f.ObservedAt, f.Url)),
+                    place.Precision == WorldNewsPrecision.City ? PrimarySources.CityKilometres : PrimarySources.CountryKilometres);
+                if (match is not null) primary = $"{match.Source} ({match.Title})";
+            }
+            catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException && !cancellationToken.IsCancellationRequested)
+            {
+                _logger.LogInformation(ex, "World News: couldn't check hazards for a story");
+            }
+        }
+        if (primary is null) return story;
+        var confidence = StoryConfidenceRules.Assess(trust.Independence, primary, story.Figures.Count(figure => figure.Disputed), trust.FactCheckVerdict);
+        return story with { Trust = trust with { PrimarySource = primary, Confidence = confidence } };
+    }
+
+    private static string SourceName(string url) =>
+        Uri.TryCreate(url, UriKind.Absolute, out var uri) ? uri.Host switch
+        {
+            var h when h.EndsWith("usgs.gov", StringComparison.OrdinalIgnoreCase) => "USGS",
+            var h when h.Contains("gdacs", StringComparison.OrdinalIgnoreCase) => "GDACS",
+            var h when h.EndsWith("nhc.noaa.gov", StringComparison.OrdinalIgnoreCase) => "NOAA National Hurricane Center",
+            var h when h.Contains("nasa.gov", StringComparison.OrdinalIgnoreCase) => "NASA",
+            var h when h.Contains("nifc", StringComparison.OrdinalIgnoreCase) || h.Contains("arcgis", StringComparison.OrdinalIgnoreCase) => "NIFC",
+            var h => h,
+        } : "an official record";
+
+    // The sources page (World News trust plan 1.15-1.18, 13-11-26): every feed with its health, the
+    // crawl's numbers, coverage by region, outlets' records and countries gone quiet.
+    public CrawlDashboard Dashboard(DateTimeOffset now)
+    {
+        var health = Store.FeedHealth();
+        var paused = Store.PausedFeeds();
+        var added = Store.CustomFeeds();
+        var addedUrls = added.Select(feed => feed.Url).ToHashSet(StringComparer.Ordinal);
+        var feeds = OutletFeeds.Outlets.Concat(added).DistinctBy(feed => feed.Url)
+            .Select(feed => new CrawlFeed(feed, health.GetValueOrDefault(feed.Url), paused.Contains(feed.Url), addedUrls.Contains(feed.Url)))
+            .OrderBy(feed => feed.Outlet.Name, StringComparer.OrdinalIgnoreCase).ThenBy(feed => feed.Outlet.Language)
+            .ToList();
+        var hours = Store.CountryHours(now.AddDays(-7));
+        var regions = feeds.GroupBy(feed => WorldRegions.Of(feed.Outlet.Country))
+            .Select(region => new CrawlRegion(region.Key,
+                region.Select(feed => feed.Outlet.Name).Distinct(StringComparer.OrdinalIgnoreCase).Count(),
+                hours.Where(row => WorldRegions.Of(row.Country) == region.Key).Sum(row => row.Reports)))
+            .OrderBy(region => region.Reports)
+            .ToList();
+        return new CrawlDashboard(
+            hours.Where(row => row.Hour >= now.AddHours(-1)).Sum(row => row.Reports),
+            hours.Where(row => row.Hour >= now.AddDays(-1)).Sum(row => row.Reports),
+            Store.CountNewEvents(now.AddDays(-1)),
+            feeds,
+            regions,
+            Store.OutletRecords(now.AddDays(-7)),
+            CoverageSilenceRules.Find(hours, now));
+    }
+
+    // Feeds a homepage offers that really return stories, for the sources page's "Add an outlet".
+    // A site that refuses the app is reported as refusing; nothing is done to get round it.
+    public async Task<(IReadOnlyList<FeedCandidate> Feeds, string? Problem)> DiscoverFeedsAsync(string homepage, CancellationToken cancellationToken = default)
+    {
+        if (!Uri.TryCreate(homepage.Trim(), UriKind.Absolute, out var page) || page.Scheme is not ("https" or "http"))
+            return ([], "Enter the outlet's homepage, starting with https://");
+        var http = _httpClientFactory.CreateClient(HttpClientName);
+        string html;
+        try
+        {
+            using var response = await http.GetAsync(page, cancellationToken);
+            if (FeedSchedule.IsRefusal((int)response.StatusCode))
+                return ([], $"{page.Host} refuses automated requests (HTTP {(int)response.StatusCode}), so it can't be added.");
+            html = response.IsSuccessStatusCode ? await response.Content.ReadAsStringAsync(cancellationToken) : string.Empty;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException && !cancellationToken.IsCancellationRequested)
+        {
+            return ([], $"{page.Host} didn't answer: {ex.Message}");
+        }
+        var found = new List<FeedCandidate>();
+        foreach (var url in FeedDiscovery.Candidates(html, page).Take(12))
+        {
+            try
+            {
+                using var response = await http.GetAsync(url, cancellationToken);
+                if (!response.IsSuccessStatusCode) continue;
+                await using var body = await response.Content.ReadAsStreamAsync(cancellationToken);
+                using var copy = new MemoryStream();
+                await body.CopyToAsync(copy, cancellationToken);
+                copy.Position = 0;
+                var document = OutletFeeds.Load(copy);
+                var kind = document.Root?.Name.LocalName is "urlset" or "sitemapindex" ? "sitemap" : "rss";
+                var items = OutletFeeds.Parse(document, new NewsOutlet(page.Host, "English", "International", url, kind), DateTimeOffset.UtcNow);
+                if (items.Count > 0 || OutletFeeds.SitemapChildren(document).Count > 0)
+                    found.Add(new FeedCandidate(url, kind, items.Count, items.FirstOrDefault()?.Title));
+            }
+            catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or System.Xml.XmlException && !cancellationToken.IsCancellationRequested)
+            {
+            }
+        }
+        return (found, found.Count == 0 ? $"No working RSS feed or news sitemap found on {page.Host}." : null);
     }
 
     // The reader has seen this analysis: the next "what changed" starts from it.

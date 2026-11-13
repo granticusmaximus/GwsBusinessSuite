@@ -23,6 +23,9 @@
         <p class="world-news-updated small mb-0" title="@News.Status">@UpdatedLine</p>
     </Meta>
     <Actions>
+        <a class="btn btn-outline-secondary" href="admin/world-news/sources" title="Every feed's health, the crawl's numbers and where coverage is thin">
+            <i class="bi bi-broadcast me-1" aria-hidden="true"></i>Sources
+        </a>
         <button type="button" class="btn btn-outline-secondary world-news-refresh" @onclick="ReadNow" disabled="@News.IsRefreshing"
                 aria-label="@(News.IsRefreshing ? "Reading the news" : "Read the news now")"
                 title="Read the news now. It also reads every 15 minutes on its own.">
@@ -59,6 +62,17 @@
         </button>
     </Filters>
 </PageHeader>
+
+@if (_silences.Count > 0)
+{
+    @* Unusual silence (World News trust plan 1.12, 13-11-26): quiet can be an internet shutdown or a blackout. *@
+    <p class="world-news-silence" role="status">
+        <i class="bi bi-volume-mute me-1" aria-hidden="true"></i>
+        <strong>Unusually quiet:</strong>
+        @string.Join(", ", _silences.Take(5).Select(silence => $"{silence.Country} ({silence.PercentOfUsual}% of usual coverage)")).
+        <a href="admin/osint">Check internet outages on Overwatch</a>
+    </p>
+}
 
 <div class="world-news-chips" role="group" aria-label="Kind of story">
     <button type="button" class="world-news-chip @(_kind.Length == 0 ? "is-active" : "")" aria-pressed="@(_kind.Length == 0 ? "true" : "false")"
@@ -308,7 +322,37 @@ else if (_view == WorldNewsTab.Developing)
                             @onclick="ToggleSurgeAlertsAsync">
                         <i class="bi @(_surgeAlerts ? "bi-lightning-charge-fill" : "bi-lightning-charge") me-1" aria-hidden="true"></i>Surge alerts @(_surgeAlerts ? "on" : "off")
                     </button>
+                    <button type="button" class="world-news-surge @(_watchlistOpen ? "is-on" : "")" aria-expanded="@(_watchlistOpen ? "true" : "false")"
+                            title="Follow a topic, place, person or company and get a notification when a confirmed story matches"
+                            @onclick="ToggleWatchlistAsync">
+                        <i class="bi bi-binoculars me-1" aria-hidden="true"></i>Watchlist@(_watchlist.Count > 0 ? $" ({_watchlist.Count})" : "")
+                    </button>
                 </div>
+                @if (_watchlistOpen)
+                {
+                    @* Watchlists (World News trust plan 1.11, 13-11-26). *@
+                    <div class="world-news-watchlist" role="region" aria-label="Your watchlist">
+                        <form class="world-news-watchlist-add" @onsubmit="AddWatchAsync" @onsubmit:preventDefault>
+                            <input class="form-control form-control-sm" placeholder="A topic, place, person or company" aria-label="Add to your watchlist"
+                                   @bind="_newWatch" @bind:event="oninput" maxlength="200" />
+                            <button type="submit" class="btn btn-sm btn-primary" disabled="@string.IsNullOrWhiteSpace(_newWatch)">Watch</button>
+                        </form>
+                        <p class="world-news-watchlist-help">
+                            You get a notification when a story matches and at least two independent sources have it.
+                            Use "quotes" for a phrase, OR, NOT, and * for word endings.
+                        </p>
+                        @if (_watchError is not null) { <p class="text-danger small mb-1" role="alert">@_watchError</p> }
+                        <ul class="world-news-watchlist-items">
+                            @foreach (var watch in _watchlist)
+                            {
+                                <li>
+                                    <span>@watch.Query</span>
+                                    <button type="button" class="btn btn-sm btn-link p-0" aria-label="@($"Stop watching {watch.Query}")" @onclick="() => RemoveWatchAsync(watch.Id)">Remove</button>
+                                </li>
+                            }
+                        </ul>
+                    </div>
+                }
                 @if (VisibleSituations.Count == 0)
                 {
                     <EmptyState Icon="bi-search" Message="No developing stories match those filters." />
@@ -827,6 +871,7 @@ else
         News.Changed += OnNewsChanged;
         _username = await CurrentUserAccessor.GetCurrentUsernameAsync();
         _surgeAlerts = !string.IsNullOrWhiteSpace(_username) && await Task.Run(() => News.Store.IsWatchingSurges(_username));
+        _silences = await Task.Run(() => News.Store.Silences(DateTimeOffset.UtcNow));
         ApplyQuery();
         await LoadAsync();
         if (!string.IsNullOrWhiteSpace(EventQuery)
@@ -1044,6 +1089,35 @@ else
         WorldNewsMap.ClearCorrection(_situation.Id);
         _placing = false;
         LoadPlacement();
+    }
+
+    private IReadOnlyList<CoverageSilence> _silences = [];
+    private bool _watchlistOpen;
+    private IReadOnlyList<KeywordWatch> _watchlist = [];
+    private string _newWatch = string.Empty;
+    private string? _watchError;
+
+    private async Task ToggleWatchlistAsync()
+    {
+        _watchlistOpen = !_watchlistOpen;
+        if (_watchlistOpen && !string.IsNullOrWhiteSpace(_username)) _watchlist = await Task.Run(() => News.Store.KeywordWatches(_username));
+    }
+
+    private async Task AddWatchAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_username) || string.IsNullOrWhiteSpace(_newWatch)) return;
+        var query = _newWatch;
+        var added = await Task.Run(() => News.Store.AddKeywordWatch(_username, query, DateTimeOffset.UtcNow));
+        _watchError = added is null ? $"That can't be watched (nothing to search for, or you already watch {WorldNewsStore.MaxKeywordWatches})." : null;
+        if (added is not null) _newWatch = string.Empty;
+        _watchlist = await Task.Run(() => News.Store.KeywordWatches(_username));
+    }
+
+    private async Task RemoveWatchAsync(string id)
+    {
+        if (string.IsNullOrWhiteSpace(_username)) return;
+        await Task.Run(() => News.Store.RemoveKeywordWatch(_username, id));
+        _watchlist = await Task.Run(() => News.Store.KeywordWatches(_username));
     }
 
     private async Task ToggleSurgeAlertsAsync()

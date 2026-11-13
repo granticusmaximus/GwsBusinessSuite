@@ -35,7 +35,8 @@ public sealed record StoryDocument(
     IReadOnlyDictionary<string, string> English,
     StoryChanges? Changes,
     WorldArticle? FirstReport = null,
-    WorldArticle? LatestReport = null)
+    WorldArticle? LatestReport = null,
+    StoryTrustSummary? Trust = null)
 {
     public IReadOnlyList<OutletComparison> Comparisons => Analysis is null ? [] : EventAnalyzer.Compare(Analysis);
 

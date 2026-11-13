@@ -37,7 +37,8 @@ public static class EventDocument
     // The story, once, for the screen and the Markdown: outlets with where they're based and whether
     // their article was read in full, the sources, the figures, English headlines and what changed.
     public static StoryDocument Build(EventOverview e, IReadOnlyList<WorldArticle> articles, EventSummary? summary, EventAnalysis? analysis,
-        IReadOnlyDictionary<string, string>? english = null, IReadOnlySet<string>? readInFull = null, StoryChanges? changes = null)
+        IReadOnlyDictionary<string, string>? english = null, IReadOnlySet<string>? readInFull = null, StoryChanges? changes = null,
+        IReadOnlyList<ArticleEdit>? edits = null, string? primarySource = null, string? factCheckVerdict = null)
     {
         var outlets = articles.GroupBy(a => a.Outlet)
             .Select(outlet => new StoryOutlet(outlet.Key,
@@ -47,9 +48,15 @@ public static class EventDocument
             .OrderByDescending(outlet => outlet.Reports)
             .ThenBy(outlet => outlet.Name, StringComparer.OrdinalIgnoreCase)
             .ToList();
-        return new StoryDocument(e, summary, analysis, outlets, Sources(articles), CoverageClaims.For(articles),
+        var figures = CoverageClaims.For(articles);
+        var independence = SourceIndependence.Assess(articles);
+        var factChecks = FactChecks.In(articles);
+        factCheckVerdict ??= FactChecks.DisputingVerdict(factChecks);
+        var confidence = StoryConfidenceRules.Assess(independence, primarySource, figures.Count(figure => figure.Disputed), factCheckVerdict);
+        return new StoryDocument(e, summary, analysis, outlets, Sources(articles), figures,
             english ?? new Dictionary<string, string>(), changes,
-            articles.MinBy(a => a.SeenAt), articles.MaxBy(a => a.SeenAt));
+            articles.MinBy(a => a.SeenAt), articles.MaxBy(a => a.SeenAt),
+            new StoryTrustSummary(independence, confidence, edits ?? [], primarySource, factCheckVerdict, factChecks));
     }
 
     public static string ToMarkdown(EventOverview e, IReadOnlyList<WorldArticle> articles, EventSummary? summary,
