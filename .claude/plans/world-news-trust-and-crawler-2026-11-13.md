@@ -157,4 +157,8 @@ and the write-up both draw on the evidence; then B3-B9 and N5-N15; B10 (reading)
     to stories (a person pastes the story link). B1's ships/cameras aren't on the board; Overwatch
     (?news=) shows those.
 - Next: B3-B9 and N5-N15, then B10.
+- 13-11-26 B9 DONE: official newsrooms (ReliefWeb, UN OCHA, European Commission, White House, US DoD,
+  GOV.UK; UN News reclassified) as Kind "official": shown on the trust panel as official statements,
+  not counted as independent sources. Rules 2026-11-13.2 with changelog + methodology rule. Left out:
+  State Dept and UNHCR (403), NATO and WFP (no feed found).
 

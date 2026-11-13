@@ -173,4 +173,17 @@ public sealed class WorldNewsNewsroomTests
         bad.Should().BeOfType<RedirectHttpResult>().Which.Url.Should().StartWith("/tip?error=");
         test.Store.Tips().Should().ContainSingle().Which.Name.Should().Be("Ana");
     }
+
+    [Fact]
+    public void OfficialNewsrooms_ShouldShowAsStatements_AndNotCountAsIndependentSources()
+    {
+        WorldArticle Report(string outlet, string id) =>
+            new(id, $"https://{id}.example/a", "Ceasefire agreed in the region", outlet, "English", "United Kingdom", Now, "test", null);
+        var articles = new[] { Report("BBC News", "a"), Report("The White House", "b"), Report("UN News", "c") };
+
+        SourceIndependence.Assess(articles).Independent.Should().Be(1, "only the BBC is independent journalism here");
+        OfficialStatements.In(articles).Select(s => s.Outlet).Should().BeEquivalentTo("The White House", "UN News");
+        StoryConfidenceRules.RulesVersion.Should().Be("2026-11-13.2");
+        TrustMethodology.Changelog[0].Version.Should().Be(StoryConfidenceRules.RulesVersion, "every rules change is in the changelog");
+    }
 }

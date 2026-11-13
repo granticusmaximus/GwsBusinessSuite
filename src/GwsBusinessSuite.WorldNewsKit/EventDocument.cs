@@ -57,7 +57,8 @@ public static class EventDocument
         return new StoryDocument(e, summary, analysis, outlets, Sources(articles), figures,
             english ?? new Dictionary<string, string>(), changes,
             articles.MinBy(a => a.SeenAt), articles.MaxBy(a => a.SeenAt),
-            new StoryTrustSummary(independence, confidence, edits ?? [], primarySource, factCheckVerdict, factChecks, CitedSources.Find(articles)));
+            new StoryTrustSummary(independence, confidence, edits ?? [], primarySource, factCheckVerdict, factChecks, CitedSources.Find(articles),
+                OfficialStatements: OfficialStatements.In(articles)));
     }
 
     public static string ToMarkdown(EventOverview e, IReadOnlyList<WorldArticle> articles, EventSummary? summary,

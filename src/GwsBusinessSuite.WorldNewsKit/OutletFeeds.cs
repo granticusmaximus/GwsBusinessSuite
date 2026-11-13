@@ -7,12 +7,15 @@ namespace GwsBusinessSuite.WorldNewsKit;
 
 // One newsroom's own feed. Country is where the outlet is based; BBC language services are
 // "United Kingdom" whatever language they write in.
-// Kind: "rss" (RSS/RDF/Atom), "sitemap" (a Google News sitemap, 13-11-26) or "factcheck" (a
-// fact-checker's feed: its reports are verdicts on claims, shown as such on a story).
+// Kind: "rss" (RSS/RDF/Atom), "sitemap" (a Google News sitemap, 13-11-26), "factcheck" (a
+// fact-checker's feed: its reports are verdicts on claims, shown as such on a story) or "official"
+// (a government, UN or EU newsroom, B9 13-11-26: what that body says, shown as an official
+// statement, not counted as an independent source).
 public sealed record NewsOutlet(string Name, string Language, string Country, string Url, string Kind = "rss")
 {
     public string Feed => "outlet:" + Url;
     public bool IsFactCheck => Kind == "factcheck";
+    public bool IsOfficial => Kind == "official";
 }
 
 // Outlets' own RSS feeds, which Google News can't give: the real article URL and the outlet's
@@ -58,7 +61,15 @@ public static partial class OutletFeeds
         new("Africanews", "English", "Republic of the Congo", "https://www.africanews.com/feed/rss"),
         new("The Moscow Times", "English", "Netherlands", "https://www.themoscowtimes.com/rss/news"),
         new("CGTN", "English", "China", "https://www.cgtn.com/subscribe/rss/section/world.xml"),
-        new("UN News", "English", International, "https://news.un.org/feed/subscribe/en/news/all/rss.xml"),
+        new("UN News", "English", International, "https://news.un.org/feed/subscribe/en/news/all/rss.xml", "official"),
+        // Official newsrooms (B9, 13-11-26), each answering that day. Left out: the US State
+        // Department and UNHCR (403 to the server), NATO and WFP (no feed at the known address).
+        new("ReliefWeb", "English", International, "https://reliefweb.int/updates/rss.xml", "official"),
+        new("UN OCHA", "English", International, "https://www.unocha.org/rss.xml", "official"),
+        new("European Commission", "English", International, "https://ec.europa.eu/commission/presscorner/api/rss?language=en", "official"),
+        new("The White House", "English", "United States", "https://www.whitehouse.gov/news/feed/", "official"),
+        new("US Department of Defense", "English", "United States", "https://www.defense.gov/DesktopModules/ArticleCS/RSS.ashx?ContentType=9&Site=945&max=10", "official"),
+        new("GOV.UK", "English", "United Kingdom", "https://www.gov.uk/search/news-and-communications.atom", "official"),
         new("Al Jazeera", "English", "Qatar", "https://www.aljazeera.com/xml/rss/all.xml"),
         new("BBC News", "English", "United Kingdom", "https://feeds.bbci.co.uk/news/world/rss.xml"),
         new("The Guardian", "English", "United Kingdom", "https://www.theguardian.com/world/rss"),

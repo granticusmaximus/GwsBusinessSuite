@@ -95,8 +95,9 @@ public static partial class SourceIndependence
     public static StoryIndependence Assess(IReadOnlyList<WorldArticle> articles)
     {
         // Fact-checkers rate claims rather than report events, so they aren't counted as sources.
+        // Official newsrooms (B9) say what a body states, so they don't count either (rules 2026-11-13.2).
         var news = articles.Where(article => !NewsNoise.IsNoise(article) && !FactChecks.IsFactChecker(article.Outlet)
-            && article.Outlet != WikipediaCurrentEvents.Outlet).ToList();
+            && !OfficialStatements.IsOfficial(article.Outlet) && article.Outlet != WikipediaCurrentEvents.Outlet).ToList();
         // Each report's origin (a copy takes the first copy's), then one origin per outlet: its own
         // (or its owner's) if any report is its own work, else the wire it only repeated. So the
         // number of independent sources can never exceed the number of outlets.
@@ -204,7 +205,7 @@ public static class StoryConfidenceRules
 {
     // The version of every rule behind a label (independence, confidence, the gate). Each label is
     // stamped with it (A7), so a later change of rules can be traced and old labels re-scored.
-    public const string RulesVersion = "2026-11-13.1";
+    public const string RulesVersion = "2026-11-13.2";
     public const int ConfirmedIndependent = 3;
     // A4: a story still on one source this long after its first report is called unconfirmed.
     public static readonly TimeSpan RumourClock = TimeSpan.FromHours(12);
@@ -260,7 +261,24 @@ public static partial class ArticleEdits
 // confirmed or disputed it.
 public sealed record StoryTrustSummary(StoryIndependence Independence, StoryConfidence Confidence, IReadOnlyList<ArticleEdit> Edits,
     string? PrimarySource, string? FactCheckVerdict, IReadOnlyList<FactCheck>? FactChecks = null, IReadOnlyList<CitedSource>? CitedSources = null,
-    string RulesVersion = StoryConfidenceRules.RulesVersion);
+    string RulesVersion = StoryConfidenceRules.RulesVersion, IReadOnlyList<OfficialStatement>? OfficialStatements = null);
+
+// B9 (13-11-26): an official newsroom's report in a story: what that body says about it.
+public sealed record OfficialStatement(string Outlet, string Title, string Url);
+
+public static class OfficialStatements
+{
+    public static readonly IReadOnlySet<string> Outlets = OutletFeeds.Outlets.Where(outlet => outlet.IsOfficial)
+        .Select(outlet => outlet.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+    public static bool IsOfficial(string outlet) => Outlets.Contains(outlet);
+
+    public static IReadOnlyList<OfficialStatement> In(IEnumerable<WorldArticle> articles) =>
+        articles.Where(article => IsOfficial(article.Outlet))
+            .Select(article => new OfficialStatement(article.Outlet, article.Title, article.Url))
+            .DistinctBy(statement => statement.Url, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+}
 
 // 1.7: a fact-checker's report in a story. Verdict is the rating its headline or description gives
 // ("False", "Misleading"), or null when it gives none (FactCheck.org rarely does).
@@ -754,11 +772,13 @@ public static class TrustMethodology
 {
     public static readonly IReadOnlyList<(string Version, string Change)> Changelog =
     [
+        ("2026-11-13.2", "Official newsrooms (UN, ReliefWeb, OCHA, the European Commission, the White House, the US Defense Department, GOV.UK) are shown as official statements and no longer count as independent sources: they say what a body states, which isn't independent corroboration."),
         ("2026-11-13.1", "First published rules: independence by wire credit, attribution, identical text and owner; one origin per outlet; Confirmed at 3 independent sources or an official record; Disputed on conflicting figures or a false-type fact-check; unconfirmed after 12 hours on one source; alerts need 2 independent sources or an official record."),
     ];
 
     public static readonly IReadOnlyList<string> Rules =
     [
+        "Official newsrooms (UN, ReliefWeb, OCHA, the European Commission, the White House, the US Defense Department, GOV.UK) are shown as official statements: what that body says. They are not counted as independent sources.",
         "A report's origin is the wire it credits or rests on (\"(Reuters)\", \"told AP\", \"citing AFP\"), else the group that owns its outlet, else the outlet. Reports with identical text share an origin.",
         "Each outlet counts once: as itself (or its owner) if any of its reports is its own work, otherwise as the wire it repeated. Independent sources can never outnumber outlets.",
         "Fact-checkers and Wikipedia's Current events are shown but never counted as sources; press releases, listicles and service pages are kept out entirely.",

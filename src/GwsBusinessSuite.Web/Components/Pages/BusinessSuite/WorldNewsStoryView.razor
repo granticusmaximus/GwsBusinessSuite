@@ -101,6 +101,19 @@ else
                         @string.Join(", ", cited.Select(source => $"{source.Name} ({Count(source.Outlets, "outlet")})"))
                     </p>
                 }
+                @if (trust.OfficialStatements is { Count: > 0 } statements)
+                {
+                    @* B9 (13-11-26): what official bodies said; a statement, not independent confirmation. *@
+                    <ul class="story-trust-checks">
+                        @foreach (var statement in statements.Take(5))
+                        {
+                            <li>
+                                Official statement from <strong>@statement.Outlet</strong>:
+                                <a href="@statement.Url" target="_blank" rel="noopener noreferrer">@statement.Title</a>
+                            </li>
+                        }
+                    </ul>
+                }
                 @if (trust.FactChecks is { Count: > 0 } checks)
                 {
                     <ul class="story-trust-checks">
