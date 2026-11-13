@@ -14,7 +14,7 @@ using Microsoft.Extensions.Logging;
 namespace GwsBusinessSuite.Infrastructure.Services;
 
 public sealed record OverwatchAreaView(Guid Id, string Name, BoundingBox Bounds, bool WatchIncidents, bool WatchWeather,
-    bool WatchHazards, string MinSeverity, DateTimeOffset? LastCheckedAt, bool WatchNews = false);
+    bool WatchHazards, string MinSeverity, DateTimeOffset? LastCheckedAt, bool WatchNews = false, bool WatchConvergence = false);
 
 public sealed record OverwatchAreaAlertView(Guid Id, Guid AreaId, string Title, string Message, bool IsRead, DateTimeOffset CreatedAt, string? LinkUrl = null);
 
@@ -38,7 +38,8 @@ public sealed class OverwatchAreaService(
     TimeProvider timeProvider,
     ILogger<OverwatchAreaService> logger,
     IncidentCaptureService? captures = null,
-    WorldNewsMapService? worldNews = null)
+    WorldNewsMapService? worldNews = null,
+    SignalConvergenceService? convergence = null)
 {
     public const int MaxAreasPerUser = 20;
     private const int MaxSeenKeys = 2000;
@@ -60,7 +61,7 @@ public sealed class OverwatchAreaService(
     }
 
     public async Task<OverwatchAreaView> AddAreaAsync(string username, string name, BoundingBox bounds, bool watchIncidents,
-        bool watchWeather, bool watchHazards, string minSeverity, bool watchNews = true, CancellationToken ct = default)
+        bool watchWeather, bool watchHazards, string minSeverity, bool watchNews = true, CancellationToken ct = default, bool watchConvergence = false)
     {
         name = (name ?? string.Empty).Trim();
         if (name.Length is 0 or > 80) throw new ArgumentException("Give the area a name (up to 80 characters).");
@@ -74,7 +75,7 @@ public sealed class OverwatchAreaService(
         var area = new OverwatchWatchArea
         {
             Username = username, Name = name, North = bounds.North, South = bounds.South, East = bounds.East, West = bounds.West,
-            WatchIncidents = watchIncidents, WatchWeather = watchWeather, WatchHazards = watchHazards, WatchNews = watchNews, MinSeverity = minSeverity,
+            WatchIncidents = watchIncidents, WatchWeather = watchWeather, WatchHazards = watchHazards, WatchNews = watchNews, WatchConvergence = watchConvergence, MinSeverity = minSeverity,
             CreatedBy = username, CreatedAt = timeProvider.GetUtcNow()
         };
         db.OverwatchWatchAreas.Add(area);
@@ -166,6 +167,8 @@ public sealed class OverwatchAreaService(
             ? NewsItems(worldNews.Signals(bounds, timeProvider.GetUtcNow() - WorldNewsMapService.Window, SituationKinds.Operational), area.MinSeverity).ToList()
             : [];
         items.AddRange(news);
+        if (area.WatchConvergence && convergence is not null)
+            items.AddRange(ConvergenceItems(await convergence.GetAsync(bounds, ct), bounds, area.MinSeverity));
 
         var seen = JsonSerializer.Deserialize<List<string>>(area.SeenKeysJson) ?? [];
         var seenSet = seen.ToHashSet(StringComparer.Ordinal);
@@ -241,6 +244,15 @@ public sealed class OverwatchAreaService(
         _ => true
     };
 
+    // A convergence square inside the area (its centre is): new when its set of kinds is new, so a
+    // square that gains a kind alerts again.
+    public static IEnumerable<OverwatchAreaItem> ConvergenceItems(IEnumerable<ConvergenceCell> cells, BoundingBox bounds, string minSeverity) =>
+        cells.Where(cell => bounds.Contains(cell.CenterLatitude, cell.CenterLongitude) && PassesSeverity(cell.Severity, minSeverity))
+            .Select(cell => new OverwatchAreaItem(
+                $"convergence:{cell.South}:{cell.West}:{string.Join(",", cell.Kinds.Order(StringComparer.Ordinal))}",
+                $"{cell.Kinds.Count} kinds of signal together{(string.IsNullOrWhiteSpace(cell.Label) ? "" : $" near {cell.Label}")}: {string.Join(", ", cell.Kinds)}",
+                cell.Severity, cell.CenterLatitude, cell.CenterLongitude));
+
     public static IEnumerable<OverwatchAreaItem> IncidentItems(IEnumerable<TrafficIncident> list, string minSeverity) =>
         list.Where(i => AlertingCategories.Contains(i.Category))
             // An unknown severity on a crash or closure is still worth a look unless only majors are wanted.
@@ -267,7 +279,7 @@ public sealed class OverwatchAreaService(
             .Select(h => new OverwatchAreaItem($"hazard:{h.Id}", h.Title, h.Severity));
 
     private static OverwatchAreaView ToView(OverwatchWatchArea a) => new(a.Id, a.Name, new BoundingBox(a.North, a.South, a.East, a.West),
-        a.WatchIncidents, a.WatchWeather, a.WatchHazards, a.MinSeverity, a.LastCheckedAt, a.WatchNews);
+        a.WatchIncidents, a.WatchWeather, a.WatchHazards, a.MinSeverity, a.LastCheckedAt, a.WatchNews, a.WatchConvergence);
 }
 
 public sealed class OverwatchAreaBackgroundService(IServiceScopeFactory scopeFactory, ILogger<OverwatchAreaBackgroundService> logger) : BackgroundService

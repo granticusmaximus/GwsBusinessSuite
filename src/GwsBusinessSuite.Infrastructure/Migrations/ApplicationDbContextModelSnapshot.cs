@@ -5644,6 +5644,9 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<bool>("WatchConvergence")
+                        .HasColumnType("INTEGER");
+
                     b.Property<bool>("WatchHazards")
                         .HasColumnType("INTEGER");
 

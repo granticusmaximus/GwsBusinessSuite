@@ -47,7 +47,7 @@ AI droplet:
 | 7 | Sun and shadow tool | done (SunPosition, TOOLS group) |
 | 8 | Analyst tools (range rings, bearings, areas; saved privately) | done: MEASURE (AnalystGeometry); keeping shapes = existing private map notes |
 | 9 | Briefing export (PDF) | |
-| 10 | Multi-signal area rules | |
+| 10 | Multi-signal area rules | done: watched areas SIGNALS TOGETHER (WatchConvergence, migration) |
 
 ## Progress
 

@@ -1363,6 +1363,7 @@
                             <label><input type="checkbox" @bind="_areaWeather" /> WEATHER</label>
                             <label><input type="checkbox" @bind="_areaHazards" /> HAZARDS</label>
                             <label title="World News stories placed at a city in the area: disasters, transport, conflict and health"><input type="checkbox" @bind="_areaNews" /> NEWS</label>
+                            <label title="Three or more independent kinds of signal (news, hazards, severe weather, power or internet outages) together inside the area in the last day"><input type="checkbox" @bind="_areaConvergence" /> SIGNALS TOGETHER</label>
                         </div>
                         <select aria-label="Minimum severity" value="@_areaSeverity" @onchange="e => _areaSeverity = e.Value?.ToString() ?? OverwatchAreaSeverityAny">
                             <option value="major">MAJOR ONLY</option>
@@ -2339,6 +2340,7 @@
     private bool _areaWeather = true;
     private bool _areaHazards = true;
     private bool _areaNews = true;
+    private bool _areaConvergence;
     private string _areaSeverity = "moderate";
     private string? _areaMessage;
     private List<GwsBusinessSuite.Infrastructure.Services.OverwatchAreaView> _areas = new();
@@ -2375,7 +2377,7 @@
         _areaMessage = null;
         try
         {
-            var added = await OverwatchAreaService.AddAreaAsync(_username, _areaName, _lastBbox, _areaIncidents, _areaWeather, _areaHazards, _areaSeverity, _areaNews);
+            var added = await OverwatchAreaService.AddAreaAsync(_username, _areaName, _lastBbox, _areaIncidents, _areaWeather, _areaHazards, _areaSeverity, _areaNews, watchConvergence: _areaConvergence);
             _areaName = string.Empty;
             _areaMessage = $"Watching {added.Name}. The first check learns what's already there; after that, new items appear in the bell.";
             _areas = (await OverwatchAreaService.ListAreasAsync(_username)).ToList();
@@ -2401,7 +2403,7 @@
 
     private static string AreaDescription(GwsBusinessSuite.Infrastructure.Services.OverwatchAreaView area)
     {
-        var what = new[] { area.WatchIncidents ? "incidents" : null, area.WatchWeather ? "weather" : null, area.WatchHazards ? "hazards" : null, area.WatchNews ? "news" : null }
+        var what = new[] { area.WatchIncidents ? "incidents" : null, area.WatchWeather ? "weather" : null, area.WatchHazards ? "hazards" : null, area.WatchNews ? "news" : null, area.WatchConvergence ? "signals together" : null }
             .Where(w => w is not null);
         var checkedText = area.LastCheckedAt is { } at ? $"checked {Ago(at)}" : "first check pending";
         return $"{string.Join(", ", what)} · {area.MinSeverity} · {checkedText}";
