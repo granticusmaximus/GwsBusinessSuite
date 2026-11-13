@@ -43,6 +43,7 @@
 @inject GwsBusinessSuite.Infrastructure.Services.InternetOutageService InternetOutageService
 @inject GwsBusinessSuite.Infrastructure.Services.SignalConvergenceService SignalConvergenceService
 @inject GwsBusinessSuite.Application.LiveLayers.AirportStatusService AirportStatusService
+@inject GwsBusinessSuite.Application.LiveLayers.ChokepointService ChokepointService
 @inject GwsBusinessSuite.Application.LiveLayers.SpaceWeatherService SpaceWeatherService
 @inject GwsBusinessSuite.Infrastructure.Services.SatelliteService SatelliteService
 @inject GwsBusinessSuite.Infrastructure.Services.TravelAdvisoryService TravelAdvisoryService
@@ -394,7 +395,15 @@
                         title="Ships broadcasting AIS: the Baltic from Finland's open AIS, worldwide with an aisstream.io key; refreshed every 30 seconds" @onclick="ToggleShipsAsync">
                     SHIPS [@(_shipsOn ? "ON" : "OFF")]
                 </button>
+                <button type="button" data-tg-toggle="chokepoints" class="tg-toggle @(_chokepointsOn ? "tg-toggle-on" : "")"
+                        title="Daily ship transits through 28 chokepoints (Suez, Panama, Hormuz, Bab el-Mandeb, Bosporus, Malacca...), the last week against the month before; IMF PortWatch, a few days behind" @onclick="ToggleChokepointsAsync">
+                    CHOKEPOINTS [@(_chokepointsOn ? "ON" : "OFF")]
+                </button>
             </div>
+            @if (_chokepointsOn && !string.IsNullOrWhiteSpace(_chokepointSummary))
+            {
+                <div class="tg-hazard-summary">@_chokepointSummary</div>
+            }
             @if (_shipsOn && !string.IsNullOrWhiteSpace(_shipSummary))
             {
                 <div class="tg-hazard-summary">@_shipSummary</div>
@@ -4017,6 +4026,27 @@
     private string? _auroraSummary;
     // The forecast drawn last, so a pan doesn't redraw the same aurora.
     private DateTimeOffset? _auroraDrawn;
+
+    // ---- Chokepoints and ports (13-11-26): IMF PortWatch transits. ----
+    private bool _chokepointsOn;
+    private string? _chokepointSummary;
+
+    private async Task ToggleChokepointsAsync()
+    {
+        _chokepointsOn = !_chokepointsOn;
+        if (!_chokepointsOn)
+        {
+            _chokepointSummary = null;
+            await JS.InvokeVoidAsync("tacticalGlobe.clearChokepoints");
+            return;
+        }
+        var points = await ChokepointService.GetAsync();
+        await JS.InvokeVoidAsync("tacticalGlobe.setChokepoints", HazardPayload(points));
+        var down = points.Where(p => p.Severity != "minor").Select(p => p.Title).ToList();
+        _chokepointSummary = points.Count == 0
+            ? "IMF PortWatch couldn't be reached just now."
+            : $"{points.Count} CHOKEPOINTS" + (down.Count > 0 ? $" · traffic well down: {string.Join(", ", down)}" : " · none well below normal");
+    }
 
     private async Task ToggleAirportsAsync()
     {

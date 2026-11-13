@@ -42,7 +42,7 @@ AI droplet:
 | 2 | Layer health panel | |
 | 3 | Satellite scenes on click (Earth Search STAC, before/after) | |
 | 4 | Night lights (NASA Black Marble via GIBS) | done (web + Mac map) |
-| 5 | Chokepoints and ports (IMF PortWatch) | |
+| 5 | Chokepoints and ports (IMF PortWatch) | done (ChokepointService, SEA group, Mac map) |
 | 6 | Flight anomalies (emergency squawks, holding, diversions) | squawks done; holding/diversions need track history (not kept) |
 | 7 | Sun and shadow tool | done (SunPosition, TOOLS group) |
 | 8 | Analyst tools (range rings, bearings, areas; saved privately) | |
