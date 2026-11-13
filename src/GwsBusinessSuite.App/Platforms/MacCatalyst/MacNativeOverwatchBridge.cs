@@ -113,6 +113,7 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
             case "zoomBy": ZoomBy(arguments); return;
             case "pan": Pan(arguments); return;
             case "setThreeD": SetThreeD(arguments); return;
+            case "setNightLights": SetNightLights(arguments); return;
             case "startPickPoint": _pickPointMode = true; return;
             case "cancelPickPoint": _pickPointMode = false; return;
             case "mapTap": MapTap(arguments); return;
@@ -574,6 +575,25 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
     // Only https XYZ templates from the server's timeline.
     private static string? TileTemplate(object? value) =>
         value is string text && text.StartsWith("https://", StringComparison.Ordinal) && text.Contains("{z}", StringComparison.Ordinal) ? text : null;
+
+    // Night lights (13-11-26): one NASA GIBS night (or the Black Marble baseline) as a tile layer
+    // under the radar; a null payload removes it.
+    private MKTileOverlay? _nightLights;
+
+    private void SetNightLights(object?[] arguments)
+    {
+        if (_nightLights is not null) _map.RemoveOverlay(_nightLights);
+        _nightLights = null;
+        var payload = arguments.FirstOrDefault() is string ? arguments.ElementAtOrDefault(1) : arguments.FirstOrDefault();
+        if (payload is not Dictionary<string, object?> spec || spec.GetValueOrDefault("layer") is not string layer
+            || spec.GetValueOrDefault("time") is not string time || spec.GetValueOrDefault("tileMatrixSet") is not string matrix
+            || !AsDouble(spec.GetValueOrDefault("maxLevel"), out var maxLevel)
+            || !layer.All(c => char.IsAsciiLetterOrDigit(c) || c == '_') || !time.All(c => char.IsAsciiDigit(c) || c == '-')
+            || !matrix.All(c => char.IsAsciiLetterOrDigit(c) || c == '_')) return;
+        _nightLights = new StretchedTileOverlay(
+            $"https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/{layer}/default/{time}/{matrix}/{{z}}/{{y}}/{{x}}.png", (int)maxLevel);
+        _map.AddOverlay(_nightLights, MKOverlayLevel.AboveRoads);
+    }
 
     private void RefreshRadar()
     {

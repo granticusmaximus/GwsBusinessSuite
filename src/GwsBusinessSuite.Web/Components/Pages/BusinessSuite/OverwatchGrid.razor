@@ -309,7 +309,21 @@
                         title="Every satellite heat detection worldwide in the last day (NASA FIRMS: VIIRS on NOAA-20 and MODIS), grouped into half-degree cells" @onclick="ToggleFiresAsync">
                     FIRE HOTSPOTS [@(_firesOn ? "ON" : "OFF")]
                 </button>
+                <button type="button" data-tg-toggle="night-lights" class="tg-toggle @(_nightLightsOn ? "tg-toggle-on" : "")"
+                        title="City lights from space, one night at a time (NASA VIIRS on NOAA-20), against a normal night (Black Marble): dark where it's normally lit can be a blackout. Clouds and moonlight dim a night too." @onclick="ToggleNightLightsAsync">
+                    NIGHT LIGHTS [@(_nightLightsOn ? "ON" : "OFF")]
+                </button>
             </div>
+            @if (_nightLightsOn)
+            {
+                <div class="tg-layer-buttons tg-night-lights" role="group" aria-label="Which night">
+                    <button type="button" class="tg-toggle" disabled="@(_nightLightsBaseline || _nightsAgo >= OverwatchNightLights.MaxNightsAgo)" @onclick="() => SetNightAsync(_nightsAgo + 1, false)">◀ EARLIER</button>
+                    <button type="button" class="tg-toggle" disabled="@(_nightLightsBaseline || _nightsAgo <= 1)" @onclick="() => SetNightAsync(_nightsAgo - 1, false)">LATER ▶</button>
+                    <button type="button" class="tg-toggle @(_nightLightsBaseline ? "tg-toggle-on" : "")" aria-pressed="@(_nightLightsBaseline ? "true" : "false")"
+                            title="Switch between the chosen night and a normal night to see what went dark" @onclick="() => SetNightAsync(_nightsAgo, !_nightLightsBaseline)">NORMAL NIGHT</button>
+                </div>
+                <div class="tg-hazard-summary">@_nightLightsLabel</div>
+            }
             @if (_firesOn && !string.IsNullOrWhiteSpace(_fireSummary))
             {
                 <div class="tg-hazard-summary">@_fireSummary</div>
@@ -4015,6 +4029,33 @@
             Logger.LogWarning(ex, "Overwatch airport status layer failed");
             _airportSummary = "Airport status couldn't be shown just now.";
         }
+    }
+
+    // ---- Night lights (13-11-26): NASA VIIRS nightly imagery against a normal night. ----
+    private bool _nightLightsOn;
+    private bool _nightLightsBaseline;
+    private int _nightsAgo = 1;
+    private string? _nightLightsLabel;
+
+    private async Task ToggleNightLightsAsync()
+    {
+        _nightLightsOn = !_nightLightsOn;
+        if (_nightLightsOn) await SetNightAsync(1, false);
+        else
+        {
+            _nightLightsLabel = null;
+            await JS.InvokeVoidAsync("tacticalGlobe.setNightLights", "tg-viewport", null);
+        }
+    }
+
+    private async Task SetNightAsync(int nightsAgo, bool baseline)
+    {
+        _nightsAgo = Math.Clamp(nightsAgo, 1, OverwatchNightLights.MaxNightsAgo);
+        _nightLightsBaseline = baseline;
+        var spec = OverwatchNightLights.For(_nightsAgo, baseline, DateTimeOffset.UtcNow);
+        _nightLightsLabel = spec.Label;
+        await JS.InvokeVoidAsync("tacticalGlobe.setNightLights", "tg-viewport",
+            new { layer = spec.Layer, time = spec.Time, tileMatrixSet = spec.TileMatrixSet, maxLevel = spec.MaxLevel });
     }
 
     private async Task ToggleAuroraAsync()

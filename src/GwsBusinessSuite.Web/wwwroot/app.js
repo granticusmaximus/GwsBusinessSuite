@@ -1028,7 +1028,9 @@
 				if (!status) return;
 				var jobs = status.jobsRunning;
 				setStatusItem('jobs', jobs === 0 ? 'No jobs running' : jobs + (jobs === 1 ? ' job running' : ' jobs running'), jobs > 0 ? 'info' : null);
-				setStatusItem('ai', status.aiBusy ? 'SentinelGPT busy' + (status.aiWaiting > 0 ? ' · ' + status.aiWaiting + ' queued' : '') : 'SentinelGPT idle', status.aiBusy ? 'info' : null);
+				// Which machine answers, when there are two (Mac first, AI droplet as backup).
+				var on = status.aiOn === 'mac' ? ' · Mac' : status.aiOn === 'backup' ? ' · backup' : '';
+				setStatusItem('ai', (status.aiBusy ? 'SentinelGPT busy' + (status.aiWaiting > 0 ? ' · ' + status.aiWaiting + ' queued' : '') : 'SentinelGPT idle') + on, status.aiBusy ? 'info' : (status.aiOn === 'backup' ? 'warning' : null));
 				setStatusItem('build', 'Built ' + shortStamp(status.builtAtMs) + (status.commit ? ' · ' + status.commit : ''));
 			})
 			.catch(function () { /* the connection item says when the server is out of reach */ });

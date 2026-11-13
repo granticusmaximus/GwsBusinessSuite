@@ -166,6 +166,37 @@ public static class DependencyInjection
             // Fails closed like DisabledOllamaService, except shared work, which runs on an Admin's Mac.
             services.AddSingleton<IOllamaService, MacRelayOllamaService>();
         }
+        else if (configuration.GetSection(ServerAiOptions.SectionName).Get<ServerAiOptions>() is { HasFailover: true } failover)
+        {
+            // Mac first, AI droplet second (OllamaFailover.cs). No retry handler on the Mac: a
+            // failure should move to the droplet at once, not try the Mac again.
+            services.AddHttpClient(OllamaFailoverMonitor.PrimaryClient, client =>
+            {
+                client.BaseAddress = new Uri(failover.PrimaryOllamaUrl.TrimEnd('/') + "/");
+                client.Timeout = TimeSpan.FromHours(2);
+            }).ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { ConnectTimeout = TimeSpan.FromSeconds(3) });
+            services.AddHttpClient(OllamaFailoverMonitor.SecondaryClient, (serviceProvider, client) =>
+            {
+                var options = serviceProvider.GetRequiredService<Microsoft.Extensions.Options.IOptions<ContentStudioOptions>>().Value;
+                client.BaseAddress = new Uri((string.IsNullOrWhiteSpace(options.BaseUrl) ? ContentStudioOptions.DefaultBaseUrl : options.BaseUrl).TrimEnd('/') + "/");
+                client.Timeout = TimeSpan.FromHours(2);
+            }).ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { ConnectTimeout = TimeSpan.FromSeconds(5) });
+            services.AddSingleton<OllamaFailoverMonitor>();
+            services.AddHostedService(sp => sp.GetRequiredService<OllamaFailoverMonitor>());
+            services.AddTransient<IOllamaService>(sp =>
+            {
+                var clients = sp.GetRequiredService<IHttpClientFactory>();
+                var monitor = sp.GetRequiredService<OllamaFailoverMonitor>();
+                var tracker = sp.GetRequiredService<OllamaPerformanceTracker>();
+                var logger = sp.GetRequiredService<ILogger<OllamaService>>();
+                var options = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<ContentStudioOptions>>();
+                return new FailoverOllamaService(
+                    new OllamaService(clients.CreateClient(OllamaFailoverMonitor.PrimaryClient), monitor.PrimaryLane, tracker, logger, options),
+                    new OllamaService(clients.CreateClient(OllamaFailoverMonitor.SecondaryClient), monitor.SecondaryLane, tracker, logger, options),
+                    monitor, sp.GetRequiredService<ILogger<FailoverOllamaService>>());
+            });
+            services.AddHostedService<OllamaModelWarmupBackgroundService>();
+        }
         else
         {
             services.AddHttpClient<IOllamaService, OllamaService>((serviceProvider, client) =>

@@ -155,6 +155,12 @@ Mac app (MAUI, Mac Catalyst):
       in that scope, because it would run on someone else's Mac.
     - While no Admin Mac is online, `ServerAiUnavailableException` means "wait": skip quietly,
       without logging a warning per item.
+  - **Droplet firewalls** (13-11-26): Docker-published ports bypass UFW, so both droplets drop
+    outside connections to containers in the `DOCKER-USER` chain (persisted in
+    `/etc/ufw/after.rules`). Every site on the web droplet is reached through the Cloudflare
+    tunnel on `localhost`; a container port published "publicly" is not reachable from the
+    internet, by design. On the AI droplet only the web droplet reaches Ollama and SearXNG. SSH
+    on both is key-only. Never undo these to "fix" a connection; route through the tunnel.
   - **Sites that refuse the server** (403/405 to a plain request) are left alone for a day
     (`RefusedHostPause`). Respect a refusal. Never get around bot protection with a browser
     user agent or similar tricks.

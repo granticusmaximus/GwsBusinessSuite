@@ -24,6 +24,9 @@ services:
       # once it has one: no Ollama on the browser's computer, no Mac relay (ServerAiOptions).
       ServerAi__Mode: ${SERVER_AI_MODE:-None}
       ServerAi__SingleSource: ${SERVER_AI_SINGLE_SOURCE:-true}
+      # Mac first, AI droplet second (13-11-26): the Mac's Ollama over Tailscale, in the gitignored
+      # .env as SERVER_AI_PRIMARY_URL=http://<mac-tailscale-ip>:11434. Empty: the droplet alone.
+      ServerAi__PrimaryOllamaUrl: ${SERVER_AI_PRIMARY_URL:-}
       # Email (form-submission notifications, Growth reports, bookings, campaigns, the client
       # portal) all fall back to ONE shared SMTP section - set it once in the gitignored .env:
       #   Smtp__Host=smtp.yourprovider.com   Smtp__Port=587   Smtp__Security=StartTls
@@ -100,8 +103,11 @@ services:
     volumes:
       - gwssuite-data:/app/data
       - gwssuite-backups:/app/backups
-      # Read-only: lets the Docker Health admin page inspect (never control) sibling
-      # containers on this droplet. Every container here belongs to this app's own stack.
+      # The Docker Management admin page (Admins only) inspects AND controls the containers on
+      # this droplet: start/stop/restart/remove/pull/recreate and run commands. ":ro" only stops
+      # the socket file being replaced; it does not limit the Docker API, so this is root-
+      # equivalent on the host. Kept as is on purpose (13-11-26): narrowing it would take those
+      # actions away from Admins. A docker-socket-proxy is the way to narrow it if they're dropped.
       - /var/run/docker.sock:/var/run/docker.sock:ro
     healthcheck:
       # CI/deploy.yml already poll /health/live externally after a deploy; this tells

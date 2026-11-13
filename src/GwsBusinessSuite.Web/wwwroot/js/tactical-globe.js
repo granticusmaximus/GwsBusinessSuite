@@ -3333,6 +3333,27 @@ window.tacticalGlobe = (function () {
         entry.viewer.scene.requestRender();
     }
 
+    // Night lights (13-11-26): one GIBS night (or the Black Marble baseline) just above the base map,
+    // so every other layer still draws on top. spec null removes it.
+    function setNightLights(containerId, spec) {
+        const entry = viewers.get(containerId || 'tg-viewport');
+        if (!entry) return;
+        if (entry.nightLights) {
+            entry.viewer.imageryLayers.remove(entry.nightLights, true);
+            entry.nightLights = null;
+        }
+        if (spec) {
+            const provider = new Cesium.WebMapTileServiceImageryProvider({
+                url: 'https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/' + spec.layer + '/default/' + spec.time + '/' +
+                    spec.tileMatrixSet + '/{TileMatrix}/{TileRow}/{TileCol}.png',
+                layer: spec.layer, style: 'default', format: 'image/png', tileMatrixSetID: spec.tileMatrixSet,
+                maximumLevel: spec.maxLevel, tilingScheme: new Cesium.WebMercatorTilingScheme(), credit: 'NASA GIBS (VIIRS)'
+            });
+            entry.nightLights = entry.viewer.imageryLayers.addImageryProvider(provider, 1);
+        }
+        entry.viewer.scene.requestRender();
+    }
+
     function hideSatelliteImagery(entry) {
         if (!entry || !entry.satelliteImagery) return;
         entry.viewer.imageryLayers.remove(entry.satelliteImagery.layer, true);
@@ -4613,6 +4634,7 @@ window.tacticalGlobe = (function () {
         clearStreetViewMarker: clearStreetViewMarker,
         enableStreetViewDrop: enableStreetViewDrop,
         flyToBounds: flyToBounds,
+        setNightLights: setNightLights,
         setCameraPins: setCameraPins,
         setSelectModeEnabled: setSelectModeEnabled,
         openWatchWall: openWatchWall,

@@ -37,6 +37,10 @@ search:
   formats:
     - html
     - json
+# Engines that refuse a datacenter address (a CAPTCHA) stay off: refusals are respected.
+engines:
+  - name: duckduckgo
+    disabled: true
 YAML
   chmod 644 "$CONF/settings.yml"
 fi
@@ -48,8 +52,32 @@ docker run -d --name searxng --restart unless-stopped \
   --memory 512m --cpus 1 \
   docker.io/searxng/searxng:latest
 
-if command -v ufw >/dev/null 2>&1; then
-  ufw allow from "$WEB_IP" to "$BIND_IP" port "$PORT" proto tcp comment 'SearXNG: GWS web droplet only'
+# Docker's published ports bypass UFW, so the allow-list lives in Docker's own DOCKER-USER chain:
+# only the web droplet may open connections to containers; everything else from outside is
+# dropped. Persisted in UFW's after.rules so it survives a reboot.
+PRIV_IF="$(ip -o -4 addr show | awk -v ip="$BIND_IP" '$4 ~ "^"ip"/" {print $2; exit}')"
+PUB_IF="$(ip route show default | awk '{print $5; exit}')"
+apply_rules() {
+  iptables -F DOCKER-USER
+  iptables -A DOCKER-USER -m conntrack --ctstate RELATED,ESTABLISHED -j RETURN
+  iptables -A DOCKER-USER -i "$PRIV_IF" -s "$WEB_IP" -j RETURN
+  iptables -A DOCKER-USER -i "$PRIV_IF" -j DROP
+  iptables -A DOCKER-USER -i "$PUB_IF" -j DROP
+}
+apply_rules
+if ! grep -q "GWS SearXNG" /etc/ufw/after.rules 2>/dev/null; then
+  cp -p /etc/ufw/after.rules "/etc/ufw/after.rules.bak-$(date -u +%Y%m%dT%H%M%SZ)"
+  cat >> /etc/ufw/after.rules <<RULES
+
+# GWS SearXNG (setup-searxng.sh): only the web droplet reaches containers.
+*filter
+:DOCKER-USER - [0:0]
+-A DOCKER-USER -m conntrack --ctstate RELATED,ESTABLISHED -j RETURN
+-A DOCKER-USER -i $PRIV_IF -s $WEB_IP -j RETURN
+-A DOCKER-USER -i $PRIV_IF -j DROP
+-A DOCKER-USER -i $PUB_IF -j DROP
+COMMIT
+RULES
 fi
 
 for _ in $(seq 1 30); do

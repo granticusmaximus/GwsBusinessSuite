@@ -13,15 +13,24 @@ public enum OllamaWorkloadPriority
 /// scheduled work. This mirrors the production Ollama one-request limit inside the app,
 /// where workload intent is known, instead of relying on Ollama's FIFO queue.
 /// </summary>
+// One queue per Ollama machine (13-11-26: the Mac first, the AI droplet as backup, each with its own
+// queue, so embeddings on the droplet never hold up a chat on the Mac). Priority belongs to the
+// request, not the queue, so the ambient priority is shared by every queue. A backup queue passes
+// "interactive work arrived" on to the main one (InteractiveArrivedPeer), so background work that
+// links InteractiveArrivedToken still yields to someone typing whichever machine is answering.
 public sealed class OllamaWorkloadScheduler(TimeProvider? time = null, ILogger<OllamaWorkloadScheduler>? logger = null)
 {
+    // Set on a backup queue only (OllamaFailoverMonitor). A property, not a constructor parameter,
+    // so dependency injection never tries to hand the app-wide queue to itself.
+    public OllamaWorkloadScheduler? InteractiveArrivedPeer { get; init; }
+
     // A wait longer than this is logged, so slowness can be put down to the queue or not (30-10-26).
     private static readonly TimeSpan LoggedWait = TimeSpan.FromSeconds(2);
     private readonly TimeProvider _time = time ?? TimeProvider.System;
     private readonly object _gate = new();
     private readonly LinkedList<Waiter> _interactiveWaiters = [];
     private readonly LinkedList<Waiter> _backgroundWaiters = [];
-    private readonly AsyncLocal<OllamaWorkloadPriority?> _ambientPriority = new();
+    private static readonly AsyncLocal<OllamaWorkloadPriority?> _ambientPriority = new();
     private bool _held;
     // When the current holder got the slot (OllamaWatchdogBackgroundService spots a stuck one).
     private DateTimeOffset? _heldSince;
@@ -68,11 +77,24 @@ public sealed class OllamaWorkloadScheduler(TimeProvider? time = null, ILogger<O
         }
     }
 
+    // Interactive work arrived on another machine's queue: background work holding a lease here
+    // and linked to InteractiveArrivedToken stops so the person isn't kept waiting.
+    public void SignalInteractiveArrived()
+    {
+        CancellationTokenSource arrived;
+        lock (_gate)
+        {
+            arrived = _interactiveArrived;
+            _interactiveArrived = new CancellationTokenSource();
+        }
+        arrived.Cancel();
+    }
+
     public IDisposable UseBackgroundPriority()
     {
         var previous = _ambientPriority.Value;
         _ambientPriority.Value = OllamaWorkloadPriority.Background;
-        return new PriorityScope(this, previous);
+        return new PriorityScope(previous);
     }
 
     public ValueTask<IAsyncDisposable> AcquireAsync(CancellationToken cancellationToken = default) =>
@@ -107,6 +129,7 @@ public sealed class OllamaWorkloadScheduler(TimeProvider? time = null, ILogger<O
         // Outside the lock: cancellation runs its callbacks inline. Not disposed, since a holder
         // may still link its token (a cancelled source without a timer needs no disposal).
         arrived?.Cancel();
+        if (arrived is not null) InteractiveArrivedPeer?.SignalInteractiveArrived();
 
         return new ValueTask<IAsyncDisposable>(WaitForLeaseAsync(waiter, priority, cancellationToken));
     }
@@ -203,9 +226,7 @@ public sealed class OllamaWorkloadScheduler(TimeProvider? time = null, ILogger<O
         }
     }
 
-    private sealed class PriorityScope(
-        OllamaWorkloadScheduler scheduler,
-        OllamaWorkloadPriority? previous) : IDisposable
+    private sealed class PriorityScope(OllamaWorkloadPriority? previous) : IDisposable
     {
         private int _disposed;
 
@@ -213,7 +234,7 @@ public sealed class OllamaWorkloadScheduler(TimeProvider? time = null, ILogger<O
         {
             if (Interlocked.Exchange(ref _disposed, 1) == 0)
             {
-                scheduler._ambientPriority.Value = previous;
+                _ambientPriority.Value = previous;
             }
         }
     }

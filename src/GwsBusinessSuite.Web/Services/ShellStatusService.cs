@@ -8,7 +8,8 @@ using Microsoft.EntityFrameworkCore;
 namespace GwsBusinessSuite.Web.Services;
 
 // What the shell's status strip shows (tech-forward T4). BuiltAtMs is Unix milliseconds, for app.js.
-public sealed record ShellStatus(int JobsRunning, bool AiBusy, int AiWaiting, string? Commit, long BuiltAtMs);
+// AiOn: which machine SentinelGPT answers on when there are two ("mac" or "backup"), else null.
+public sealed record ShellStatus(int JobsRunning, bool AiBusy, int AiWaiting, string? Commit, long BuiltAtMs, string? AiOn = null);
 
 // The build this server runs: when its files were written (in the Docker image, the deploy's
 // build) and the commit, when the build had git to read it from. The image is built without .git,
@@ -36,7 +37,8 @@ public sealed record BuildStamp(string? Commit, DateTimeOffset BuiltAt)
 }
 
 // A DbContext per call from the factory: the strip polls this from every open admin tab.
-public sealed class ShellStatusService(IDbContextFactory<ApplicationDbContext> dbFactory, OllamaWorkloadScheduler ollama, BuildStamp build, TimeProvider time)
+public sealed class ShellStatusService(IDbContextFactory<ApplicationDbContext> dbFactory, OllamaWorkloadScheduler ollama, BuildStamp build, TimeProvider time,
+    OllamaFailoverMonitor? failover = null)
 {
     public async Task<ShellStatus> GetAsync(CancellationToken ct = default)
     {
@@ -46,7 +48,8 @@ public sealed class ShellStatusService(IDbContextFactory<ApplicationDbContext> d
         var cutoff = time.GetUtcNow().ToUnixTimeSeconds() - AutomationExecutionService.OrphanThresholdSeconds;
         var running = await db.AutomationExecutions.CountAsync(execution => execution.Status == AutomationExecutionStatuses.Running
             && (execution.HeartbeatAtUnixSeconds ?? execution.StartedAtUnixSeconds ?? 0) >= cutoff, ct);
-        var (busy, waiting) = ollama.Activity;
-        return new ShellStatus(running, busy, waiting, build.Commit, build.BuiltAt.ToUnixTimeMilliseconds());
+        var (busy, waiting) = failover?.Activity ?? ollama.Activity;
+        return new ShellStatus(running, busy, waiting, build.Commit, build.BuiltAt.ToUnixTimeMilliseconds(),
+            failover is null ? null : failover.PrimaryUp ? "mac" : "backup");
     }
 }

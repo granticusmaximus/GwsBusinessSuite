@@ -37,6 +37,12 @@ public sealed class ServerAiOptions
 
     public bool ServerModelOnly => SingleSource && Mode != ServerAiMode.None;
 
+    // Mac first, droplet second (13-11-26): the Mac's Ollama over Tailscale. When set (with a server
+    // model), FailoverOllamaService asks it first and ContentStudio:BaseUrl (the AI droplet) second.
+    public string PrimaryOllamaUrl { get; init; } = string.Empty;
+
+    public bool HasFailover => Mode != ServerAiMode.None && !string.IsNullOrWhiteSpace(PrimaryOllamaUrl);
+
     public bool IsLight => Mode == ServerAiMode.Light;
 
     public bool IsDisabled => Mode == ServerAiMode.None;
