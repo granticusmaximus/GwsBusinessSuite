@@ -70,3 +70,11 @@ doesn't know its own commit (the image is built without `.git`).
   - Not done: per-run trace ids for the 45 background services (item 6). Their lines already group
     by SourceContext; add an Activity per run when a job's story needs it.
 - Next: Phase 2, starting with known causes (rule-closed) and Explain with SentinelGPT.
+- 13-11-26 Phase 2 (part):
+  - 1 DONE: KnownCauses (ServerAiUnavailable, refused sites, blocked SMTP, congress.gov DEMO_KEY):
+    new and open issues matching are marked expected with the reason (LogIssueService.RecordAsync).
+  - 2 DONE: "Explain with SentinelGPT" on the issue page: the redacted bundle + known traps to the
+    app's own model (Mac first, AI droplet second; never ForSharedWork), answer marked as AI.
+  - 5 DONE: open issues quiet 7 days close themselves (PruneAsync); recurrence reopens (existing).
+  - NOT DONE: 3 operational fixes and 4 code fixes (need a preview/approval flow and the audit
+    ledger; they act on production and git), 6 daily digest (bell wiring), SentinelGPT log tools.

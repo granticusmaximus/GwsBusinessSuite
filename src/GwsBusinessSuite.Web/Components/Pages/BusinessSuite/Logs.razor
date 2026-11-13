@@ -10,6 +10,7 @@
 @inject BuildStamp Build
 @inject NavigationManager Navigation
 @inject IJSRuntime JS
+@inject GwsBusinessSuite.Application.Abstractions.IOllamaService Ollama
 
 @* Logging plan, Phase 1 (12-11-26): warnings and errors from the server, browsers and the Mac app,
    grouped by cause, with the trace behind each sighting. *@
@@ -91,6 +92,9 @@
                 <button type="button" class="btn btn-sm btn-primary" @onclick="CopyForClaudeAsync" disabled="@_busy">
                     <i class="bi bi-clipboard" aria-hidden="true"></i> @(_copied ? "Copied" : "Copy for Claude")
                 </button>
+                <button type="button" class="btn btn-sm btn-outline-primary" @onclick="ExplainAsync" disabled="@(_busy || _explaining)">
+                    <i class="bi bi-stars" aria-hidden="true"></i> @(_explaining ? "SentinelGPT is reading…" : "Explain with SentinelGPT")
+                </button>
                 <input class="form-control form-control-sm logs-note" placeholder="Note (optional)" @bind="_note" @bind:event="oninput" aria-label="Status note" />
                 @if (issue.Status != LogIssueStatuses.Resolved)
                 {
@@ -105,6 +109,13 @@
                     <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => SetStatusAsync(LogIssueStatuses.Open)" disabled="@_busy">Reopen</button>
                 }
             </div>
+            @if (_explanation is not null)
+            {
+                <div class="logs-explanation" role="status">
+                    <strong>SentinelGPT's reading</strong> <small class="text-secondary">(written by AI from the evidence below; check it before acting)</small>
+                    <p class="mb-0" style="white-space: pre-wrap">@_explanation</p>
+                </div>
+            }
             @if (!string.IsNullOrWhiteSpace(_detail.SampleStack))
             {
                 <pre class="logs-stack">@_detail.SampleStack</pre>
@@ -249,6 +260,50 @@
             _busy = false;
         }
         await RefreshAsync();
+    }
+
+    // Logging Phase 2, part 2 (13-11-26): SentinelGPT reads the issue's evidence (redacted, as for
+    // Copy for Claude) and gives a likely cause, how sure it is, a fix and where to look. It runs on
+    // the app's own model (the Mac first, the AI droplet second): logs hold personal data, so never
+    // on anyone else's machine.
+    private bool _explaining;
+    private string? _explanation;
+
+    private const string ExplainSystem = """
+        You are SentinelGPT helping the owner of GWS Business Suite (ASP.NET Core Blazor Server, EF Core on
+        SQLite, a Mac Catalyst app, deployed with Docker on a DigitalOcean droplet) understand one logged issue.
+        Known traps in this app: outgoing SMTP is blocked on the droplet (mail uses the Gmail API); EF on SQLite
+        can't translate DateTimeOffset comparisons or ORDER BY (materialize first); sites that refuse the server
+        are paused for a day and never worked around; ServerAiUnavailableException means wait for a model;
+        layout islands share the page's DbContext (use IDbContextFactory); an empty-named Razor fragment tag kills the circuit;
+        inline scripts are blocked by the CSP.
+        Answer in plain English with these headings: Likely cause; How sure (high/medium/low, and why);
+        What to do; Where to look (files or settings). Use only the evidence given. If it isn't enough, say what's missing.
+        """;
+
+    private async Task ExplainAsync()
+    {
+        if (_detail is null) return;
+        _explaining = true;
+        _explanation = null;
+        try
+        {
+            var latestTrace = _detail.Occurrences.FirstOrDefault(occurrence => occurrence.TraceId is not null)?.TraceId;
+            var trace = latestTrace is null ? [] : await Traces.ReadTraceAsync(latestTrace, 200);
+            var bundle = LogIssueBundle.ToMarkdown(_detail, trace, Build.Commit);
+            using var limit = new CancellationTokenSource(TimeSpan.FromMinutes(4));
+            _explanation = (await Ollama.GenerateAsync("sentinelgpt", ExplainSystem, bundle[..Math.Min(bundle.Length, 24_000)], 16_384, limit.Token)).Trim();
+        }
+        catch (Exception ex) when (ex is not JSDisconnectedException)
+        {
+            _explanation = ex is OperationCanceledException
+                ? "SentinelGPT took too long (over 4 minutes). Try again, or use Copy for Claude."
+                : $"SentinelGPT couldn't answer: {ex.Message}";
+        }
+        finally
+        {
+            _explaining = false;
+        }
     }
 
     private async Task CopyForClaudeAsync()

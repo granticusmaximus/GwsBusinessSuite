@@ -40,6 +40,12 @@ public sealed class LogIssueService(IDbContextFactory<ApplicationDbContext> dbFa
                 };
                 db.LogIssues.Add(issue);
             }
+            if (issue.Status == LogIssueStatuses.Open
+                && KnownCauses.Match(issue.ExceptionType, issue.Source, issue.Title, issue.SampleStack) is { } knownCause)
+            {
+                issue.Status = LogIssueStatuses.Expected;
+                issue.StatusNote = knownCause;
+            }
             else if (issue.Status == LogIssueStatuses.Resolved)
             {
                 // It came back after being marked fixed.
@@ -119,10 +125,21 @@ public sealed class LogIssueService(IDbContextFactory<ApplicationDbContext> dbFa
         await db.SaveChangesAsync(cancellationToken);
     }
 
+    // Logging Phase 2, part 5 (13-11-26): an open issue quiet this long closes itself; it reopens as
+    // "came back" if it's seen again (RecordAsync).
+    public const int QuietDaysToClose = 7;
+
     public async Task<int> PruneAsync(DateTimeOffset now, CancellationToken cancellationToken = default)
     {
         var cutoff = now.AddDays(-LogIssueLimits.RetentionDays).ToUnixTimeMilliseconds();
         await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
+        var quietSince = now.AddDays(-QuietDaysToClose).ToUnixTimeMilliseconds();
+        foreach (var quiet in await db.LogIssues.Where(issue => issue.Status == LogIssueStatuses.Open && issue.LastSeenUnixMs < quietSince).ToListAsync(cancellationToken))
+        {
+            quiet.Status = LogIssueStatuses.Resolved;
+            quiet.StatusNote = $"Not seen for {QuietDaysToClose} days (last in release {quiet.LastRelease}); it reopens if it comes back.";
+        }
+        await db.SaveChangesAsync(cancellationToken);
         var ids = await db.LogIssues.Where(issue => issue.LastSeenUnixMs < cutoff).Select(issue => issue.Id).ToListAsync(cancellationToken);
         if (ids.Count == 0) return 0;
         await db.LogOccurrences.Where(occurrence => ids.Contains(occurrence.IssueId)).ExecuteDeleteAsync(cancellationToken);

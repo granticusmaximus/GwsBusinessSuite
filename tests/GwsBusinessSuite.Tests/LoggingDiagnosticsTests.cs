@@ -192,6 +192,38 @@ public sealed class LoggingDiagnosticsTests : IAsyncLifetime
     public void JsonLog_ShouldSitBesideTheTextLog() =>
         SerilogBootstrapper.JsonLogPath("/app/data/logs/gwssuite-.log").Should().Be("/app/data/logs/gwssuite-.clef");
 
+    // Logging Phase 2 (13-11-26): known causes close by rule; quiet issues close themselves.
+    [Fact]
+    public async Task AKnownCause_ShouldBeMarkedExpected_WithTheReason()
+    {
+        await _store.RecordAsync([Event("Mail failed", "SMTP connect to smtp.gmail.com:587 timed out")]);
+        var issue = (await _store.ListAsync(new LogIssueQuery())).Single();
+        issue.Status.Should().Be(GwsBusinessSuite.Domain.Entities.LogIssueStatuses.Expected);
+        issue.StatusNote.Should().Contain("DigitalOcean");
+    }
+
+    [Fact]
+    public async Task AnOpenIssueQuietForAWeek_ShouldCloseItself_AndReopenIfItComesBack()
+    {
+        await _store.RecordAsync([Event("Feed {Name} failed", "Feed 1 failed")]);
+        await _store.PruneAsync(Now.AddDays(LogIssueService.QuietDaysToClose + 1));
+        (await _store.ListAsync(new LogIssueQuery())).Single().Status.Should().Be(GwsBusinessSuite.Domain.Entities.LogIssueStatuses.Resolved);
+
+        await _store.RecordAsync([Event("Feed {Name} failed", "Feed 2 failed", at: Now.AddDays(9))]);
+        (await _store.ListAsync(new LogIssueQuery())).Single().Status.Should().Be(GwsBusinessSuite.Domain.Entities.LogIssueStatuses.Open);
+    }
+
+    [Theory]
+    [InlineData("GwsBusinessSuite.Application.Abstractions.ServerAiUnavailableException", "x", "AI model")]
+    [InlineData(null, "GwsBusinessSuite.Infrastructure.Services.RefusedHostPauseHandler", "refused")]
+    [InlineData(null, "x", null)]
+    public void KnownCauses_ShouldNameTheReason(string? exceptionType, string source, string? expected)
+    {
+        var reason = GwsBusinessSuite.Application.Diagnostics.KnownCauses.Match(exceptionType, source, "t", null);
+        if (expected is null) reason.Should().BeNull();
+        else reason.Should().Contain(expected);
+    }
+
     private static CapturedLogEvent Event(string template, string message, string origin = "server", DateTimeOffset? at = null, string? trace = null, string release = "abc1234") =>
         new(at ?? Now, "Warning", origin, "GwsBusinessSuite.Test", template, message, null, null, trace, "grant", "/admin", null, release);
 
