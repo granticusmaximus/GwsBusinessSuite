@@ -206,7 +206,10 @@ public sealed class OverwatchGridScriptBrowserTestsB(PlaywrightBrowserFixture fi
         var json = await page.EvaluateAsync<string>("() => JSON.stringify(window.__nativeMessages.map(m => ({ operation: m.operation, args: Array.from(Object.values(m.arguments)) })))");
         var messages = JsonDocument.Parse(json).RootElement.EnumerateArray().Select(m => m.Clone()).ToList();
         messages.Select(m => m.GetProperty("operation").GetString()).Should().ContainInOrder("layout", "mapTap");
-        var layout = messages.First(m => m.GetProperty("operation").GetString() == "layout").GetProperty("args");
+        // The last frame sent before the click is the one the click is measured against (a slow runner
+        // can still deliver a setup-time frame first; CI failed on f68e32f with left 0).
+        var tapIndex = messages.FindIndex(m => m.GetProperty("operation").GetString() == "mapTap");
+        var layout = messages.Take(tapIndex).Last(m => m.GetProperty("operation").GetString() == "layout").GetProperty("args");
         layout[0].GetDouble().Should().Be(272, "the container's new left edge");
         var tap = messages.First(m => m.GetProperty("operation").GetString() == "mapTap").GetProperty("args");
         tap[0].GetDouble().Should().BeApproximately((400 - 272) / layout[2].GetDouble(), 0.001, "measured against the same rectangle");
