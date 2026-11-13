@@ -68,10 +68,20 @@ public sealed class WikiLinkPreviewBrowserTests(PlaywrightBrowserFixture fixture
         await using var pageScope = await OpenAsync();
         var page = pageScope;
 
+        // The delay is timed in the browser (13-11-26): a busy CI runner let 400 ms of page time
+        // pass inside the test's own 150 ms wait, and the preview was already up when it looked.
+        await page.EvaluateAsync("""
+            () => {
+                window.__hoverAt = null; window.__shownAt = null;
+                document.querySelector('#open').addEventListener('pointerenter', () => { window.__hoverAt ??= performance.now(); });
+                new MutationObserver(() => {
+                    if (window.__shownAt === null && document.querySelector('.gws-wiki-preview')) window.__shownAt = performance.now();
+                }).observe(document.body, { childList: true, subtree: true });
+            }
+            """);
         await page.HoverAsync("#open");
-        await page.WaitForTimeoutAsync(150);
-        (await page.QuerySelectorAsync(".gws-wiki-preview")).Should().BeNull("it waits ~400 ms before showing");
         await page.WaitForSelectorAsync(".gws-wiki-preview", new() { Timeout = 3000 });
+        (await page.EvaluateAsync<double>("() => window.__shownAt - window.__hoverAt")).Should().BeGreaterThanOrEqualTo(300, "it waits ~400 ms before showing");
 
         (await page.TextContentAsync(".gws-wiki-preview-title")).Should().Be("<img src=x onerror=\"window.__xss=1\">Plans", "page text is shown as text, never parsed as HTML");
         (await page.EvaluateAsync<bool>("() => !!window.__xss")).Should().BeFalse();

@@ -842,17 +842,25 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
         }
         await page.WaitForTimeoutAsync(500);
 
-        async Task<double> DrawnShareAsync()
+        // Measured in the browser's own time, over at least 40 ticks and 3 s: a loaded CI runner
+        // managed 4 ticks in 3 s of the test's time (13-11-26), and a share of ticks drawn means
+        // nothing when the tick rate itself collapses. So the checks are rates: idle draws about
+        // once a second; a pulse draws at least 4 a second (it asks for ~20; a loaded machine gave
+        // 9), or half the ticks when the browser can't even tick that fast.
+        async Task<(int Ticks, int Drawn, double Seconds)> MeasureAsync()
         {
-            var before = await page.EvaluateAsync<int[]>("() => [window.__ticks, window.__drawn]");
-            await page.WaitForTimeoutAsync(3000);
-            var after = await page.EvaluateAsync<int[]>("() => [window.__ticks, window.__drawn]");
-            var ticks = after[0] - before[0];
-            ticks.Should().BeGreaterThan(5, "the animation loop has to be running to measure anything");
-            return (after[1] - before[1]) / (double)ticks;
+            var before = await page.EvaluateAsync<double[]>("() => [window.__ticks, window.__drawn, performance.now()]");
+            await page.WaitForFunctionAsync(
+                "start => window.__ticks - start[0] >= 40 && performance.now() - start[2] >= 3000", before,
+                new PageWaitForFunctionOptions { Timeout = 30000, PollingInterval = 100 });
+            var after = await page.EvaluateAsync<double[]>("() => [window.__ticks, window.__drawn, performance.now()]");
+            return ((int)(after[0] - before[0]), (int)(after[1] - before[1]), (after[2] - before[2]) / 1000);
         }
 
-        (await DrawnShareAsync()).Should().BeLessThan(0.15, "nothing changed, so only the once-a-second frame draws (it was every tick)");
+        void ShouldBeIdle((int Ticks, int Drawn, double Seconds) measured, string because) =>
+            measured.Drawn.Should().BeLessThanOrEqualTo((int)Math.Ceiling(measured.Seconds) + 2, because);
+
+        ShouldBeIdle(await MeasureAsync(), "nothing changed, so only the once-a-second frame draws (it was every tick)");
 
         await page.EvaluateAsync("""
             () => window.tacticalGlobe.setWorldNews([{
@@ -862,11 +870,13 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
               href: '/admin/world-news?situation=situation-1', sources: []
             }])
             """);
-        (await DrawnShareAsync()).Should().BeGreaterThan(0.2, "the SURGING pulse asks for about 20 frames a second while it's there");
+        var pulsing = await MeasureAsync();
+        pulsing.Drawn.Should().BeGreaterThanOrEqualTo((int)Math.Min(pulsing.Ticks * 0.5, pulsing.Seconds * 4),
+            "the SURGING pulse asks for about 20 frames a second while it's there");
 
         await page.EvaluateAsync("() => window.tacticalGlobe.clearWorldNews()");
         await page.WaitForTimeoutAsync(300);
-        (await DrawnShareAsync()).Should().BeLessThan(0.15, "the pulse stopped with the marker");
+        ShouldBeIdle(await MeasureAsync(), "the pulse stopped with the marker");
     }
 
     [Fact]
