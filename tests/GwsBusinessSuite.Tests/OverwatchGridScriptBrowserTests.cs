@@ -52,7 +52,7 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
         "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com; " +
         "img-src 'self' data: blob: https:; " +
         "font-src 'self' data: https://fonts.gstatic.com https://cdn.jsdelivr.net; " +
-        "connect-src 'self' wss: ws: https://nominatim.openstreetmap.org https://*.azurewebsites.net https://cdn.jsdelivr.net https://server.arcgisonline.com https://tile.openstreetmap.org https://*.tile.openstreetmap.org https://mesonet.agron.iastate.edu https://gibs.earthdata.nasa.gov; " +
+        "connect-src 'self' wss: ws: https://nominatim.openstreetmap.org https://*.azurewebsites.net https://cdn.jsdelivr.net https://server.arcgisonline.com https://tile.openstreetmap.org https://*.tile.openstreetmap.org https://mesonet.agron.iastate.edu https://tilecache.rainviewer.com https://gibs.earthdata.nasa.gov; " +
         "media-src 'self' blob: https:; " +
         "worker-src 'self' blob: https://cdn.jsdelivr.net; " +
         "frame-src 'self'; " +
@@ -966,7 +966,8 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
             frames: [
               { validUtc: iso(-10), kind: 'Observed', tileUrlTemplate: base + 'nexrad-n0q-900913-m10m/{z}/{x}/{y}.png' },
               { validUtc: iso(-5), kind: 'Observed', tileUrlTemplate: base + 'nexrad-n0q-900913-m05m/{z}/{x}/{y}.png' },
-              { validUtc: iso(0), kind: 'Observed', tileUrlTemplate: base + 'nexrad-n0q-900913/{z}/{x}/{y}.png' },
+              { validUtc: iso(0), kind: 'Observed', tileUrlTemplate: base + 'nexrad-n0q-900913/{z}/{x}/{y}.png',
+                globalTileUrlTemplate: 'https://tilecache.rainviewer.com/v2/radar/test/256/{z}/{x}/{y}/2/1_1.png' },
               { validUtc: iso(60), kind: 'Forecast', tileUrlTemplate: base + 'hrrr::REFD-F0060-0/{z}/{x}/{y}.png' },
               { validUtc: iso(120), kind: 'Forecast', tileUrlTemplate: base + 'hrrr::REFD-F0120-0/{z}/{x}/{y}.png' }
             ]

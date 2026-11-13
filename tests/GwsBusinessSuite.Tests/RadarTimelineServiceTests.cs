@@ -67,4 +67,36 @@ public sealed class RadarTimelineServiceTests
 
         timeline.Frames[timeline.NowIndex].ValidUtc.Should().Be(new DateTimeOffset(2026, 10, 9, 13, 35, 0, TimeSpan.Zero));
     }
+
+    // Worldwide radar (12-11-26): each observed frame carries the RainViewer frame nearest its time,
+    // within 10 minutes, to draw under the US layer. Forecast frames stay US-only.
+    [Fact]
+    public void Build_ShouldPairEachScanWithTheNearestWorldFrame_AndLeaveForecastsUsOnly()
+    {
+        var world = RadarTimelineService.ParseGlobalFrames("https://tilecache.rainviewer.com",
+            Enumerable.Range(0, 13).Select(i => (LatestScan.AddMinutes(-120 + i * 10).ToUnixTimeSeconds(), (string?)$"/v2/radar/f{i}")));
+
+        var timeline = RadarTimelineService.Build(LatestScan, ModelRun, LatestScan.AddMinutes(2), world);
+
+        var now = timeline.Frames[timeline.NowIndex];
+        now.GlobalTileUrlTemplate.Should().Be("https://tilecache.rainviewer.com/v2/radar/f12/256/{z}/{x}/{y}/2/1_1.png");
+        timeline.Frames[timeline.NowIndex - 1].GlobalTileUrlTemplate.Should().NotBeNull("5 minutes off is still the nearest world frame");
+        timeline.Frames.Where(frame => frame.Kind == RadarFrameKind.Observed).Should().OnlyContain(frame => frame.GlobalTileUrlTemplate != null);
+        timeline.Frames.Where(frame => frame.Kind == RadarFrameKind.Forecast).Should().OnlyContain(frame => frame.GlobalTileUrlTemplate == null);
+
+        RadarTimelineService.Build(LatestScan, ModelRun, LatestScan, world.Where(frame => frame.ValidUtc < LatestScan.AddMinutes(-30)).ToList())
+            .Frames[timeline.NowIndex].GlobalTileUrlTemplate.Should().BeNull("no world frame within 10 minutes");
+    }
+
+    [Fact]
+    public void ParseGlobalFrames_ShouldOnlyTrustHttpsHostsAndPlainPaths()
+    {
+        RadarTimelineService.ParseGlobalFrames("http://tilecache.rainviewer.com", [(1, "/v2/radar/a")]).Should().BeEmpty();
+        RadarTimelineService.ParseGlobalFrames(null, [(1, "/v2/radar/a")]).Should().BeEmpty();
+        RadarTimelineService.ParseGlobalFrames("https://tilecache.rainviewer.com", [(1, "/../x"), (2, "relative"), (0, "/v2/radar/a")]).Should().BeEmpty();
+        RadarTimelineService.ParseGlobalFrames("https://tilecache.rainviewer.com/", [(20, "/v2/radar/b"), (10, "/v2/radar/a")])
+            .Select(frame => frame.TileUrlTemplate).Should().Equal(
+                "https://tilecache.rainviewer.com/v2/radar/a/256/{z}/{x}/{y}/2/1_1.png",
+                "https://tilecache.rainviewer.com/v2/radar/b/256/{z}/{x}/{y}/2/1_1.png");
+    }
 }

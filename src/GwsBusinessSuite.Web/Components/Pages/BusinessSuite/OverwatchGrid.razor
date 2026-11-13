@@ -1939,7 +1939,9 @@
             {
                 validUtc = frame.ValidUtc,
                 kind = frame.Kind.ToString(),
-                tileUrlTemplate = frame.TileUrlTemplate
+                tileUrlTemplate = frame.TileUrlTemplate,
+                // The whole planet's radar under the US layer (12-11-26).
+                globalTileUrlTemplate = frame.GlobalTileUrlTemplate
             })
         });
         await JS.InvokeVoidAsync("tacticalGlobe.setHourlyForecast", hourlyTask.Result

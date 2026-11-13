@@ -742,15 +742,27 @@ public sealed class OverwatchGridScriptBrowserTestsB(PlaywrightBrowserFixture fi
             }
         };
 
+        var worldTiles = 0;
+        // RainViewer frame paths expire after ~2 hours, so a stand-in tile answers; what matters is
+        // that the globe asks for world tiles and the CSP lets them through (12-11-26).
+        await page.RouteAsync("https://tilecache.rainviewer.com/**", route =>
+        {
+            Interlocked.Increment(ref worldTiles);
+            return route.FulfillAsync(new() { Status = 200, ContentType = "image/png", BodyBytes = Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==") });
+        });
+
         await page.EvaluateAsync(RadarTimelineScript);
         await page.EvaluateAsync("() => window.tacticalGlobe.setRadarVisible(true)");
         await page.WaitForFunctionAsync("document.querySelector('.tg-radar-bar') && document.querySelector('.tg-radar-bar').style.display === 'block'", new PageWaitForFunctionOptions { Timeout = 5000 });
 
-        (await page.TextContentAsync(".tg-radar-kind")).Should().Be("LATEST RADAR");
+        (await page.TextContentAsync(".tg-radar-kind")).Should().Be("LATEST RADAR · WORLDWIDE");
+        for (var i = 0; i < 50 && Volatile.Read(ref worldTiles) == 0; i++) await page.WaitForTimeoutAsync(100);
+        worldTiles.Should().BeGreaterThan(0, "the worldwide layer draws under the US one");
         (await page.InputValueAsync(".tg-radar-slider")).Should().Be("2");
 
         await page.ClickAsync("[data-radar='forward']");
         (await page.TextContentAsync(".tg-radar-kind")).Should().StartWith("FUTURE RADAR · HRRR MODEL");
+        (await page.TextContentAsync(".tg-radar-kind")).Should().EndWith("US ONLY");
         (await page.InputValueAsync(".tg-radar-slider")).Should().Be("3");
 
         await page.ClickAsync("[data-radar='now']");

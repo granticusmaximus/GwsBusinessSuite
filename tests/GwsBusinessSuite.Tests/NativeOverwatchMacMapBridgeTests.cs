@@ -170,7 +170,12 @@ public sealed class NativeOverwatchMacMapBridgeTests
             .And.Contain("native.selectedMany(group)")
             .And.Contain(".FirstOrDefault(pin => pin.Handle == handle)")
             .And.Contain("gws-overwatch-map.log")
-            .And.Contain("Report($\"{operation} failed:");
+            .And.Contain("Report($\"{operation} failed:")
+            // Radar (12-11-26): the Mac app drew none. The latest frame, worldwide under the US layer,
+            // stretched past each source's last zoom.
+            .And.Contain("case \"setRadarTimeline\": SetRadarTimeline(arguments); return;")
+            .And.Contain("new StretchedTileOverlay(_radarGlobal, 7)")
+            .And.Contain("MKTileOverlay tiles => new MKTileOverlayRenderer(tiles)");
     }
 
     [Fact]

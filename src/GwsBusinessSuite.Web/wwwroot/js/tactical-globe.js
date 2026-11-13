@@ -2151,7 +2151,7 @@ window.tacticalGlobe = (function () {
         if (key === radar.key) return;
 
         const shownTime = radar.index >= 0 && radar.frames[radar.index] ? Date.parse(radar.frames[radar.index].validUtc) : null;
-        radar.layers.forEach(function (layer) { entry.viewer.imageryLayers.remove(layer, true); });
+        radar.layers.forEach(function (layer) { layer.remove(); });
         radar.layers = new Map();
         radar.key = key;
         radar.frames = timeline.frames;
@@ -2191,17 +2191,39 @@ window.tacticalGlobe = (function () {
         updateRadarForecastLine(entry);
     }
 
+    // One frame of radar: the whole planet (RainViewer, 12-11-26; its tiles stop at zoom 7 and
+    // Cesium stretches them) with the sharper US layer (NEXRAD / HRRR) on top. The pair shows,
+    // fades and is removed as one, so the rest of the timeline code treats it as a single layer.
     function ensureRadarLayer(entry, index) {
         const radar = entry.radar;
         let layer = radar.layers.get(index);
         if (!layer) {
-            layer = entry.viewer.imageryLayers.addImageryProvider(new Cesium.UrlTemplateImageryProvider({
-                url: radar.frames[index].tileUrlTemplate,
+            const frame = radar.frames[index];
+            const layers = entry.viewer.imageryLayers;
+            const parts = [];
+            if (frame.globalTileUrlTemplate) {
+                parts.push(layers.addImageryProvider(new Cesium.UrlTemplateImageryProvider({
+                    url: frame.globalTileUrlTemplate,
+                    maximumLevel: 7,
+                    credit: 'Radar: RainViewer'
+                })));
+            }
+            parts.push(layers.addImageryProvider(new Cesium.UrlTemplateImageryProvider({
+                url: frame.tileUrlTemplate,
                 // Radar is ~1 km resolution; beyond this Cesium upsamples instead of requesting
                 // street-level tiles the source doesn't really have.
                 maximumLevel: 10,
                 credit: 'Radar: NOAA NEXRAD / HRRR via Iowa Environmental Mesonet'
-            }));
+            })));
+            let shown = false;
+            let opacity = 1;
+            layer = {
+                get show() { return shown; },
+                set show(value) { shown = !!value; parts.forEach(function (part) { part.show = shown; }); },
+                get alpha() { return opacity; },
+                set alpha(value) { opacity = value; parts.forEach(function (part) { part.alpha = value; }); },
+                remove: function () { parts.forEach(function (part) { layers.remove(part, true); }); }
+            };
             layer.show = false;
             radar.layers.set(index, layer);
         }
@@ -2366,10 +2388,11 @@ window.tacticalGlobe = (function () {
         const kind = bar.querySelector('.tg-radar-kind');
         if (frame.kind === 'Forecast') {
             const run = radar.modelRunUtc ? new Date(radar.modelRunUtc) : null;
-            kind.textContent = 'FUTURE RADAR \u00b7 HRRR MODEL' + (run && !isNaN(run.getTime()) ? ' ' + String(run.getUTCHours()).padStart(2, '0') + 'Z' : '');
+            // The forecast model covers the US only; say so, since the past frames are worldwide.
+            kind.textContent = 'FUTURE RADAR \u00b7 HRRR MODEL' + (run && !isNaN(run.getTime()) ? ' ' + String(run.getUTCHours()).padStart(2, '0') + 'Z' : '') + ' \u00b7 US ONLY';
             kind.className = 'tg-radar-kind tg-radar-kind-forecast';
         } else {
-            kind.textContent = radar.index === radar.nowIndex ? 'LATEST RADAR' : 'PAST RADAR';
+            kind.textContent = (radar.index === radar.nowIndex ? 'LATEST RADAR' : 'PAST RADAR') + (frame.globalTileUrlTemplate ? ' \u00b7 WORLDWIDE' : ' \u00b7 US');
             kind.className = 'tg-radar-kind';
         }
         const play = bar.querySelector('.tg-radar-play');

@@ -105,7 +105,7 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
         {
             case "init": Show(arguments); return;
             case "layout": Place(arguments); return;
-            case "dispose": _pickPointMode = false; ClearAll(); _map.Hidden = true; return;
+            case "dispose": _pickPointMode = false; ClearAll(); _radarVisible = false; RefreshRadar(); _map.Hidden = true; return;
             case "flyTo":
             case "flyToStreetLevel": FlyTo(arguments); return;
             case "flyToBounds": FlyToBounds(arguments); return;
@@ -116,6 +116,8 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
             case "startPickPoint": _pickPointMode = true; return;
             case "cancelPickPoint": _pickPointMode = false; return;
             case "mapTap": MapTap(arguments); return;
+            case "setRadarTimeline": SetRadarTimeline(arguments); return;
+            case "setRadarVisible": _radarVisible = arguments.LastOrDefault() is true; RefreshRadar(); return;
             case "home":
                 _map.SetRegion(new MKCoordinateRegion(new CLLocationCoordinate2D(20, 0), new MKCoordinateSpan(140, 340)), true);
                 return;
@@ -544,6 +546,103 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
         if (_overlays.Remove(operation, out var overlays) && overlays.Count > 0) _map.RemoveOverlays(overlays.ToArray());
     }
 
+    // Radar on the native map (12-11-26; before, the Mac app drew none). The latest observed frame:
+    // the whole planet (RainViewer, tiles to zoom 7) with the sharper US layer (NEXRAD) on top, both
+    // stretched past their last zoom so the radar stays on screen when you zoom in.
+    private bool _radarVisible;
+    private string? _radarGlobal;
+    private string? _radarRegional;
+    private readonly List<IMKOverlay> _radarOverlays = [];
+    private string? _radarShownKey;
+
+    private void SetRadarTimeline(object?[] arguments)
+    {
+        var payload = arguments.FirstOrDefault() is string ? arguments.ElementAtOrDefault(1) : arguments.FirstOrDefault();
+        if (payload is not Dictionary<string, object?> timeline || timeline.GetValueOrDefault("frames") is not object?[] frames || frames.Length == 0)
+        {
+            _radarGlobal = _radarRegional = null;
+            RefreshRadar();
+            return;
+        }
+        var nowIndex = AsDouble(timeline.GetValueOrDefault("nowIndex"), out var index) ? (int)Math.Clamp(index, 0, frames.Length - 1) : frames.Length - 1;
+        var frame = frames[nowIndex] as Dictionary<string, object?>;
+        _radarRegional = TileTemplate(frame?.GetValueOrDefault("tileUrlTemplate"));
+        _radarGlobal = TileTemplate(frame?.GetValueOrDefault("globalTileUrlTemplate"));
+        RefreshRadar();
+    }
+
+    // Only https XYZ templates from the server's timeline.
+    private static string? TileTemplate(object? value) =>
+        value is string text && text.StartsWith("https://", StringComparison.Ordinal) && text.Contains("{z}", StringComparison.Ordinal) ? text : null;
+
+    private void RefreshRadar()
+    {
+        var key = _radarVisible ? $"{_radarGlobal}|{_radarRegional}" : null;
+        if (key == _radarShownKey) return;
+        _radarShownKey = key;
+        if (_radarOverlays.Count > 0) _map.RemoveOverlays(_radarOverlays.ToArray());
+        _radarOverlays.Clear();
+        if (!_radarVisible) return;
+        if (_radarGlobal is not null) _radarOverlays.Add(new StretchedTileOverlay(_radarGlobal, 7));
+        if (_radarRegional is not null) _radarOverlays.Add(new StretchedTileOverlay(_radarRegional, 10));
+        foreach (var overlay in _radarOverlays) _map.AddOverlay(overlay, MKOverlayLevel.AboveRoads);
+    }
+
+    // An XYZ tile layer that keeps drawing past the zoom its source stops at: deeper tiles are cut
+    // from the deepest real one and enlarged, as the web globe does. MapKit would otherwise show
+    // nothing past MaximumZ.
+    private sealed class StretchedTileOverlay : MKTileOverlay
+    {
+        private readonly string _template;
+        private readonly int _sourceMaxZoom;
+
+        public StretchedTileOverlay(string template, int sourceMaxZoom) : base(template)
+        {
+            _template = template;
+            _sourceMaxZoom = sourceMaxZoom;
+            CanReplaceMapContent = false;
+            MaximumZ = 20;
+        }
+
+        public override void LoadTileAtPath(MKTileOverlayPath path, MKTileOverlayLoadTileCompletionHandler result)
+        {
+            if (path.Z <= _sourceMaxZoom)
+            {
+                base.LoadTileAtPath(path, result);
+                return;
+            }
+            var levels = (int)path.Z - _sourceMaxZoom;
+            var scale = 1L << levels;
+            var parentX = (long)path.X >> levels;
+            var parentY = (long)path.Y >> levels;
+            var url = _template.Replace("{z}", _sourceMaxZoom.ToString(CultureInfo.InvariantCulture), StringComparison.Ordinal)
+                .Replace("{x}", parentX.ToString(CultureInfo.InvariantCulture), StringComparison.Ordinal)
+                .Replace("{y}", parentY.ToString(CultureInfo.InvariantCulture), StringComparison.Ordinal);
+            NSUrlSession.SharedSession.CreateDataTask(new NSUrl(url), (data, _, error) =>
+            {
+                try
+                {
+                    using var image = data is null ? null : UIImage.LoadFromData(data);
+                    if (image?.CGImage is not { } source) { result(null!, error!); return; }
+                    var size = source.Width / (double)scale;
+                    var crop = new CoreGraphics.CGRect(((long)path.X - (parentX << levels)) * size, ((long)path.Y - (parentY << levels)) * size, Math.Max(size, 1), Math.Max(size, 1));
+                    using var piece = source.WithImageInRect(crop);
+                    if (piece is null) { result(null!, null!); return; }
+                    var format = UIGraphicsImageRendererFormat.DefaultFormat;
+                    format.Scale = 1;
+                    var renderer = new UIGraphicsImageRenderer(new CoreGraphics.CGSize(256, 256), format);
+                    using var pieceImage = UIImage.FromImage(piece);
+                    result(renderer.CreatePng(_ => pieceImage.Draw(new CoreGraphics.CGRect(0, 0, 256, 256))), null!);
+                }
+                catch (Exception ex)
+                {
+                    MapLog($"radar tile {path.Z}/{path.X}/{path.Y} failed: {ex.GetType().Name}: {ex.Message}");
+                    result(null!, null!);
+                }
+            }).Resume();
+        }
+    }
+
     private void ClearAll()
     {
         foreach (var operation in _annotations.Keys.Concat(_overlays.Keys).Distinct().ToList()) Clear(operation);
@@ -654,6 +753,7 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
 
         public override MKOverlayRenderer OverlayRenderer(MKMapView mapView, IMKOverlay overlay) => overlay switch
         {
+            MKTileOverlay tiles => new MKTileOverlayRenderer(tiles) { Alpha = 0.75f },
             MKPolygon polygon => new MKPolygonRenderer(polygon) { FillColor = UIColor.SystemOrange.ColorWithAlpha(0.22f), StrokeColor = UIColor.SystemOrange, LineWidth = 2 },
             MKPolyline line => new MKPolylineRenderer(line) { StrokeColor = UIColor.SystemCyan, LineWidth = 3 },
             _ => new MKOverlayRenderer(overlay)

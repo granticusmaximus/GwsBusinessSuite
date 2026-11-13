@@ -16,8 +16,17 @@ public enum RadarFrameKind
     Forecast
 }
 
-// TileUrlTemplate is an XYZ (Web Mercator) template with {z}/{x}/{y} placeholders.
-public sealed record RadarFrame(DateTimeOffset ValidUtc, RadarFrameKind Kind, string TileUrlTemplate);
+// TileUrlTemplate is an XYZ (Web Mercator) template with {z}/{x}/{y} placeholders: the sharp US
+// layer (NEXRAD / HRRR). GlobalTileUrlTemplate, on observed frames, is the whole planet's radar for
+// the nearest time (RainViewer, 12-11-26), drawn underneath it; its tiles stop at GlobalMaxZoom and
+// are stretched beyond. Forecast frames have none: no free source forecasts radar worldwide.
+public sealed record RadarFrame(DateTimeOffset ValidUtc, RadarFrameKind Kind, string TileUrlTemplate, string? GlobalTileUrlTemplate = null)
+{
+    public const int GlobalMaxZoom = 7;
+}
+
+// One RainViewer frame: its time and tile template.
+public sealed record GlobalRadarFrame(DateTimeOffset ValidUtc, string TileUrlTemplate);
 
 // NowIndex is the newest observed frame - the timeline opens there, with the past to its left and
 // the forecast to its right. ModelRunUtc is the HRRR run the forecast frames come from (null when
@@ -60,26 +69,37 @@ public sealed class RadarTimelineService(
         var timeline = Build(
             await ReadTimeAsync<RadarScanMetadata>("data/gis/images/4326/USCOMP/n0q_0.json", m => m.Meta?.Valid, cancellationToken),
             await ReadTimeAsync<HrrrMetadata>("data/gis/images/4326/hrrr/refd_0000.json", m => m.ModelInitUtc, cancellationToken),
-            DateTimeOffset.UtcNow);
+            DateTimeOffset.UtcNow,
+            await ReadGlobalFramesAsync(cancellationToken));
         cache.Set(CacheKey, timeline, CacheDuration);
         return timeline;
     }
 
     // Pure so it can be tested against fixed times.
-    public static RadarTimeline Build(DateTimeOffset? latestScanUtc, DateTimeOffset? modelRunUtc, DateTimeOffset nowUtc)
+    public static RadarTimeline Build(DateTimeOffset? latestScanUtc, DateTimeOffset? modelRunUtc, DateTimeOffset nowUtc,
+        IReadOnlyList<GlobalRadarFrame>? globalFrames = null)
     {
+        globalFrames ??= [];
+        // The world frame nearest each US scan, if one is within 10 minutes (RainViewer is every 10).
+        string? GlobalFor(DateTimeOffset valid) => globalFrames
+            .Where(frame => (frame.ValidUtc - valid).Duration() <= TimeSpan.FromMinutes(10))
+            .OrderBy(frame => (frame.ValidUtc - valid).Duration())
+            .FirstOrDefault()?.TileUrlTemplate;
+
         // If the scan time can't be read, the latest mosaic is at most a few minutes old.
         var latestScan = latestScanUtc ?? FloorToMinutes(nowUtc, ObservedStepMinutes).AddMinutes(-ObservedStepMinutes);
 
         var frames = new List<RadarFrame>();
         for (var minutesAgo = ObservedFrames * ObservedStepMinutes; minutesAgo >= ObservedStepMinutes; minutesAgo -= ObservedStepMinutes)
         {
+            var valid = latestScan.AddMinutes(-minutesAgo);
             frames.Add(new RadarFrame(
-                latestScan.AddMinutes(-minutesAgo),
+                valid,
                 RadarFrameKind.Observed,
-                $"{TileBaseUrl}nexrad-n0q-900913-m{minutesAgo:00}m/{{z}}/{{x}}/{{y}}.png"));
+                $"{TileBaseUrl}nexrad-n0q-900913-m{minutesAgo:00}m/{{z}}/{{x}}/{{y}}.png",
+                GlobalFor(valid)));
         }
-        frames.Add(new RadarFrame(latestScan, RadarFrameKind.Observed, $"{TileBaseUrl}nexrad-n0q-900913/{{z}}/{{x}}/{{y}}.png"));
+        frames.Add(new RadarFrame(latestScan, RadarFrameKind.Observed, $"{TileBaseUrl}nexrad-n0q-900913/{{z}}/{{x}}/{{y}}.png", GlobalFor(latestScan)));
         var nowIndex = frames.Count - 1;
 
         if (modelRunUtc is { } run)
@@ -118,6 +138,47 @@ public sealed class RadarTimelineService(
             return null;
         }
     }
+
+    // RainViewer's public map list (free, no key, verified 12-11-26): every radar frame of the last
+    // two hours, every 10 minutes, for the whole planet. Tiles stop at zoom 7 on the free tier.
+    public const string GlobalRadarIndexUrl = "https://api.rainviewer.com/public/weather-maps.json";
+
+    private async Task<IReadOnlyList<GlobalRadarFrame>> ReadGlobalFramesAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            var maps = await httpClient.GetFromJsonAsync<RainViewerMaps>(GlobalRadarIndexUrl, cancellationToken);
+            return ParseGlobalFrames(maps?.Host, maps?.Radar?.Past?.Select(frame => (frame.Time, frame.Path)));
+        }
+        catch (Exception ex) when (ex is HttpRequestException or JsonException or TaskCanceledException && !cancellationToken.IsCancellationRequested)
+        {
+            logger.LogWarning(ex, "Couldn't read the global radar frames.");
+            return [];
+        }
+    }
+
+    public static IReadOnlyList<GlobalRadarFrame> ParseGlobalFrames(string? host, IEnumerable<(long Time, string? Path)>? frames)
+    {
+        if (string.IsNullOrWhiteSpace(host) || !Uri.TryCreate(host, UriKind.Absolute, out var hostUri) || hostUri.Scheme != Uri.UriSchemeHttps || frames is null) return [];
+        return frames
+            .Where(frame => frame.Time > 0 && frame.Path is { Length: > 1 } path && path.StartsWith('/') && !path.Contains(".."))
+            .Select(frame => new GlobalRadarFrame(
+                DateTimeOffset.FromUnixTimeSeconds(frame.Time),
+                // 256 px tiles, colour scheme 2, smoothed, snow shown.
+                $"{host.TrimEnd('/')}{frame.Path}/256/{{z}}/{{x}}/{{y}}/2/1_1.png"))
+            .OrderBy(frame => frame.ValidUtc)
+            .ToList();
+    }
+
+    private sealed record RainViewerMaps(
+        [property: JsonPropertyName("host")] string? Host,
+        [property: JsonPropertyName("radar")] RainViewerRadar? Radar);
+
+    private sealed record RainViewerRadar([property: JsonPropertyName("past")] List<RainViewerFrame>? Past);
+
+    private sealed record RainViewerFrame(
+        [property: JsonPropertyName("time")] long Time,
+        [property: JsonPropertyName("path")] string? Path);
 
     private static DateTimeOffset FloorToMinutes(DateTimeOffset value, int minutes) =>
         new(value.Ticks - value.Ticks % TimeSpan.FromMinutes(minutes).Ticks, value.Offset);

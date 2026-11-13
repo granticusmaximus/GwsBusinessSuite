@@ -17,7 +17,8 @@ all need to know belongs here.
   and, on a Mac, a Debug build of the Mac app when your branch touches it. About 3-5 minutes
   since 12-11-26 (the old whole-solution build is `--full`, and took 35-50 minutes cold).
   - `open gws` builds the Mac app from its own copy of the sources
-    (`~/Library/Caches/gws-business-suite-build`), so repo builds can't mix into an install. Before
+    (`~/Library/Caches/gws-business-suite-build`), so repo builds can't mix into an install, and
+    always clean-builds the app there (an incremental trimmed AOT build mixed images too). Before
     12-11-26 it shared `src/*/bin/Release` with every Release build, and a mixed bundle crashed the
     app at launch twice that day.
   `dotnet build` and `dotnet test` on their own aren't enough. Report its result. Don't hand

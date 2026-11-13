@@ -157,6 +157,11 @@ install_updater
 if [ "$app_needs_update" = "true" ]; then
   echo "Building $APP_NAME ($CONFIGURATION)..."
   mirror_sources
+  # Always a clean app build (12-11-26). Incrementally, a change in the app's own code re-trims
+  # shared assemblies (Microsoft.CodeAnalysis) without recompiling the AOT code built against them
+  # (Microsoft.CodeAnalysis.CSharp), and the app aborted at launch in load_aot_module ("a dependency
+  # cannot be found or it is out of date"). The referenced projects stay incremental; ~2 minutes.
+  rm -rf "$BUILD_ROOT/src/GwsBusinessSuite.App/bin/$CONFIGURATION" "$BUILD_ROOT/src/GwsBusinessSuite.App/obj/$CONFIGURATION"
   dotnet build "$BUILD_ROOT/src/GwsBusinessSuite.App/GwsBusinessSuite.App.csproj" \
     --framework net10.0-maccatalyst --configuration "$CONFIGURATION" --runtime "maccatalyst-$ARCH" \
     --nologo -v quiet -p:ValidateXcodeVersion="$VALIDATE_XCODE"
