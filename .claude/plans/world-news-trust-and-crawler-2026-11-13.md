@@ -161,4 +161,7 @@ and the write-up both draw on the evidence; then B3-B9 and N5-N15; B10 (reading)
   GOV.UK; UN News reclassified) as Kind "official": shown on the trust panel as official statements,
   not counted as independent sources. Rules 2026-11-13.2 with changelog + methodology rule. Left out:
   State Dept and UNHCR (403), NATO and WFP (no feed found).
+- 13-11-26 B7 DONE: SummaryCheck: SentinelGPT's story summary, sentence by sentence; one naming a number
+  or proper name not in any report's headline, English headline or description is underlined, with
+  a count. Full articles aren't checked (a flag = "not found in what World News holds").
 

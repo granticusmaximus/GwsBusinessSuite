@@ -271,7 +271,19 @@ else
             }
             @if (analysis is { Summary.Length: > 0 })
             {
-                <p>@analysis.Summary</p>
+                @* B7 (13-11-26): sentences naming something the reports don't are marked. *@
+                var checkedSummary = CheckSummary(analysis.Summary);
+                <p>
+                    @foreach (var sentence in checkedSummary)
+                    {
+                        if (sentence.Supported) { @sentence.Text @(" ") }
+                        else { <span class="story-unsupported" title="@($"Not found in the reports' headlines or descriptions: {string.Join(", ", sentence.NotFound)}")">@sentence.Text</span> @(" ") }
+                    }
+                </p>
+                @if (checkedSummary.Count(sentence => !sentence.Supported) is var unsupported and > 0)
+                {
+                    <p class="story-quiet">@unsupported of @checkedSummary.Count sentences (underlined) name something not found in the reports' headlines or descriptions. It may be in the full articles; check before relying on it.</p>
+                }
             }
             else if (_story.Summary is { } summary)
             {
@@ -638,6 +650,10 @@ else
         await Task.Run(() => News.Store.SetDeskCheck(eventId, item, done, evidence, user, DateTimeOffset.UtcNow));
         _checks = await Task.Run(() => News.Store.DeskChecks(eventId));
     }
+
+    private IReadOnlyList<SummarySentence> CheckSummary(string summary) =>
+        SummaryCheck.Check(summary, _story is null ? [] : _story.Sources.SelectMany(source =>
+            new[] { source.Report.Title, source.Report.Snippet, _story.English.GetValueOrDefault(source.Report.Id) }));
 
     private async Task AddToBudgetAsync()
     {

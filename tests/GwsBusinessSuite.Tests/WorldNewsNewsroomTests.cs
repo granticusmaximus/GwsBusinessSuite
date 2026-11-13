@@ -186,4 +186,19 @@ public sealed class WorldNewsNewsroomTests
         StoryConfidenceRules.RulesVersion.Should().Be("2026-11-13.2");
         TrustMethodology.Changelog[0].Version.Should().Be(StoryConfidenceRules.RulesVersion, "every rules change is in the changelog");
     }
+
+    [Fact]
+    public void SummaryCheck_ShouldFlagSentencesNamingWhatTheReportsDont()
+    {
+        var sources = new[] { "Earthquake of magnitude 6.1 strikes near Kushiro, Japan", "At least 1,200 people evacuated in Hokkaido" };
+        var result = SummaryCheck.Check(
+            "A magnitude 6.1 earthquake struck near Kushiro. About 1,200 people were evacuated in Hokkaido. Officials in Sapporo said 40 were hurt. Rescue work continues.",
+            sources);
+
+        result.Should().HaveCount(4);
+        result[0].Supported.Should().BeTrue();
+        result[1].Supported.Should().BeTrue("1,200 matches whatever the separators");
+        result[2].NotFound.Should().BeEquivalentTo("Sapporo", "40");
+        result[3].Supported.Should().BeTrue("nothing checkable in it");
+    }
 }

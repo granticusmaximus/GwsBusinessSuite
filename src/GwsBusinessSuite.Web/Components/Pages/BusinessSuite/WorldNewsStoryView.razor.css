@@ -462,3 +462,6 @@
 .story-desk-source { font-weight: 600; margin-right: .4rem; color: var(--gws-text-strong); }
 .story-desk-checklist { list-style: none; margin: 0; padding: 0; display: grid; gap: .6rem; }
 .story-desk-checklist .form-control { margin-top: .25rem; max-width: 40rem; }
+
+/* B7: a summary sentence naming something not found in the reports. */
+.story-unsupported { text-decoration: underline dotted; text-decoration-color: var(--bs-warning, #d97706); text-underline-offset: 3px; cursor: help; }
