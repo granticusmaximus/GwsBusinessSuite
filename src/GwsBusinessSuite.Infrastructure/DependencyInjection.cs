@@ -932,6 +932,8 @@ public static class DependencyInjection
         services.AddSingleton<WorldNewsMapCache>();
         services.AddScoped(sp => new WorldNewsMapService(sp.GetRequiredService<WorldNewsService>().Store, sp.GetRequiredService<WorldNewsMapCache>()));
         services.AddScoped<WorldNewsContextService>();
+        // The World News desk (trust plan N2, 13-11-26): a verified story as a draft article.
+        services.AddScoped<WorldNewsDeskService>();
         // Overwatch briefings: facts for "Brief me" (written by the local model) + the daily morning briefing.
         services.AddScoped<OverwatchBriefingService>();
         services.AddHostedService<OverwatchBriefingBackgroundService>();

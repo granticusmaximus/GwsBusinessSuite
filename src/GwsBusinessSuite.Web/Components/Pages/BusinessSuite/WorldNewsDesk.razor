@@ -1,0 +1,147 @@
+@page "/admin/world-news/desk"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = "AdminOnly")]
+@using Microsoft.AspNetCore.Authorization
+@using GwsBusinessSuite.Application.Abstractions
+@using GwsBusinessSuite.Infrastructure.Services
+@using GwsBusinessSuite.WorldNewsKit
+@inject WorldNewsService News
+@inject ICurrentUserAccessor CurrentUserAccessor
+
+@* World News trust plan N3/N4 (13-11-26): the story budget (what the desk is following, who owns
+   it, where it stands, what's next) and the tips sent from /tip. *@
+
+<PageTitle>World News desk</PageTitle>
+
+<PageHeader Title="News desk" Icon="bi-journal-text" Description="The stories the desk is following, and the tips readers have sent.">
+    <Actions>
+        <a class="btn btn-outline-secondary" href="admin/world-news"><i class="bi bi-arrow-left me-1" aria-hidden="true"></i>World News</a>
+        <a class="btn btn-outline-secondary" href="tip" target="_blank" rel="noopener"><i class="bi bi-box-arrow-up-right me-1" aria-hidden="true"></i>Tip form</a>
+    </Actions>
+</PageHeader>
+
+@if (!string.IsNullOrEmpty(_error)) { <p class="alert alert-warning" role="alert">@_error</p> }
+
+<section class="card border-0 shadow-sm mb-3" aria-labelledby="desk-budget">
+    <div class="card-header"><strong id="desk-budget">The budget</strong> <small class="text-secondary">add a story from its page</small></div>
+    @if (_budget.Count == 0)
+    {
+        <div class="card-body text-secondary">Nothing on the budget yet. Open a story and choose "Add to the budget".</div>
+    }
+    else
+    {
+        <div class="table-responsive">
+            <table class="table align-middle mb-0 desk-table">
+                <thead><tr><th>Story</th><th>Owner</th><th>Status</th><th>Next action</th><th>Updated</th><th><span class="visually-hidden">Actions</span></th></tr></thead>
+                <tbody>
+                    @foreach (var row in _budget)
+                    {
+                        var edit = _edits[row.EventId];
+                        <tr @key="row.EventId">
+                            <td><a href="@($"admin/world-news?event={row.EventId}")">@row.Title</a></td>
+                            <td><input class="form-control form-control-sm" aria-label="Owner" @bind="edit.Owner" @bind:event="oninput" /></td>
+                            <td>
+                                <select class="form-select form-select-sm" aria-label="Status" @bind="edit.Status">
+                                    @foreach (var status in BudgetStatuses.All) { <option value="@status">@status</option> }
+                                </select>
+                            </td>
+                            <td><input class="form-control form-control-sm" aria-label="Next action" @bind="edit.NextAction" @bind:event="oninput" /></td>
+                            <td class="small text-secondary text-nowrap">@row.UpdatedAt.ToLocalGwsDateTime()<br />@row.UpdatedBy</td>
+                            <td class="text-nowrap">
+                                <button type="button" class="btn btn-sm btn-outline-primary" @onclick="() => SaveAsync(row)">Save</button>
+                                <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => RemoveAsync(row)" aria-label="@($"Take {row.Title} off the budget")"><i class="bi bi-x-lg" aria-hidden="true"></i></button>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</section>
+
+<section class="card border-0 shadow-sm mb-3" aria-labelledby="desk-tips">
+    <div class="card-header"><strong id="desk-tips">Tips</strong> <small class="text-secondary">sent from the public tip form; untrusted until checked</small></div>
+    <div class="card-body">
+        @if (_tips.Count == 0) { <p class="text-secondary mb-0">No tips yet. The form is at /tip.</p> }
+        @foreach (var tip in _tips)
+        {
+            <div class="desk-tip" @key="tip.Id">
+                <div class="small text-secondary">
+                    <span class="desk-tip-status desk-tip-@tip.Status">@tip.Status</span>
+                    @tip.CreatedAt.ToLocalGwsDateTime()
+                    @if (!string.IsNullOrWhiteSpace(tip.Name)) { <span> · @tip.Name</span> }
+                    @if (!string.IsNullOrWhiteSpace(tip.Contact)) { <span> · @tip.Contact</span> }
+                    @if (tip.HandledBy is { Length: > 0 } by) { <span> · @by</span> }
+                </div>
+                <p class="mb-1 desk-tip-message">@tip.Message</p>
+                @if (tip.Url is { Length: > 0 } url) { <a href="@url" target="_blank" rel="noopener noreferrer nofollow" class="small">@url</a> }
+                @if (tip.EventId is { Length: > 0 } eventId) { <div class="small"><a href="@($"admin/world-news?event={eventId}")">Linked story</a></div> }
+                @if (tip.Status != TipStatuses.Closed)
+                {
+                    <div class="desk-tip-actions">
+                        <input class="form-control form-control-sm" placeholder="Story link or id (optional)" aria-label="Story for this tip" @bind="_tipStory[tip.Id]" @bind:event="oninput" />
+                        <button type="button" class="btn btn-sm btn-outline-primary" @onclick="() => SetTipAsync(tip, TipStatuses.Following)">Follow up</button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => SetTipAsync(tip, TipStatuses.Closed)">Close</button>
+                    </div>
+                }
+            </div>
+        }
+    </div>
+</section>
+
+@code {
+    private sealed class BudgetEdit
+    {
+        public string Owner { get; set; } = string.Empty;
+        public string Status { get; set; } = BudgetStatuses.All[0];
+        public string NextAction { get; set; } = string.Empty;
+    }
+
+    private IReadOnlyList<BudgetItem> _budget = [];
+    private IReadOnlyList<NewsTip> _tips = [];
+    private readonly Dictionary<string, BudgetEdit> _edits = new();
+    private readonly Dictionary<string, string> _tipStory = new();
+    private string? _error;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        (_budget, _tips) = await Task.Run(() => (News.Store.Budget(), News.Store.Tips()));
+        _edits.Clear();
+        foreach (var row in _budget) _edits[row.EventId] = new BudgetEdit { Owner = row.Owner, Status = row.Status, NextAction = row.NextAction };
+        foreach (var tip in _tips) _tipStory.TryAdd(tip.Id, tip.EventId ?? string.Empty);
+    }
+
+    private async Task SaveAsync(BudgetItem row)
+    {
+        var edit = _edits[row.EventId];
+        var by = await CurrentUserAccessor.GetCurrentUsernameAsync();
+        await Task.Run(() => News.Store.SetBudgetItem(row with
+        {
+            Owner = edit.Owner.Trim(), Status = edit.Status, NextAction = edit.NextAction.Trim(),
+            UpdatedAt = DateTimeOffset.UtcNow, UpdatedBy = by,
+        }));
+        await LoadAsync();
+    }
+
+    private async Task RemoveAsync(BudgetItem row)
+    {
+        await Task.Run(() => News.Store.RemoveBudgetItem(row.EventId));
+        await LoadAsync();
+    }
+
+    private async Task SetTipAsync(NewsTip tip, string status)
+    {
+        _error = null;
+        var eventId = TipRules.StoryIdFrom(_tipStory.GetValueOrDefault(tip.Id));
+        if (eventId is not null && !await Task.Run(() => News.Store.HasEvent(eventId)))
+        {
+            _error = "That story wasn't found. Paste the story's link from World News, or leave it empty.";
+            return;
+        }
+        var by = await CurrentUserAccessor.GetCurrentUsernameAsync();
+        await Task.Run(() => News.Store.SetTipStatus(tip.Id, status, eventId, by));
+        await LoadAsync();
+    }
+}

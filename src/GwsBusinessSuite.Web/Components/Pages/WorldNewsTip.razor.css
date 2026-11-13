@@ -1,0 +1,4 @@
+.tip-card { max-width: 40rem; margin: 0 auto; }
+.tip-form { display: grid; }
+/* The bot trap: off screen for people, still in the form for bots that fill every field. */
+.tip-trap { position: absolute; left: -10000px; width: 1px; height: 1px; overflow: hidden; }

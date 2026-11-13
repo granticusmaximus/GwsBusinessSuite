@@ -584,6 +584,9 @@ public sealed partial class WorldNewsService : IDisposable
             var h when h.EndsWith("nhc.noaa.gov", StringComparison.OrdinalIgnoreCase) => "NOAA National Hurricane Center",
             var h when h.Contains("nasa.gov", StringComparison.OrdinalIgnoreCase) => "NASA",
             var h when h.Contains("nifc", StringComparison.OrdinalIgnoreCase) || h.Contains("arcgis", StringComparison.OrdinalIgnoreCase) => "NIFC",
+            var h when h.Contains("ioda", StringComparison.OrdinalIgnoreCase) => "IODA",
+            var h when h.EndsWith("faa.gov", StringComparison.OrdinalIgnoreCase) => "FAA",
+            var h when h.Contains("firms", StringComparison.OrdinalIgnoreCase) || h.Contains("earthdata", StringComparison.OrdinalIgnoreCase) => "NASA FIRMS",
             var h => h,
         } : "an official record";
 
@@ -790,6 +793,36 @@ public sealed partial class WorldNewsService : IDisposable
         Store.ReplaceOutletOwners(rows, DateTimeOffset.UtcNow);
         LoadOwners();
         return rows.Count;
+    }
+
+    // B1/B2: what records and sensors saw near a story's place since two days before its first
+    // report, and its physical claims checked against them. Asked after the story shows.
+    public async Task<EvidenceBoard?> EvidenceBoardAsync(StoryDocument story, CancellationToken cancellationToken = default)
+    {
+        var headline = story.Event.Headline ?? story.Event.Title;
+        if (WorldNewsPlaces.Instance.Locate(headline) is not { } place) return null;
+        var radius = place.Precision == WorldNewsPrecision.City ? EvidenceBoards.CityKilometres : EvidenceBoards.CountryKilometres;
+        var signals = new List<PrimarySignal>();
+        using var scope = _scopes.CreateScope();
+        var services = scope.ServiceProvider;
+        async Task Gather(Func<Task<IEnumerable<GwsBusinessSuite.Application.Hazards.HazardFeature>>> read)
+        {
+            try { signals.AddRange((await read()).Select(f => new PrimarySignal(SourceName(f.Url), f.Kind, f.Title, f.Latitude, f.Longitude, f.ObservedAt, f.Url))); }
+            catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or InvalidOperationException && !cancellationToken.IsCancellationRequested)
+            {
+                _logger.LogInformation(ex, "World News: an evidence source couldn't be read");
+            }
+        }
+        var span = radius / 111.0 + 1;
+        var box = new GwsBusinessSuite.Application.CameraIntel.BoundingBox(Math.Min(85, place.Latitude + span), Math.Max(-85, place.Latitude - span),
+            Math.Min(180, place.Longitude + span), Math.Max(-180, place.Longitude - span));
+        await Task.WhenAll(
+            Gather(async () => (await services.GetRequiredService<GwsBusinessSuite.Application.Hazards.HazardLayerService>().GetHazardsAsync(box, cancellationToken)).Features),
+            Gather(async () => await services.GetRequiredService<GwsBusinessSuite.Application.Hazards.FireHotspotService>().GetAsync(cancellationToken)),
+            Gather(async () => await services.GetRequiredService<InternetOutageService>().GetAsync(cancellationToken)),
+            Gather(async () => await services.GetRequiredService<GwsBusinessSuite.Application.LiveLayers.AirportStatusService>().GetAsync(cancellationToken)));
+        var nearby = EvidenceBoards.Near(signals, place.Latitude, place.Longitude, story.Event.FirstSeen, DateTimeOffset.UtcNow, radius);
+        return new EvidenceBoard(SensorChecks.Relevant(headline, nearby), SensorChecks.Check(headline, nearby), place.City is { } city ? $"{city}, {place.Country}" : place.Country);
     }
 
     // The reader has seen this analysis: the next "what changed" starts from it.

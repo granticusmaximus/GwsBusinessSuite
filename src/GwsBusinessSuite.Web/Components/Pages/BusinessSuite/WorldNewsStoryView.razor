@@ -5,6 +5,7 @@
 @inject WorldNewsService News
 @inject ICurrentUserAccessor CurrentUserAccessor
 @inject WikipediaMostReadService MostRead
+@inject IServiceScopeFactory ScopeFactory
 
 @* A World News story's document, drawn from StoryDocument: the same content as the PDF
    (EventDocument.ToMarkdown). Shared by the World News dialog and the story page. Since 07-11-26 it's
@@ -174,6 +175,75 @@ else
                 </ul>
             </section>
         }
+
+        @* The desk (World News trust plan B1/B2/N1-N3, 13-11-26): evidence, checklist, budget, draft. *@
+        <section class="story-desk" aria-label="The desk">
+            <div class="story-desk-actions">
+                <button type="button" class="btn btn-sm btn-outline-primary" @onclick="AddToBudgetAsync" disabled="@_onBudget">
+                    <i class="bi bi-kanban me-1" aria-hidden="true"></i>@(_onBudget ? "On the budget" : "Add to the budget")
+                </button>
+                <button type="button" class="btn btn-sm btn-outline-primary" @onclick="WriteDraftAsync" disabled="@_writing">
+                    <i class="bi bi-pencil-square me-1" aria-hidden="true"></i>@(_writing ? "Writing…" : "Write a draft from this story")
+                </button>
+                @if (_draftId is { } draftId) { <a class="btn btn-sm btn-link" href="@($"admin/article-editor/{draftId}")">Open the draft</a> }
+                @if (_situationId is { } situationId) { <a class="btn btn-sm btn-link" href="@($"admin/osint?news={situationId}")" data-enhance-nav="false">Show on Overwatch</a> }
+            </div>
+
+            <h3 class="story-desk-heading">Evidence board@(_board is { Place.Length: > 0 } b ? $": near {b.Place}" : "")</h3>
+            @if (_board is null)
+            {
+                <p class="story-quiet">@(_boardLoaded ? "No place to check: the story couldn't be placed on the map." : "Checking records and sensors near the story…")</p>
+            }
+            else
+            {
+                @foreach (var check in _board.Checks)
+                {
+                    <p class="story-desk-check story-desk-check-@check.Verdict.ToString().ToLowerInvariant()">
+                        <strong>@check.Claim:</strong> @(check.Verdict == SensorVerdict.Supported ? "supported" : "no sensor signal"). @check.Detail
+                    </p>
+                }
+                @if (_board.Signals.Count == 0)
+                {
+                    <p class="story-quiet">No official records or sensor signals near here since two days before the first report.</p>
+                }
+                else
+                {
+                    <ol class="story-desk-timeline">
+                        @foreach (var signal in _board.Signals)
+                        {
+                            <li>
+                                <span class="story-desk-time">@(signal.At is { } at ? at.ToLocalGwsDateTime() : "now")</span>
+                                <span class="story-desk-source">@signal.Source</span>
+                                @if (signal.Url.StartsWith("http", StringComparison.Ordinal)) { <a href="@signal.Url" target="_blank" rel="noopener noreferrer">@signal.Title</a> } else { <span>@signal.Title</span> }
+                                <small class="text-secondary">@($"{signal.Kilometres:0} km")</small>
+                            </li>
+                        }
+                    </ol>
+                }
+            }
+
+            <h3 class="story-desk-heading">Verification checklist @(DeskChecklist.IsComplete(_checks) ? "· checked by the desk" : "")</h3>
+            <ul class="story-desk-checklist">
+                @foreach (var (key, label, help) in DeskChecklist.Items)
+                {
+                    var check = _checks.FirstOrDefault(c => c.Item == key);
+                    <li>
+                        <label class="form-check">
+                            <input class="form-check-input" type="checkbox" checked="@(check?.Done == true)" @onchange="e => SetCheckAsync(key, e.Value is true)" />
+                            <span class="form-check-label"><strong>@label</strong> <small class="text-secondary">@help</small></span>
+                        </label>
+                        <input class="form-control form-control-sm" placeholder="Evidence (a link or what you checked)" aria-label="@($"Evidence for {label}")"
+                               value="@(_evidence.GetValueOrDefault(key) ?? check?.Evidence)" @onchange="e => _evidence[key] = e.Value?.ToString() ?? string.Empty" />
+                        @if (check?.Done != true && DeskChecklist.Suggest(key, _story.Trust, _board, _story.FirstReport) is { } suggestion)
+                        {
+                            <button type="button" class="btn btn-sm btn-link p-0" @onclick="() => _evidence[key] = suggestion">Use: @suggestion</button>
+                        }
+                        @if (check is { Done: true }) { <small class="d-block text-secondary">@check.CheckedBy, @check.CheckedAt?.ToLocalGwsDateTime()</small> }
+                    </li>
+                }
+            </ul>
+            @if (_deskError is not null) { <p class="text-danger small" role="alert">@_deskError</p> }
+        </section>
 
         @* 1. What happened. *@
         <section id="story-part-story" class="story-part" aria-labelledby="story-h-story">
@@ -524,6 +594,62 @@ else
         _challenges = await Task.Run(() => News.Store.Challenges(eventId));
     }
 
+    private EvidenceBoard? _board;
+    private bool _boardLoaded;
+    private IReadOnlyList<DeskCheck> _checks = [];
+    private readonly Dictionary<string, string> _evidence = new();
+    private bool _onBudget;
+    private bool _writing;
+    private Guid? _draftId;
+    private string? _situationId;
+    private string? _deskError;
+
+    private async Task LoadDeskAsync(StoryDocument story)
+    {
+        var eventId = story.Event.Id;
+        _checks = await Task.Run(() => News.Store.DeskChecks(eventId));
+        _onBudget = await Task.Run(() => News.Store.Budget().Any(item => item.EventId == eventId));
+        _situationId = await Task.Run(() => News.Store.SituationOf(eventId));
+        _board = await News.EvidenceBoardAsync(story);
+        _boardLoaded = true;
+    }
+
+    private async Task SetCheckAsync(string item, bool done)
+    {
+        if (_story is null || _username is null) return;
+        var evidence = _evidence.GetValueOrDefault(item) ?? _checks.FirstOrDefault(c => c.Item == item)?.Evidence;
+        if (done && string.IsNullOrWhiteSpace(evidence)) { _deskError = "Add the evidence first: a link or what you checked."; _checks = [.. _checks]; return; }
+        _deskError = null;
+        var eventId = _story.Event.Id;
+        var user = _username;
+        await Task.Run(() => News.Store.SetDeskCheck(eventId, item, done, evidence, user, DateTimeOffset.UtcNow));
+        _checks = await Task.Run(() => News.Store.DeskChecks(eventId));
+    }
+
+    private async Task AddToBudgetAsync()
+    {
+        if (_story is null || _username is null) return;
+        var item = new BudgetItem(_story.Event.Id, _story.Event.Headline ?? _story.Event.Title, _username, "watching", "Verify", DateTimeOffset.UtcNow, _username);
+        await Task.Run(() => News.Store.SetBudgetItem(item));
+        _onBudget = true;
+    }
+
+    private async Task WriteDraftAsync()
+    {
+        if (_story is null || _username is null) return;
+        _writing = true;
+        try
+        {
+            await using var scope = ScopeFactory.CreateAsyncScope();
+            _draftId = await scope.ServiceProvider.GetRequiredService<WorldNewsDeskService>().CreateDraftAsync(_story, _board, _username);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or Microsoft.EntityFrameworkCore.DbUpdateException)
+        {
+            _deskError = "The draft couldn't be saved: " + ex.Message;
+        }
+        finally { _writing = false; }
+    }
+
     private static string OriginKind(string kind) => kind switch { "wire" => "wire copy", "owner" => "same owner", _ => "same text" };
 
     // The event whose story this shows.
@@ -585,6 +711,7 @@ else
         _story = story;
         _gone = story is null;
         _challenges = story is null ? [] : await Task.Run(() => News.Store.Challenges(story.Event.Id));
+        _board = null; _boardLoaded = false; _draftId = null; _evidence.Clear();
         // A primary source can confirm it (World News trust plan 1.13); checked after it shows.
         if (story is not null)
         {
@@ -592,6 +719,8 @@ else
             var confirmed = await News.ConfirmWithPrimarySourcesAsync(story);
             if (id != EventId || _disposed) return;
             if (!ReferenceEquals(confirmed, story)) { _story = confirmed; StateHasChanged(); }
+            await LoadDeskAsync(_story ?? story);
+            if (id != EventId || _disposed) return;
         }
         // Seen: the next "what changed since you last read" starts from this analysis.
         if (_username is { } username && story?.Analysis is { } analysis)

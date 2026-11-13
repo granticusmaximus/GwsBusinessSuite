@@ -74,6 +74,29 @@ whose accuracy is tracked. Old Phase 2's reading items move to Phase B, built on
 | B9 | Official newsrooms as sources (government, UN, ReliefWeb RSS). |
 | B10 | Reading on top: story timelines, briefings, entity pages, quote tracker, full translation, saved-search RSS, business impact, Ask World News, reader mode, listen, reading list, balanced view, trends, tone, predictions, digest, shareable pages, export, automation triggers. |
 
+#### Phase B newsroom (added 13-11-26 at Grant's request; the first four first)
+
+| # | Item |
+| --- | --- |
+| N1 | Verification checklist per story (origin, second independent source, official record, location, photos, numbers), each item ticked with evidence; "Confirmed by the desk" only when done. |
+| N2 | Write from a story: a CMS draft pre-filled with confirmed facts, a sources box, the label and "how we verified this", every claim linked to its evidence. |
+| N3 | Story budget: the day's followed stories, owner, status (watching, verifying, ready, published) and next action. |
+| N4 | Tip line: a public or private form for tips, links and files; matched to stories; promotable to a story to verify. |
+| N5 | Beats: standing areas (region, topic, watchlist) assigned to people; new and surging stories go to their queue. |
+| N6 | Shift handover: an auto-drafted note of what moved, what's unconfirmed and open challenges. |
+| N7 | Desk notes on stories: private, timestamped, with @mentions. |
+| N8 | Source book: private contacts with reliability, past accuracy and the stories they were used on (private per person, like Sentinel). |
+| N9 | Two-person sign-off on desk verdicts and published pieces, both names in the tamper-evident record. |
+| N10 | Live blog: timestamped updates on the site, each tagged confirmed/unconfirmed, corrections shown in place. |
+| N11 | Embargo and hold: no publishing or alerts until a release time, with a reason. |
+| N12 | Corrections publishing: on the article and a public corrections page, linked to the methodology log. |
+| N13 | The morgue: one search over past stories, verdicts, notes and sources (on the FTS archive). |
+| N14 | Story dossiers: pinned reports, records, screenshots, Overwatch snapshots and notes, exported as a PDF. |
+| N15 | Desk metrics: time to verdict, how often desk verdicts held up, open items per person, tips that became stories. |
+
+Order for Phase B: N1-N4 with B1/B2 (evidence board + sensor checks) first, since the checklist
+and the write-up both draw on the evidence; then B3-B9 and N5-N15; B10 (reading) last.
+
 ## Progress
 
 - 13-11-26: plan written; Phase 1 started. Found already built and marked: 2.2 "what changed since
@@ -120,4 +143,18 @@ whose accuracy is tracked. Old Phase 2's reading items move to Phase B, built on
   - A10: /admin/world-news/methodology (rules, changelog, calibration, recall, balance, record, challenges).
   - Calibration needs a day of snapshots and balance a week of counts before they say much.
 - Next: Phase B.
+- 13-11-26: newsroom features N1-N15 added to Phase B (Grant). Phase B not started.
+- 13-11-26 PHASE B FIRST SLICE DONE (B1, B2, N1-N4; tests in WorldNewsNewsroomTests; checked live on a local copy):
+  - WorldNewsKit/Newsroom.cs: EvidenceBoards.Near, SensorChecks (Check + Relevant; kinds match
+    HazardKinds exactly; no power-cut check, no sensor sees it), DeskChecklist (6 items, Suggest never
+    ticks), BudgetItem/BudgetStatuses, NewsTip/TipRules (incl. StoryIdFrom), StoryDraft.Markdown.
+  - worldnews.db tables desk_checks, budget, tips (non-followed tips pruned after 90 days).
+  - WorldNewsService.EvidenceBoardAsync (hazards, FIRMS, IODA, FAA near the located story).
+  - WorldNewsDeskService.CreateDraftAsync: Article draft; "verified" tag only when the checklist is complete.
+  - Story page desk section; /admin/world-news/desk (budget + tips); public /tip page and
+    POST /api/world-news/tips (antiforgery, 5 per 15 min per IP, honeypot) in WorldNewsTipEndpoints.
+  - Not done from N4's text: files on tips (links only, deliberately) and automatic matching of tips
+    to stories (a person pastes the story link). B1's ships/cameras aren't on the board; Overwatch
+    (?news=) shows those.
+- Next: B3-B9 and N5-N15, then B10.
 

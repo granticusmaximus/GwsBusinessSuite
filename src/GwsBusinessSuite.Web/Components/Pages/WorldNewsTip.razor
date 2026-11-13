@@ -1,0 +1,47 @@
+@page "/tip"
+@attribute [AllowAnonymous]
+@using Microsoft.AspNetCore.Authorization
+
+@* The World News tip line (trust plan N4, 13-11-26). A static page with a plain form, so it works
+   without the interactive connection; WorldNewsTipEndpoints takes the post. *@
+
+<PageTitle>Send a news tip</PageTitle>
+
+<div class="gws-booking-shell">
+    <div class="card border-0 shadow-sm tip-card">
+        <div class="card-body">
+            <h1 class="h4">Send us a tip</h1>
+            @if (Sent == "1")
+            {
+                <p class="alert alert-success" role="status">Thank you. The desk will look into it. We may not reply, but every tip is read.</p>
+            }
+            else
+            {
+                <p class="text-secondary">Seen something the news should know about? Tell us what you saw, where and when. Add a link if you have one.
+                    Please don't send anything that puts you or anyone else at risk.</p>
+                @if (!string.IsNullOrWhiteSpace(Error)) { <p class="alert alert-warning" role="alert">@Error</p> }
+                <form method="post" action="@WorldNewsTipEndpoints.Path" class="tip-form">
+                    <AntiforgeryToken />
+                    <label for="tip-message" class="form-label fw-semibold">What happened?</label>
+                    <textarea id="tip-message" name="Message" class="form-control" rows="6" maxlength="4000" required></textarea>
+                    <label for="tip-url" class="form-label fw-semibold mt-3">A link (optional)</label>
+                    <input id="tip-url" name="Url" type="url" class="form-control" maxlength="500" placeholder="https://" />
+                    <label for="tip-name" class="form-label fw-semibold mt-3">Your name (optional)</label>
+                    <input id="tip-name" name="Name" class="form-control" maxlength="120" autocomplete="name" />
+                    <label for="tip-contact" class="form-label fw-semibold mt-3">How to reach you (optional)</label>
+                    <input id="tip-contact" name="Contact" class="form-control" maxlength="200" />
+                    <div class="tip-trap" aria-hidden="true">
+                        <label for="tip-website">Leave this empty</label>
+                        <input id="tip-website" name="Website" tabindex="-1" autocomplete="off" />
+                    </div>
+                    <button type="submit" class="btn btn-primary mt-3">Send tip</button>
+                </form>
+            }
+        </div>
+    </div>
+</div>
+
+@code {
+    [SupplyParameterFromQuery(Name = "sent")] public string? Sent { get; set; }
+    [SupplyParameterFromQuery(Name = "error")] public string? Error { get; set; }
+}

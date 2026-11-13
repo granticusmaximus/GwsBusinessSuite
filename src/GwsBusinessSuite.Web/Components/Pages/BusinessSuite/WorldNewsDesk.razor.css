@@ -1,0 +1,10 @@
+.desk-table input, .desk-table select { min-width: 8rem; }
+.desk-tip { padding: .75rem 0; border-bottom: 1px solid var(--neu-border, rgba(127,127,127,.2)); }
+.desk-tip:last-child { border-bottom: 0; }
+.desk-tip-message { white-space: pre-wrap; overflow-wrap: anywhere; }
+.desk-tip-status { text-transform: capitalize; font-weight: 600; margin-right: .35rem; }
+.desk-tip-new { color: var(--bs-primary); }
+.desk-tip-following { color: var(--bs-warning-text-emphasis, #997404); }
+.desk-tip-closed { color: var(--bs-secondary-color); }
+.desk-tip-actions { display: flex; gap: .5rem; flex-wrap: wrap; margin-top: .5rem; }
+.desk-tip-actions input { flex: 1 1 14rem; }

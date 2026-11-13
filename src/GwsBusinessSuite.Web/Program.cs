@@ -320,6 +320,7 @@ builder.Services.AddAntiforgery(options => options.HeaderName = "X-CSRF-TOKEN");
 builder.Services.AddRateLimiter(options =>
 {
     options.AddClientErrorLimit();
+    options.AddTipLimit();
     options.AddPolicy("login", context =>
         RateLimitPartition.GetFixedWindowLimiter(
             partitionKey: context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
@@ -840,6 +841,7 @@ app.MapDeveloperApiSentinelEndpoints();
 app.MapDeveloperApiBoardEndpoints();
 app.MapNativeOverwatchEndpoints();
 app.MapDiagnosticsEndpoints();
+app.MapTipEndpoints();
 
 // Stripe billing webhooks - anonymous but signature-verified. Stripe.Event/Stripe.EventUtility/Stripe.Invoice are referenced fully-qualified here
 // rather than via a top-level "using Stripe;" because GwsBusinessSuite.Domain.Entities already

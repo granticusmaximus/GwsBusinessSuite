@@ -87,6 +87,14 @@ public sealed class WorldNewsStore
                 PRIMARY KEY (username, event_id));
             CREATE TABLE IF NOT EXISTS article_translations (article_id TEXT PRIMARY KEY, english TEXT NOT NULL, created_at INTEGER NOT NULL);
             CREATE TABLE IF NOT EXISTS surge_alerts_sent (situation_id TEXT PRIMARY KEY, sent_at INTEGER NOT NULL);
+            CREATE TABLE IF NOT EXISTS desk_checks (
+                event_id TEXT NOT NULL, item TEXT NOT NULL, done INTEGER NOT NULL, evidence TEXT, checked_by TEXT, checked_at INTEGER, PRIMARY KEY (event_id, item));
+            CREATE TABLE IF NOT EXISTS budget (
+                event_id TEXT PRIMARY KEY, title TEXT NOT NULL, owner TEXT NOT NULL, status TEXT NOT NULL, next_action TEXT NOT NULL,
+                updated_at INTEGER NOT NULL, updated_by TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS tips (
+                id TEXT PRIMARY KEY, name TEXT, contact TEXT, message TEXT NOT NULL, url TEXT, created_at INTEGER NOT NULL, status TEXT NOT NULL,
+                event_id TEXT, handled_by TEXT);
             CREATE TABLE IF NOT EXISTS outlet_owners (outlet TEXT NOT NULL, owner TEXT NOT NULL, fetched_at INTEGER NOT NULL, PRIMARY KEY (outlet, owner));
             CREATE TABLE IF NOT EXISTS label_snapshots (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, event_id TEXT NOT NULL, level TEXT NOT NULL, reason TEXT NOT NULL, independent INTEGER NOT NULL,
@@ -282,6 +290,145 @@ public sealed class WorldNewsStore
         command.CommandText = "SELECT COUNT(*) FROM events WHERE first_seen >= $since";
         command.Parameters.AddWithValue("$since", since.ToUnixTimeSeconds());
         return Convert.ToInt32(command.ExecuteScalar());
+    }
+
+    // N1: the desk's verification checklist for a story.
+    public IReadOnlyList<DeskCheck> DeskChecks(string eventId)
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT event_id, item, done, evidence, checked_by, checked_at FROM desk_checks WHERE event_id = $event";
+        command.Parameters.AddWithValue("$event", eventId);
+        using var reader = command.ExecuteReader();
+        var checks = new List<DeskCheck>();
+        while (reader.Read())
+            checks.Add(new DeskCheck(reader.GetString(0), reader.GetString(1), reader.GetInt64(2) != 0, reader.IsDBNull(3) ? null : reader.GetString(3),
+                reader.IsDBNull(4) ? null : reader.GetString(4), reader.IsDBNull(5) ? null : DateTimeOffset.FromUnixTimeSeconds(reader.GetInt64(5))));
+        return checks;
+    }
+
+    public void SetDeskCheck(string eventId, string item, bool done, string? evidence, string checkedBy, DateTimeOffset now)
+    {
+        if (DeskChecklist.Items.All(i => i.Key != item)) throw new ArgumentException("Unknown checklist item.", nameof(item));
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "INSERT INTO desk_checks (event_id, item, done, evidence, checked_by, checked_at) VALUES ($event, $item, $done, $evidence, $by, $at) "
+            + "ON CONFLICT(event_id, item) DO UPDATE SET done = excluded.done, evidence = excluded.evidence, checked_by = excluded.checked_by, checked_at = excluded.checked_at";
+        command.Parameters.AddWithValue("$event", eventId);
+        command.Parameters.AddWithValue("$item", item);
+        command.Parameters.AddWithValue("$done", done ? 1 : 0);
+        command.Parameters.AddWithValue("$evidence", (object?)(evidence?.Trim() is { Length: > 0 } text ? (text.Length > 1000 ? text[..1000] : text) : null) ?? DBNull.Value);
+        command.Parameters.AddWithValue("$by", checkedBy);
+        command.Parameters.AddWithValue("$at", now.ToUnixTimeSeconds());
+        command.ExecuteNonQuery();
+    }
+
+    // N3: the story budget.
+    public IReadOnlyList<BudgetItem> Budget()
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT event_id, title, owner, status, next_action, updated_at, updated_by FROM budget ORDER BY updated_at DESC";
+        using var reader = command.ExecuteReader();
+        var items = new List<BudgetItem>();
+        while (reader.Read())
+            items.Add(new BudgetItem(reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3), reader.GetString(4),
+                DateTimeOffset.FromUnixTimeSeconds(reader.GetInt64(5)), reader.GetString(6)));
+        return items;
+    }
+
+    public void SetBudgetItem(BudgetItem item)
+    {
+        if (!BudgetStatuses.All.Contains(item.Status)) throw new ArgumentException("Unknown status.", nameof(item));
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "INSERT INTO budget (event_id, title, owner, status, next_action, updated_at, updated_by) VALUES ($event, $title, $owner, $status, $next, $at, $by) "
+            + "ON CONFLICT(event_id) DO UPDATE SET title = excluded.title, owner = excluded.owner, status = excluded.status, next_action = excluded.next_action, "
+            + "updated_at = excluded.updated_at, updated_by = excluded.updated_by";
+        command.Parameters.AddWithValue("$event", item.EventId);
+        command.Parameters.AddWithValue("$title", item.Title.Length > 300 ? item.Title[..300] : item.Title);
+        command.Parameters.AddWithValue("$owner", item.Owner);
+        command.Parameters.AddWithValue("$status", item.Status);
+        command.Parameters.AddWithValue("$next", item.NextAction.Length > 500 ? item.NextAction[..500] : item.NextAction);
+        command.Parameters.AddWithValue("$at", item.UpdatedAt.ToUnixTimeSeconds());
+        command.Parameters.AddWithValue("$by", item.UpdatedBy);
+        command.ExecuteNonQuery();
+    }
+
+    public void RemoveBudgetItem(string eventId)
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "DELETE FROM budget WHERE event_id = $event";
+        command.Parameters.AddWithValue("$event", eventId);
+        command.ExecuteNonQuery();
+    }
+
+    // N4: tips. Kept for 90 days unless the desk is following one.
+    public NewsTip AddTip(string? name, string? contact, string message, string? url, DateTimeOffset now)
+    {
+        static string? Cap(string? value, int max) => value?.Trim() is { Length: > 0 } text ? (text.Length > max ? text[..max] : text) : null;
+        var tip = new NewsTip(Guid.NewGuid().ToString("N"), Cap(name, TipRules.MaxName), Cap(contact, TipRules.MaxContact), Cap(message, TipRules.MaxMessage)!,
+            Cap(url, TipRules.MaxUrl), now, TipStatuses.New, null, null);
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "INSERT INTO tips (id, name, contact, message, url, created_at, status) VALUES ($id, $name, $contact, $message, $url, $at, 'new'); "
+            + "DELETE FROM tips WHERE status <> 'following' AND created_at < $old";
+        command.Parameters.AddWithValue("$id", tip.Id);
+        command.Parameters.AddWithValue("$name", (object?)tip.Name ?? DBNull.Value);
+        command.Parameters.AddWithValue("$contact", (object?)tip.Contact ?? DBNull.Value);
+        command.Parameters.AddWithValue("$message", tip.Message);
+        command.Parameters.AddWithValue("$url", (object?)tip.Url ?? DBNull.Value);
+        command.Parameters.AddWithValue("$at", now.ToUnixTimeSeconds());
+        command.Parameters.AddWithValue("$old", now.AddDays(-90).ToUnixTimeSeconds());
+        command.ExecuteNonQuery();
+        return tip;
+    }
+
+    public IReadOnlyList<NewsTip> Tips()
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT id, name, contact, message, url, created_at, status, event_id, handled_by FROM tips ORDER BY created_at DESC LIMIT 200";
+        using var reader = command.ExecuteReader();
+        var tips = new List<NewsTip>();
+        while (reader.Read())
+            tips.Add(new NewsTip(reader.GetString(0), reader.IsDBNull(1) ? null : reader.GetString(1), reader.IsDBNull(2) ? null : reader.GetString(2), reader.GetString(3),
+                reader.IsDBNull(4) ? null : reader.GetString(4), DateTimeOffset.FromUnixTimeSeconds(reader.GetInt64(5)), reader.GetString(6),
+                reader.IsDBNull(7) ? null : reader.GetString(7), reader.IsDBNull(8) ? null : reader.GetString(8)));
+        return tips;
+    }
+
+    public void SetTipStatus(string id, string status, string? eventId, string handledBy)
+    {
+        if (status is not (TipStatuses.New or TipStatuses.Following or TipStatuses.Closed)) throw new ArgumentException("Unknown status.", nameof(status));
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "UPDATE tips SET status = $status, event_id = COALESCE($event, event_id), handled_by = $by WHERE id = $id";
+        command.Parameters.AddWithValue("$status", status);
+        command.Parameters.AddWithValue("$event", (object?)eventId ?? DBNull.Value);
+        command.Parameters.AddWithValue("$by", handledBy);
+        command.Parameters.AddWithValue("$id", id);
+        command.ExecuteNonQuery();
+    }
+
+    // The developing story an event belongs to, for "show on Overwatch".
+    public bool HasEvent(string eventId)
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT 1 FROM events WHERE id = $event";
+        command.Parameters.AddWithValue("$event", eventId);
+        return command.ExecuteScalar() is not null;
+    }
+
+    public string? SituationOf(string eventId)
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT situation_id FROM events WHERE id = $event";
+        command.Parameters.AddWithValue("$event", eventId);
+        return command.ExecuteScalar() as string;
     }
 
     // A3: outlets' current owners from Wikidata, replaced in full by each weekly refresh.
