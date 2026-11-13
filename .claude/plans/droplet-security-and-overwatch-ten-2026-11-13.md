@@ -41,10 +41,10 @@ AI droplet:
 | 1 | Time slider for every layer (72 h replay + what changed) | |
 | 2 | Layer health panel | |
 | 3 | Satellite scenes on click (Earth Search STAC, before/after) | |
-| 4 | Night lights (NASA Black Marble via GIBS) | |
+| 4 | Night lights (NASA Black Marble via GIBS) | done (web + Mac map) |
 | 5 | Chokepoints and ports (IMF PortWatch) | |
-| 6 | Flight anomalies (emergency squawks, holding, diversions) | |
-| 7 | Sun and shadow tool | |
+| 6 | Flight anomalies (emergency squawks, holding, diversions) | squawks done; holding/diversions need track history (not kept) |
+| 7 | Sun and shadow tool | done (SunPosition, TOOLS group) |
 | 8 | Analyst tools (range rings, bearings, areas; saved privately) | |
 | 9 | Briefing export (PDF) | |
 | 10 | Multi-signal area rules | |
@@ -96,3 +96,4 @@ Decisions (Grant, 13-11-26, as recommended):
   /root/gws-ai-backups/codex-audit-<time>). Grant's root key login checked first. Assistants now
   reach the AI droplet as root with Grant's Mac key.
 - Left for Grant: Tailscale access rule (only gws-web -> dagda:11434), Mac power settings (pmset).
+- 13-11-26: Tailscale access rule saved by Grant (gws-web -> dagda:11434 only; other Mac ports checked blocked). Mac pmset set. Overwatch 4, 6, 7 built.

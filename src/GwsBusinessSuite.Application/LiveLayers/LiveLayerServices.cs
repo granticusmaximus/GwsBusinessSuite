@@ -8,7 +8,22 @@ using Microsoft.Extensions.Logging;
 namespace GwsBusinessSuite.Application.LiveLayers;
 
 public sealed record Aircraft(string Icao24, string Callsign, string Country, double Latitude, double Longitude,
-    double? AltitudeFeet, double? SpeedKnots, double? HeadingDegrees, double? VerticalRateFeetPerMinute);
+    double? AltitudeFeet, double? SpeedKnots, double? HeadingDegrees, double? VerticalRateFeetPerMinute, string? Squawk = null)
+{
+    // Flight anomalies (13-11-26): the three transponder codes a crew sets in trouble.
+    public string? Emergency => FlightAnomalies.EmergencyFor(Squawk);
+}
+
+public static class FlightAnomalies
+{
+    public static string? EmergencyFor(string? squawk) => squawk?.Trim() switch
+    {
+        "7500" => "Unlawful interference (7500)",
+        "7600" => "Radio failure (7600)",
+        "7700" => "General emergency (7700)",
+        _ => null,
+    };
+}
 
 public sealed record AircraftResult(IReadOnlyList<Aircraft> Aircraft, string? Note);
 
@@ -87,7 +102,8 @@ public sealed class AircraftService(HttpClient httpClient, IMemoryCache cache, I
                 altitudeMeters * 3.28084,
                 Number(s[9]) * 1.94384,
                 Number(s[10]),
-                Number(s[11]) * 196.85));
+                Number(s[11]) * 196.85,
+                s.GetArrayLength() > 14 && s[14].ValueKind == JsonValueKind.String ? s[14].GetString() : null));
         }
         return list;
     }

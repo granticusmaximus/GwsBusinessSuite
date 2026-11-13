@@ -530,7 +530,8 @@ window.tacticalGlobe = (function () {
                     Cesium.Math.toDegrees(rectangle.north),
                     Cesium.Math.toDegrees(rectangle.south),
                     Cesium.Math.toDegrees(rectangle.east),
-                    Cesium.Math.toDegrees(rectangle.west));
+                    Cesium.Math.toDegrees(rectangle.west))
+                    .catch(function () { /* the Overwatch page has closed (navigated away): nothing to tell */ });
             }, 500);
         });
 
@@ -640,7 +641,8 @@ window.tacticalGlobe = (function () {
                     Cesium.Math.toDegrees(rectangle.north),
                     Cesium.Math.toDegrees(rectangle.south),
                     Cesium.Math.toDegrees(rectangle.east),
-                    Cesium.Math.toDegrees(rectangle.west));
+                    Cesium.Math.toDegrees(rectangle.west))
+                    .catch(function () { /* the Overwatch page has closed (navigated away): nothing to tell */ });
             }
         }, 400);
 
@@ -1364,7 +1366,8 @@ window.tacticalGlobe = (function () {
             const position = Cesium.Cartesian3.fromDegrees(Number(plane.lon), Number(plane.lat));
             const altitude = Number.isFinite(plane.altitudeFeet) ? Math.round(plane.altitudeFeet / 100) * 100 : null;
             const selected = plane.id === selectedId;
-            const colour = Cesium.Color.fromCssColorString(selected ? AIRCRAFT_PATH_COLOUR : AIRCRAFT_COLOUR);
+            // A plane squawking 7500/7600/7700 is red and always labelled (flight anomalies, 13-11-26).
+            const colour = Cesium.Color.fromCssColorString(plane.emergency ? '#ff3b30' : selected ? AIRCRAFT_PATH_COLOUR : AIRCRAFT_COLOUR);
             // The id is what scene.pick hands the click handler, so clicking a plane opens its panel.
             const pickId = { _tacticalGlobeAircraft: plane };
             billboards.add({
@@ -1373,13 +1376,13 @@ window.tacticalGlobe = (function () {
                 disableDepthTestDistance: 0
             });
             if (selected) updateSelectedAircraft(entry, plane);
-            if (!withLabels) return;
+            if (!withLabels && !plane.emergency) return;
             labels.add({
                 id: pickId, position: position,
-                text: (plane.callsign || plane.id) + (altitude !== null ? '  ' + altitude.toLocaleString('en-US') + ' FT' : ''),
+                text: (plane.emergency ? plane.emergency.toUpperCase() + '  ' : '') + (plane.callsign || plane.id) + (altitude !== null ? '  ' + altitude.toLocaleString('en-US') + ' FT' : ''),
                 font: '10px monospace', fillColor: colour, outlineColor: Cesium.Color.BLACK, outlineWidth: 3,
                 style: Cesium.LabelStyle.FILL_AND_OUTLINE, pixelOffset: new Cesium.Cartesian2(0, -16),
-                distanceDisplayCondition: nearOnly, disableDepthTestDistance: 0
+                distanceDisplayCondition: plane.emergency ? undefined : nearOnly, disableDepthTestDistance: 0
             });
         });
     }
@@ -4782,7 +4785,7 @@ window.tacticalGlobe = (function () {
         };
 
         const reportRegion = function (region) {
-            if (nativeDotNetRef) nativeDotNetRef.invokeMethodAsync('OnGlobeViewChanged', region[0], region[1], region[2], region[3]);
+            if (nativeDotNetRef) nativeDotNetRef.invokeMethodAsync('OnGlobeViewChanged', region[0], region[1], region[2], region[3]).catch(function () { });
         };
 
         // Pins the native map can't split by zooming (news stories placed at one country or city

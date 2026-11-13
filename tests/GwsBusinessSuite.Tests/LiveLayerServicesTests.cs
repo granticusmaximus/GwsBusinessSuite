@@ -134,4 +134,23 @@ public sealed class LiveLayerServicesTests
             return Task.FromResult(new HttpResponseMessage(status) { Content = new StringContent(body) });
         }
     }
+
+    [Fact]
+    public void ParseStates_ShouldReadTheSquawk_AndFlagTheEmergencyCodes()
+    {
+        var json = """
+            {"states":[
+              ["abc123","DAL42  ","United States",0,0,-84.4,33.6,3000,false,200,90,0,null,3050,"7700",false,0],
+              ["def456","UAL9","United States",0,0,-84.5,33.7,9000,false,220,180,0,null,9100,"1200",false,0],
+              ["aaa111","N1","United States",0,0,-84.6,33.8,900,false,60,10,0,null,950,null,false,0]
+            ]}
+            """;
+        var planes = GwsBusinessSuite.Application.LiveLayers.AircraftService.ParseStates(json);
+
+        planes.Single(p => p.Icao24 == "abc123").Emergency.Should().Be("General emergency (7700)");
+        planes.Single(p => p.Icao24 == "def456").Emergency.Should().BeNull();
+        planes.Single(p => p.Icao24 == "aaa111").Squawk.Should().BeNull();
+        GwsBusinessSuite.Application.LiveLayers.FlightAnomalies.EmergencyFor("7500").Should().StartWith("Unlawful");
+        GwsBusinessSuite.Application.LiveLayers.FlightAnomalies.EmergencyFor("7600").Should().StartWith("Radio failure");
+    }
 }

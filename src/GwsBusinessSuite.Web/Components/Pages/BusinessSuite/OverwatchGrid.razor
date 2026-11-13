@@ -401,6 +401,25 @@
             }
         </div>
         <div class="tg-layer-group">
+            <div class="tg-layer-group-title">TOOLS</div>
+            <div class="tg-layer-buttons">
+                <button type="button" data-tg-toggle="sun-shadow" class="tg-toggle @(_sunToolOn ? "tg-toggle-on" : "")"
+                        title="Where the sun is and which way shadows fall at the centre of the view, for a time you choose: check when a photo was taken" @onclick="ToggleSunTool">
+                    SUN &amp; SHADOW [@(_sunToolOn ? "ON" : "OFF")]
+                </button>
+            </div>
+            @if (_sunToolOn)
+            {
+                <div class="tg-sun-tool">
+                    <label class="tg-favorites-empty" for="tg-sun-time">TIME (LOCAL)</label>
+                    <input id="tg-sun-time" type="datetime-local" class="tg-input" @bind="_sunTime" @bind:event="oninput" />
+                    <label class="tg-favorites-empty" for="tg-sun-bearing">SHADOW IN THE PHOTO POINTS TOWARD (° FROM NORTH, OPTIONAL)</label>
+                    <input id="tg-sun-bearing" type="number" min="0" max="359" class="tg-input" @bind="_sunShadowBearing" @bind:event="oninput" />
+                    @foreach (var line in SunToolLines()) { <div class="tg-hazard-summary">@line</div> }
+                </div>
+            }
+        </div>
+        <div class="tg-layer-group">
             <div class="tg-layer-group-title">CAMERAS</div>
             <div class="tg-layer-buttons">
                 <button type="button" data-tg-toggle="healthy" class="tg-toggle @(_hideUnhealthy ? "tg-toggle-on" : "")"
@@ -3819,9 +3838,11 @@
             await JS.InvokeVoidAsync("tacticalGlobe.setAircraft", "tg-viewport", result.Aircraft.Select(a => new
             {
                 id = a.Icao24, callsign = a.Callsign, lat = a.Latitude, lon = a.Longitude,
-                altitudeFeet = a.AltitudeFeet, speedKnots = a.SpeedKnots, heading = a.HeadingDegrees
+                altitudeFeet = a.AltitudeFeet, speedKnots = a.SpeedKnots, heading = a.HeadingDegrees, emergency = a.Emergency
             }));
-            _aircraftSummary = result.Note ?? $"AIRCRAFT {result.Aircraft.Count} (updated {DateTimeOffset.Now.ToGwsTime()})";
+            var emergencies = result.Aircraft.Where(a => a.Emergency is not null).ToList();
+            _aircraftSummary = result.Note ?? $"AIRCRAFT {result.Aircraft.Count} (updated {DateTimeOffset.Now.ToGwsTime()})"
+                + (emergencies.Count == 0 ? "" : " · EMERGENCY: " + string.Join("; ", emergencies.Select(a => $"{(a.Callsign.Length > 0 ? a.Callsign : a.Icao24)} {a.Emergency}")));
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -4028,6 +4049,38 @@
         {
             Logger.LogWarning(ex, "Overwatch airport status layer failed");
             _airportSummary = "Airport status couldn't be shown just now.";
+        }
+    }
+
+    // ---- Sun and shadow (13-11-26): at the centre of the view, for a chosen local time. ----
+    private bool _sunToolOn;
+    private DateTime _sunTime = DateTime.Now;
+    private double? _sunShadowBearing;
+
+    private void ToggleSunTool() => _sunToolOn = !_sunToolOn;
+
+    private IEnumerable<string> SunToolLines()
+    {
+        var latitude = (_lastBbox.North + _lastBbox.South) / 2;
+        var longitude = (_lastBbox.East + _lastBbox.West) / 2;
+        var at = new DateTimeOffset(_sunTime, TimeZoneInfo.Local.GetUtcOffset(_sunTime));
+        var sun = GwsBusinessSuite.Application.Overwatch.SunPosition.At(latitude, longitude, at);
+        yield return $"AT {latitude:0.###}, {longitude:0.###} ON {at.ToLocalGwsDateTime()}";
+        if (sun.ShadowPerUnitHeight is not { } shadow)
+        {
+            yield return $"SUN DOWN ({sun.ElevationDegrees:0.0}° below the horizon): no shadows";
+        }
+        else
+        {
+            yield return $"SUN {sun.AzimuthDegrees:0}° ({GwsBusinessSuite.Application.Overwatch.SunPosition.Compass(sun.AzimuthDegrees)}), {sun.ElevationDegrees:0.0}° UP";
+            yield return $"SHADOWS POINT {sun.ShadowBearingDegrees:0}° ({GwsBusinessSuite.Application.Overwatch.SunPosition.Compass(sun.ShadowBearingDegrees)}), {shadow:0.00} × AN OBJECT'S HEIGHT";
+        }
+        if (_sunShadowBearing is { } bearing)
+        {
+            var times = GwsBusinessSuite.Application.Overwatch.SunPosition.TimesForShadow(latitude, longitude, at, bearing);
+            yield return times.Count == 0
+                ? $"NO TIME THAT DAY GIVES A SHADOW TOWARD {bearing:0}°"
+                : $"SHADOW TOWARD {bearing:0}° THAT DAY: {times.First().At.ToGwsTime()}-{times.Last().At.ToGwsTime()} (±5°; shadow length narrows it)";
         }
     }
 

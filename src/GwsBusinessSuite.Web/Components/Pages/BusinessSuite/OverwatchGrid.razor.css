@@ -997,3 +997,10 @@
 @media (pointer: coarse) {
     .tg-traffic-live-check { min-height: 44px; }
 }
+
+/* Sun and shadow tool (13-11-26). */
+.tg-sun-tool { display: grid; gap: 4px; margin-top: 6px; }
+.tg-sun-tool .tg-input {
+    background: rgba(0, 0, 0, 0.35); color: inherit; border: 1px solid rgba(120, 255, 170, 0.35);
+    font: 11px monospace; padding: 4px 6px; border-radius: 3px; color-scheme: dark;
+}
