@@ -45,6 +45,7 @@
 @inject GwsBusinessSuite.Application.LiveLayers.AirportStatusService AirportStatusService
 @inject GwsBusinessSuite.Application.LiveLayers.ChokepointService ChokepointService
 @inject GwsBusinessSuite.Application.Overwatch.SatelliteSceneService SatelliteSceneService
+@inject GwsBusinessSuite.Infrastructure.Services.OverwatchViewBriefingPdf ViewBriefingPdf
 @inject GwsBusinessSuite.Application.LiveLayers.SpaceWeatherService SpaceWeatherService
 @inject GwsBusinessSuite.Infrastructure.Services.SatelliteService SatelliteService
 @inject GwsBusinessSuite.Infrastructure.Services.TravelAdvisoryService TravelAdvisoryService
@@ -428,6 +429,10 @@
                 <button type="button" data-tg-toggle="layer-health" class="tg-toggle @(_layerHealthOn ? "tg-toggle-on" : "")"
                         title="Each layer's source, and the last problem it hit since this page opened" @onclick="() => _layerHealthOn = !_layerHealthOn">
                     LAYER HEALTH [@(_layerHealthOn ? "ON" : "OFF")]
+                </button>
+                <button type="button" class="tg-toggle" disabled="@_briefingPdfBusy"
+                        title="Download this view as a PDF: a satellite map, every layer that's on and what it shows, and the Brief me facts if gathered" @onclick="DownloadBriefingPdfAsync">
+                    @(_briefingPdfBusy ? "MAKING PDF..." : "BRIEFING PDF")
                 </button>
             </div>
             @if (_layerHealthOn)
@@ -4150,6 +4155,45 @@
         {
             Logger.LogWarning(ex, "Overwatch airport status layer failed"); NoteLayerProblem("airport status", ex);
             _airportSummary = "Airport status couldn't be shown just now.";
+        }
+    }
+
+    // ---- Briefing PDF (13-11-26): the view, the layers that are on, the Brief me facts. ----
+    private bool _briefingPdfBusy;
+
+    private IReadOnlyList<(string Layer, string Shows)> LayersShown() =>
+        new (bool On, string Layer, string? Shows)[]
+        {
+            (_radarOn, "Radar", "precipitation radar"), (_alertsOn, "Weather alerts", "NWS alerts"),
+            (_incidentsOn, "Traffic incidents", null), (_worldNewsOn, "World News", null),
+            (_convergenceOn, "Convergence", _convergenceSummary), (_conflictOn, "Conflict", _conflictSummary),
+            (_travelOn, "Travel advice", _travelSummary), (_humanitarianOn, "Humanitarian", _humanitarianSummary),
+            (_hazardsOn, "Hazards", _hazardSummary), (_outagesOn, "Power outages", _outageSummary),
+            (_internetOn, "Internet outages", _internetSummary), (_firesOn, "Fire hotspots", _fireSummary),
+            (_nightLightsOn, "Night lights", _nightLightsLabel), (_aircraftOn, "Aircraft", _aircraftSummary),
+            (_airQualityOn, "Air quality", _airQualitySummary), (_airportsOn, "Airports", _airportSummary),
+            (_auroraOn, "Aurora", _auroraSummary), (_satellitesOn, "Satellites", _satelliteSummary),
+            (_shipsOn, "Ships", _shipSummary), (_chokepointsOn, "Chokepoints", _chokepointSummary),
+        }
+        .Where(layer => layer.On)
+        .Select(layer => (layer.Layer, string.IsNullOrWhiteSpace(layer.Shows) ? "on" : layer.Shows!))
+        .ToList();
+
+    private async Task DownloadBriefingPdfAsync()
+    {
+        _briefingPdfBusy = true;
+        try
+        {
+            var bytes = await ViewBriefingPdf.BuildAsync(_lastBbox, _username, LayersShown(), _briefFacts, _briefText, DateTimeOffset.Now);
+            await JS.InvokeVoidAsync("gwsDownload.bytes", $"overwatch-briefing-{DateTime.Now:yyyy-MM-dd-HHmm}.pdf", Convert.ToBase64String(bytes), "application/pdf");
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException and not JSDisconnectedException)
+        {
+            Logger.LogWarning(ex, "Overwatch briefing PDF failed");
+        }
+        finally
+        {
+            _briefingPdfBusy = false;
         }
     }
 

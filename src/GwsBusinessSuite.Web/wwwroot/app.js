@@ -1103,6 +1103,19 @@
 			link.remove();
 			window.setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
 		},
+		// Bytes made in the circuit (Overwatch's briefing PDF), passed as base64.
+		bytes: function (filename, base64, type) {
+			var raw = atob(base64), data = new Uint8Array(raw.length);
+			for (var i = 0; i < raw.length; i++) data[i] = raw.charCodeAt(i);
+			var url = URL.createObjectURL(new Blob([data], { type: type || 'application/octet-stream' }));
+			var link = document.createElement('a');
+			link.href = url;
+			link.download = filename;
+			document.body.appendChild(link);
+			link.click();
+			link.remove();
+			window.setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+		},
 		// A file the server makes (an invoice PDF): a download link Blazor's navigation leaves alone.
 		url: function (url) {
 			var link = document.createElement('a');

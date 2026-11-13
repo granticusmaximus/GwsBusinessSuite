@@ -1105,6 +1105,8 @@ public static class DependencyInjection
         }).AddHttpMessageHandler<RefusedHostPauseHandler>();
         services.AddScoped<SignalConvergenceService>();
         // FAA airport status and NOAA SWPC aurora/Kp for the AIR and SPACE groups (05-11-26), key-less.
+        // Overwatch briefing PDF (13-11-26): Esri map export of the view.
+        services.AddHttpClient<OverwatchViewBriefingPdf>(client => client.Timeout = TimeSpan.FromSeconds(30));
         // Satellite scenes on click (Planetary Computer, key-less), 13-11-26.
         services.AddHttpClient<GwsBusinessSuite.Application.Overwatch.SatelliteSceneService>(client =>
         {
