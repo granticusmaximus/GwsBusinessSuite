@@ -480,6 +480,31 @@ public sealed class OverwatchGridScriptBrowserTestsB(PlaywrightBrowserFixture fi
         consoleErrors.Should().BeEmpty();
     }
 
+    // Camera pins by difference (13-11-26): only changes cross the network, the globe keeps the set.
+    [Fact]
+    public async Task CameraPins_ShouldMergeDifferences_AndHandTheWholeSetToTheMap()
+    {
+        var (page, consoleErrors) = await OpenHarnessAsync(fixture.Browser, macApp: true);
+        await using var pageScope = page;
+        (await InitAsync(page)).Should().BeNull();
+        await page.EvaluateAsync("() => { window.__nativeMessages = []; }");
+
+        var counts = await page.EvaluateAsync<int[]>("""
+            () => {
+                const pin = (id) => ({ id, name: id, lat: 33.7, lon: -84.4, streamUrl: 'https://x/' + id, streamKind: 'Snapshot', sourceName: 's', health: 'Unknown' });
+                const sent = () => window.__nativeMessages.filter(m => m.operation === 'setCameraPins');
+                window.tacticalGlobe.updateCameraPins([pin('a'), pin('b')], []);
+                window.tacticalGlobe.updateCameraPins([pin('c')], ['a']);
+                window.tacticalGlobe.resetCameraPins();
+                window.tacticalGlobe.updateCameraPins([pin('d')], []);
+                return sent().map(m => Array.from(Object.values(m.arguments)).find(Array.isArray).length);
+            }
+            """);
+
+        counts.Should().Equal([2, 2, 1], "a+b, then b+c, then only d after a reset");
+        consoleErrors.Should().BeEmpty();
+    }
+
     [Fact]
     public async Task DriveMode_ShouldReportGpsFixesToThePage_UntilStopped()
     {

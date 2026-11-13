@@ -1780,6 +1780,32 @@
 
     // Shared by the bbox pin push, the favorites panel's "GO" action, and shareable view links -
     // one camera-identity/payload shape used everywhere a camera crosses the JS interop boundary.
+    // Camera pins by difference (13-11-26): what was last sent, by id, with a signature of the
+    // fields that can change (health, favourite, stream); only additions, changes and removals go.
+    private readonly Dictionary<string, int> _sentPins = new(StringComparer.Ordinal);
+
+    private async Task SendCameraPinsAsync()
+    {
+        var now = _visibleCameras.ToDictionary(camera => camera.Id, camera => camera, StringComparer.Ordinal);
+        int Signature(CameraFeed camera) => HashCode.Combine(camera.Name, camera.StreamUrl, camera.Latitude, camera.Longitude,
+            _favoriteCameraIds.Contains(camera.Id), CameraHealthService.GetKnown(camera.Id)?.Status);
+        var added = now.Values.Where(camera => !_sentPins.TryGetValue(camera.Id, out var sent) || sent != Signature(camera)).ToList();
+        var removed = _sentPins.Keys.Where(id => !now.ContainsKey(id)).ToList();
+        try
+        {
+            await JS.InvokeVoidAsync("tacticalGlobe.updateCameraPins", added.Select(ToPinPayload).ToList(), removed);
+            foreach (var id in removed) _sentPins.Remove(id);
+            foreach (var camera in added) _sentPins[camera.Id] = Signature(camera);
+        }
+        catch (Exception ex) when (ex is not JSDisconnectedException and not OperationCanceledException)
+        {
+            // Out of step: start again with a full send next time.
+            _sentPins.Clear();
+            try { await JS.InvokeVoidAsync("tacticalGlobe.resetCameraPins"); } catch (JSException) { }
+            throw;
+        }
+    }
+
     private object ToPinPayload(CameraFeed camera) => new
     {
         id = camera.Id,
@@ -1950,7 +1976,7 @@
                 // information that should reappear whenever it becomes true again.
                 if (_visibleCameras.Count > 0) _emptyHintDismissed = false;
                 StateHasChanged();
-                await JS.InvokeVoidAsync("tacticalGlobe.setCameraPins", _visibleCameras.Select(ToPinPayload).ToList());
+                await SendCameraPinsAsync();
             }),
             _alertsOn ? TimedAsync("alerts", async () =>
             {

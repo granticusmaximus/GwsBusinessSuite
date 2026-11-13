@@ -1141,6 +1141,22 @@ window.tacticalGlobe = (function () {
         return el;
     }
 
+    // Camera pins by difference (13-11-26): the server sends only the pins added or changed and the
+    // ids removed since its last send; this keeps the full set and draws it through setCameraPins
+    // (looked up at call time, so the Mac app's adapter gets the whole list locally). A pan used to
+    // resend every pin in view (measured ~480 KB a pan).
+    const cameraPinSets = new Map();
+
+    function updateCameraPins(added, removedIds) {
+        let pins = cameraPinSets.get('tg-viewport');
+        if (!pins) { pins = new Map(); cameraPinSets.set('tg-viewport', pins); }
+        (removedIds || []).forEach(function (id) { pins.delete(id); });
+        (added || []).forEach(function (pin) { pins.set(pin.id, pin); });
+        return window.tacticalGlobe.setCameraPins(Array.from(pins.values()));
+    }
+
+    function resetCameraPins() { cameraPinSets.delete('tg-viewport'); }
+
     function setCameraPins(containerIdOrPins, maybePins) {
         // Supports being called as setCameraPins(pins) for the single-globe case this page
         // actually uses today, or setCameraPins(containerId, pins) if a future page ever hosts
@@ -4720,6 +4736,8 @@ window.tacticalGlobe = (function () {
         setMeasure: setMeasure,
         clearMeasure: clearMeasure,
         setCameraPins: setCameraPins,
+        updateCameraPins: updateCameraPins,
+        resetCameraPins: resetCameraPins,
         setSelectModeEnabled: setSelectModeEnabled,
         openWatchWall: openWatchWall,
         openWatchWallWithCameras: openWatchWallWithCameras,
