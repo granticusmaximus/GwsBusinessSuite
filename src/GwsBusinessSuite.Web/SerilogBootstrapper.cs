@@ -28,7 +28,7 @@ public static class SerilogBootstrapper
             .WriteTo.File(
                 logFilePath,
                 rollingInterval: RollingInterval.Day,
-                retainedFileCountLimit: 14,
+                retainedFileCountLimit: 7,
                 fileSizeLimitBytes: 50_000_000,
                 rollOnFileSizeLimit: true,
                 outputTemplate:
@@ -40,7 +40,7 @@ public static class SerilogBootstrapper
                 new RenderedCompactJsonFormatter(),
                 JsonLogPath(logFilePath),
                 rollingInterval: RollingInterval.Day,
-                retainedFileCountLimit: 14,
+                retainedFileCountLimit: 7,
                 fileSizeLimitBytes: 50_000_000,
                 rollOnFileSizeLimit: true)
             // Warnings and errors, grouped into issues for /admin/logs.

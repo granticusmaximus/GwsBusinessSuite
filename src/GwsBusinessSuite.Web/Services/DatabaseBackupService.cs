@@ -28,7 +28,10 @@ public sealed class DatabaseBackupOptions
     // Media library files (originals and thumbnails; resized copies are rebuilt on demand).
     public string MediaPath { get; set; } = "/app/data/media";
     public int IntervalHours { get; set; } = 6;
+    // Newest backup of each day is kept this many days, then the newest of each week up to
+    // WeeklyRetentionDays (BackupThinning); everything from the last two days is always kept.
     public int RetentionDays { get; set; } = 30;
+    public int WeeklyRetentionDays { get; set; } = 90;
 
     // Offsite copy - deliberately generic (any SFTP-reachable host: a second droplet, a NAS,
     // a Hetzner/rsync.net storage box) rather than one specific cloud vendor's SDK, so it
@@ -142,13 +145,14 @@ public sealed class DatabaseBackupService(
 
     private void PruneExpiredBackups()
     {
-        var cutoff = DateTimeOffset.UtcNow.AddDays(-Math.Max(1, _options.RetentionDays));
-        foreach (var file in Directory.EnumerateFiles(_options.Path, $"gws-backup-*{ArchiveExtension}"))
+        var backups = Directory.EnumerateFiles(_options.Path, $"gws-backup-*{ArchiveExtension}")
+            .Concat(Directory.EnumerateFiles(_options.Path, "sentinel-backup-*.zip"))
+            .Select(file => (file, new DateTimeOffset(File.GetLastWriteTimeUtc(file), TimeSpan.Zero)));
+        var daily = Math.Max(2, _options.RetentionDays);
+        foreach (var file in BackupThinning.ToDelete(backups, DateTimeOffset.UtcNow, daily, Math.Max(daily, _options.WeeklyRetentionDays)))
         {
-            if (File.GetLastWriteTimeUtc(file) < cutoff.UtcDateTime)
-            {
-                File.Delete(file);
-            }
+            try { File.Delete(file); }
+            catch (IOException ex) { logger.LogWarning(ex, "Couldn't delete old backup {File}", Path.GetFileName(file)); }
         }
     }
 
