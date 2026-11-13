@@ -100,7 +100,7 @@ public sealed class SentinelWebClipTests
             "article", Source.AbsoluteUri, null, ArticleHtml, "Worth reading", "page", ["research", "#client/acme", "bad tag!"]));
 
         var page = await db.WikiPages.SingleAsync(p => p.Id == result.PageId);
-        var folder = await db.WikiPages.SingleAsync(p => p.SystemKey == SentinelWebClips.FolderSystemKey);
+        var folder = await db.WikiPages.SingleAsync(p => p.SystemKey == SentinelWebClips.FolderSystemKey + ":grant");
         page.ParentWikiPageId.Should().Be(folder.Id);
         page.Title.Should().Be("How we ship");
         var blocks = WikiBlockJson.ParseBlocks(page.BlocksJson);
@@ -143,33 +143,24 @@ public sealed class SentinelWebClipTests
             .Should().ThrowAsync<SentinelClipException>();
     }
 
+    // Private Sentinel (12-11-26): everyone clips into their own Web Clips folder; nobody needs an
+    // Admin to create one first, and nobody sees anyone else's clips.
     [Fact]
-    public async Task Clip_ShouldNeedEditOnWebClips_ForANonAdmin()
-    {
-        var (_, service) = await CreateAsync();
-        var request = new SentinelClipRequest("link", Source.AbsoluteUri, "Link", null, null, "page", null);
-
-        // Only an admin creates the folder.
-        await service.Invoking(s => s.ClipAsync("sam", request)).Should().ThrowAsync<SentinelClipException>().WithMessage("*admin*");
-        var adminClip = await service.ClipAsync("grant", request);
-        // Then a member needs Edit on it.
-        await service.Invoking(s => s.ClipAsync("sam", request)).Should().ThrowAsync<SentinelClipException>().WithMessage("*edit access*");
-
-        adminClip.PageId.Should().NotBeEmpty();
-    }
-
-    [Fact]
-    public async Task Clip_ShouldWorkForAMemberWithEditOnWebClips()
+    public async Task Clip_ShouldGoToEachPersonsOwnWebClipsFolder()
     {
         var (db, service) = await CreateAsync();
         var request = new SentinelClipRequest("link", Source.AbsoluteUri, "Link", null, null, "page", null);
-        await service.ClipAsync("grant", request);
-        var folder = await db.WikiPages.SingleAsync(p => p.SystemKey == SentinelWebClips.FolderSystemKey);
-        await new SentinelAccessService(db).SetPermissionAsync(folder.Id, false, "sam", SentinelAccessLevels.Edit, "grant");
 
-        var clip = await service.ClipAsync("sam", request);
+        var samClip = await service.ClipAsync("sam", request);
+        var grantClip = await service.ClipAsync("grant", request);
 
-        (await db.WikiPages.SingleAsync(p => p.Id == clip.PageId)).ParentWikiPageId.Should().Be(folder.Id);
+        var samFolder = await db.WikiPages.SingleAsync(p => p.SystemKey == SentinelWebClips.FolderSystemKey + ":sam");
+        var grantFolder = await db.WikiPages.SingleAsync(p => p.SystemKey == SentinelWebClips.FolderSystemKey + ":grant");
+        (await db.WikiPages.SingleAsync(p => p.Id == samClip.PageId)).ParentWikiPageId.Should().Be(samFolder.Id);
+        (await db.WikiPages.SingleAsync(p => p.Id == grantClip.PageId)).ParentWikiPageId.Should().Be(grantFolder.Id);
+        var access = new SentinelAccessService(db);
+        (await access.CanAccessAsync(samClip.PageId, false, "grant", SentinelAccessLevels.View)).Should().BeFalse("an Admin doesn't see Sam's clips");
+        (await access.CanAccessAsync(samClip.PageId, false, "sam", SentinelAccessLevels.View)).Should().BeTrue();
     }
 
     private static async Task<(ApplicationDbContext Db, SentinelWebClipService Service)> CreateAsync()

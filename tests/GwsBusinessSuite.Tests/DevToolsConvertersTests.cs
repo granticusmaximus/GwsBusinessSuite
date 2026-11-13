@@ -5,26 +5,6 @@ namespace GwsBusinessSuite.Tests;
 
 public sealed class DevToolsConvertersTests
 {
-    [Theory]
-    [InlineData("255", 10, 16, "FF")]
-    [InlineData("FF", 16, 10, "255")]
-    [InlineData("1010", 2, 10, "10")]
-    [InlineData("10", 10, 2, "1010")]
-    [InlineData("17", 10, 8, "21")]
-    public void ConvertNumberBase_ShouldConvertBetweenBases(string input, int fromBase, int toBase, string expected)
-    {
-        var result = DevToolsConverters.ConvertNumberBase(input, fromBase, toBase);
-
-        result.Success.Should().BeTrue();
-        result.Output.Should().Be(expected);
-    }
-
-    [Fact]
-    public void ConvertNumberBase_ShouldFailCleanlyForAnInvalidDigitInTheSourceBase()
-    {
-        DevToolsConverters.ConvertNumberBase("XYZ", 16, 10).Success.Should().BeFalse();
-    }
-
     [Fact]
     public void UnixTimestamp_ShouldRoundTripThroughDateTime()
     {

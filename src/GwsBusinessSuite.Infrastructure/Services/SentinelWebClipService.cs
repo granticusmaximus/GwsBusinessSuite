@@ -154,15 +154,13 @@ public sealed class SentinelWebClipService(
         return markdown.ToString().TrimEnd();
     }
 
-    // Found by SystemKey, like the Quick Notes folder. Only an Admin creates it; after that,
-    // clipping into it needs Edit there, like any other page in Sentinel.
+    // Each person's own Web Clips folder (private Sentinel, 12-11-26), found by their SystemKey
+    // like the Quick Notes folder. Before, one Admin-made folder held everyone's clips.
     private async Task<WikiPage> EnsureFolderAsync(string username, CancellationToken cancellationToken)
     {
-        var folder = await db.WikiPages.FirstOrDefaultAsync(page => page.SystemKey == SentinelWebClips.FolderSystemKey, cancellationToken);
+        var folder = await SentinelPersonalPages.FindAsync(db, SentinelWebClips.FolderSystemKey, username, cancellationToken);
         if (folder is null)
         {
-            if (!await IsAdminAsync(username, cancellationToken))
-                throw new SentinelClipException("There's no Web Clips folder yet - an admin's first clip creates it.");
             var created = await wikiService.SavePageAsync(new WikiPageEditorModel
             {
                 Title = "Web Clips",
@@ -175,7 +173,7 @@ public sealed class SentinelWebClipService(
                 ])
             }, username, cancellationToken: cancellationToken);
             folder = await db.WikiPages.FirstAsync(page => page.Id == created.Id, cancellationToken);
-            folder.SystemKey = SentinelWebClips.FolderSystemKey;
+            folder.SystemKey = SentinelPersonalPages.KeyFor(SentinelWebClips.FolderSystemKey, username);
             await db.SaveChangesAsync(cancellationToken);
             return folder;
         }
@@ -188,11 +186,8 @@ public sealed class SentinelWebClipService(
     private async Task RequireEditAsync(Guid pageId, string username, string what, CancellationToken cancellationToken)
     {
         if (!await accessService.CanAccessAsync(pageId, false, username, SentinelAccessLevels.Edit, cancellationToken))
-            throw new SentinelClipException($"You don't have edit access to {what} - ask an admin to share it with you.");
+            throw new SentinelClipException($"You don't have edit access to {what} - ask its owner to share it with you.");
     }
-
-    private Task<bool> IsAdminAsync(string username, CancellationToken cancellationToken) =>
-        db.AppUsers.AnyAsync(user => user.Username == username && user.Role == AppRoles.Admin, cancellationToken);
 
     private static string Hash(string token) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(token)));
 

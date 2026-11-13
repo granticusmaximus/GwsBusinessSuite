@@ -1512,17 +1512,14 @@
               OnConfirm="ConfirmDeleteSelectedTrashItemsAsync" OnCancel="CancelPermanentDelete" />
 
 @code {
-    // This route was Admin-only until per-resource Sentinel sharing (SentinelAccessService)
-    // needed somewhere for Author/Contributor accounts to actually apply - see
-    // OpenPageAsync/SavePageAsync/OpenDatabaseAsync for the per-resource checks that gate what
-    // a non-Admin can view/edit now that the route itself admits them. Admins keep unrestricted
-    // access, matching every other admin-gated page in this app - they are not subject to
-    // SentinelResourcePermission grants.
+    // Private Sentinel (12-11-26): everyone, Admins included, sees only what they own or what was
+    // shared with them (SentinelAccessService). Before that, Admins saw every page. _isAdmin is
+    // kept only for Admin tools (Email in), never for reading content.
     [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
-    private bool _isAdmin = true;
+    private bool _isAdmin;
 
     private async Task<bool> CanAccessPageOrDatabaseAsync(Guid targetId, bool isDatabase, string requiredLevel) =>
-        _isAdmin || await SentinelAccessService.CanAccessAsync(targetId, isDatabase, CurrentUsername, requiredLevel);
+        await SentinelAccessService.CanAccessAsync(targetId, isDatabase, CurrentUsername, requiredLevel);
 
     private List<WikiPage> WikiPages { get; set; } = new();
     private List<WikiDatabase> WikiDatabases { get; set; } = new();
@@ -3637,7 +3634,6 @@
             WikiDatabases = (await WikiDatabaseService.ListDatabasesAsync()).ToList();
             TrashedPages = (await WikiService.ListTrashedPagesAsync()).ToList();
             TrashedDatabases = (await WikiDatabaseService.ListTrashedDatabasesAsync()).ToList();
-            if (!_isAdmin)
             {
                 var visibleTargets = await SentinelAccessService.GetAccessibleTargetsAsync(
                     WikiPages.Select(page => new SentinelAccessTarget(page.Id, IsDatabase: false))
@@ -4850,10 +4846,16 @@
         public bool IsArchived => NotionArchivedAt.HasValue;
     }
 
-    private List<WikiTreeNode> AllTreeNodes() =>
-        WikiPages.Select(p => new WikiTreeNode(p.Id, p.Title, p.Icon, p.ParentWikiPageId, p.SortOrder, false, p.NotionId, p.NotionArchivedAt))
-            .Concat(WikiDatabases.Select(d => new WikiTreeNode(d.Id, d.Title, d.Icon, d.ParentWikiPageId, d.SortOrder, true, d.NotionId, d.NotionArchivedAt)))
+    // A page shared with you whose parent you can't see sits at the top of your tree (private
+    // Sentinel, 12-11-26); otherwise it would hang off a hidden parent and never show.
+    private List<WikiTreeNode> AllTreeNodes()
+    {
+        var visible = WikiPages.Select(p => p.Id).ToHashSet();
+        Guid? VisibleParent(Guid? parent) => parent is { } id && visible.Contains(id) ? id : null;
+        return WikiPages.Select(p => new WikiTreeNode(p.Id, p.Title, p.Icon, VisibleParent(p.ParentWikiPageId), p.SortOrder, false, p.NotionId, p.NotionArchivedAt))
+            .Concat(WikiDatabases.Select(d => new WikiTreeNode(d.Id, d.Title, d.Icon, VisibleParent(d.ParentWikiPageId), d.SortOrder, true, d.NotionId, d.NotionArchivedAt)))
             .ToList();
+    }
 
     // Recursive depth-first flatten via ToLookup(ParentId), rendered as an indented flat
     // list with expand/collapse rather than a nested component - mirrors Pages.razor's

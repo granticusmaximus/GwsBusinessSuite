@@ -2,31 +2,6 @@ namespace GwsBusinessSuite.Application.DevTools;
 
 public static class DevToolsConverters
 {
-    public static DevToolsResult ConvertNumberBase(string input, int fromBase, int toBase)
-    {
-        long value;
-        try
-        {
-            value = fromBase == 10 ? long.Parse(input.Trim()) : Convert.ToInt64(input.Trim(), fromBase);
-        }
-        catch (FormatException)
-        {
-            return DevToolsResult.Fail($"'{input}' isn't a valid base-{fromBase} number.");
-        }
-        catch (OverflowException)
-        {
-            return DevToolsResult.Fail("That number is too large to convert (max 64-bit signed).");
-        }
-
-        var output = toBase switch
-        {
-            10 => value.ToString(),
-            16 => Convert.ToString(value, 16).ToUpperInvariant(),
-            _ => Convert.ToString(value, toBase)
-        };
-        return DevToolsResult.Ok(output);
-    }
-
     public static DevToolsResult UnixTimestampToDateTime(long unixSeconds)
     {
         try

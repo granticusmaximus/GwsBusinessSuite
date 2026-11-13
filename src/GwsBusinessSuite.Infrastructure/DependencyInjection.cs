@@ -1326,7 +1326,8 @@ public static class DependencyInjection
         if (serverAiMode != ServerAiMode.None)
             services.AddHostedService<SemanticIndexBackgroundService>();
         services.AddScoped<ISentinelCollaborationService, SentinelCollaborationService>();
-        services.AddScoped<ISentinelAccessService, SentinelAccessService>();
+        // Sentinel:SystemOwner owns what the app or a sync made (private Sentinel, 12-11-26).
+        services.AddScoped<ISentinelAccessService>(sp => new SentinelAccessService(sp.GetRequiredService<IAppDbContext>(), configuration["Sentinel:SystemOwner"]));
         services.AddScoped<ISentinelPageVerificationService, SentinelPageVerificationService>();
         services.AddScoped<ISentinelDatabaseRuleService, SentinelDatabaseRuleService>();
         services.AddScoped<ISentinelReminderService, SentinelReminderService>();

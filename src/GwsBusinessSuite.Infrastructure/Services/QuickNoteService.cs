@@ -38,8 +38,7 @@ public sealed class QuickNoteService(IAppDbContext db, IWikiService wikiService)
     // calls the way a stable key can.
     private async Task<WikiPage> EnsureQuickNotesFolderAsync(string performedBy, CancellationToken cancellationToken)
     {
-        var existing = await db.WikiPages.FirstOrDefaultAsync(
-            page => page.SystemKey == QuickNotesFolderSystemKey, cancellationToken);
+        var existing = await SentinelPersonalPages.FindAsync(db, QuickNotesFolderSystemKey, performedBy, cancellationToken);
         if (existing is not null)
         {
             if (existing.TrashedAt is not null)
@@ -63,7 +62,7 @@ public sealed class QuickNoteService(IAppDbContext db, IWikiService wikiService)
         }, performedBy, cancellationToken: cancellationToken);
 
         var folder = await db.WikiPages.FirstAsync(page => page.Id == created.Id, cancellationToken);
-        folder.SystemKey = QuickNotesFolderSystemKey;
+        folder.SystemKey = SentinelPersonalPages.KeyFor(QuickNotesFolderSystemKey, performedBy);
         await db.SaveChangesAsync(cancellationToken);
         return folder;
     }

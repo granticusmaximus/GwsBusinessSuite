@@ -8,6 +8,10 @@
 @inject ISentinelPublishedSiteService PublishedSiteService
 @inject GwsBusinessSuite.Application.Community.ICommunityDirectoryService CommunityDirectory
 
+@* Only someone with Full access (the owner, or whoever they gave it to) manages sharing (private
+   Sentinel, 12-11-26). Before, anyone who could view a page could share it on or make a public link. *@
+@if (_canManage)
+{
 <div class="sentinel-share-panel">
     <button type="button" class="btn btn-sm sentinel-tool-btn sentinel-tool-btn-label" @onclick="ToggleAsync" title="Share this page">
         <i class="bi bi-share"></i><span>Share</span>
@@ -131,6 +135,8 @@
     }
 </div>
 
+}
+
 @code {
     [Parameter, EditorRequired] public Guid TargetId { get; set; }
     [Parameter] public bool IsDatabase { get; set; }
@@ -162,8 +168,24 @@
     private string _departmentAccessLevel = SentinelAccessLevels.View;
     private string _error = string.Empty;
 
+    private bool _canManage;
+    private Guid? _checkedTarget;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_checkedTarget == TargetId) return;
+        _checkedTarget = TargetId;
+        _open = false;
+        _canManage = await CanManageAsync();
+    }
+
+    // Checked again before every change, not just when the panel appears.
+    private async Task<bool> CanManageAsync() =>
+        await AccessService.CanAccessAsync(TargetId, IsDatabase, await CurrentUserAccessor.GetCurrentUsernameAsync(), SentinelAccessLevels.FullAccess);
+
     private async Task ToggleAsync()
     {
+        if (!await CanManageAsync()) { _canManage = false; _open = false; return; }
         _open = !_open;
         if (_open)
         {
@@ -175,6 +197,7 @@
     // Every member of the department (primary or additional membership) gets this access.
     private async Task SaveDepartmentPermissionAsync()
     {
+        if (!await CanManageAsync()) return;
         if (!Guid.TryParse(_departmentId, out var departmentId)) return;
         _error = string.Empty;
         try
@@ -195,6 +218,7 @@
 
     private async Task SavePermissionAsync()
     {
+        if (!await CanManageAsync()) return;
         await AccessService.SetPermissionAsync(TargetId, IsDatabase, _username, _accessLevel,
             await CurrentUserAccessor.GetCurrentUsernameAsync());
         _username = string.Empty;
@@ -203,12 +227,14 @@
 
     private async Task RemovePermissionAsync(Guid id)
     {
+        if (!await CanManageAsync()) return;
         await AccessService.RemovePermissionAsync(id, await CurrentUserAccessor.GetCurrentUsernameAsync());
         await LoadAsync();
     }
 
     private async Task CreateShareAsync()
     {
+        if (!await CanManageAsync()) return;
         var expiresAt = _shareExpiresAt is { } parsed ? new DateTimeOffset(parsed) : (DateTimeOffset?)null;
         var password = string.IsNullOrWhiteSpace(_sharePassword) ? null : _sharePassword;
         var share = await AccessService.CreatePublicShareAsync(TargetId, IsDatabase, expiresAt, _allowSearchIndexing, password,
@@ -224,6 +250,7 @@
 
     private async Task RevokeShareAsync(Guid id)
     {
+        if (!await CanManageAsync()) return;
         await AccessService.RevokePublicShareAsync(id, await CurrentUserAccessor.GetCurrentUsernameAsync());
         await LoadAsync();
     }

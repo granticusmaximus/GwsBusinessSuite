@@ -18,7 +18,7 @@ public sealed class QuickNoteServiceTests
         var second = await fixture.Service.AddQuickNoteAsync("Second idea", "More body text", "owner");
 
         var folders = await fixture.Db.WikiPages
-            .Where(page => page.SystemKey == QuickNoteService.QuickNotesFolderSystemKey)
+            .Where(page => page.SystemKey == QuickNoteService.QuickNotesFolderSystemKey + ":owner")
             .ToListAsync();
         folders.Should().ContainSingle();
         var folder = folders[0];
@@ -79,7 +79,7 @@ public sealed class QuickNoteServiceTests
         var second = await fixture.Service.AddQuickNoteAsync("Second idea", "Body two", "owner");
 
         var folder = await fixture.Db.WikiPages
-            .SingleAsync(page => page.SystemKey == QuickNoteService.QuickNotesFolderSystemKey);
+            .SingleAsync(page => page.SystemKey == QuickNoteService.QuickNotesFolderSystemKey + ":owner");
         var indexBlocks = WikiBlockJson.ParseBlocks(folder.BlocksJson);
 
         indexBlocks.Should().HaveCount(2);

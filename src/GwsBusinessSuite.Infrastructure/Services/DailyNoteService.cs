@@ -10,7 +10,7 @@ public sealed class DailyNoteService(IAppDbContext db, IWikiService wikiService,
     public async Task<WikiPage> OpenOrCreateAsync(DateOnly date, string performedBy, CancellationToken cancellationToken = default)
     {
         var key = DailyNotes.SystemKeyFor(date);
-        var existing = await db.WikiPages.FirstOrDefaultAsync(page => page.SystemKey == key, cancellationToken);
+        var existing = await SentinelPersonalPages.FindAsync(db, key, performedBy, cancellationToken);
         if (existing is not null)
         {
             if (existing.TrashedAt is not null)
@@ -39,7 +39,7 @@ public sealed class DailyNoteService(IAppDbContext db, IWikiService wikiService,
         }, performedBy, cancellationToken: cancellationToken);
 
         var page = await db.WikiPages.FirstAsync(item => item.Id == created.Id, cancellationToken);
-        page.SystemKey = key;
+        page.SystemKey = SentinelPersonalPages.KeyFor(key, performedBy);
         await db.SaveChangesAsync(cancellationToken);
         return page;
     }
@@ -78,7 +78,7 @@ public sealed class DailyNoteService(IAppDbContext db, IWikiService wikiService,
     // Found by SystemKey, like QuickNoteService's folder.
     private async Task<WikiPage> EnsureFolderAsync(string performedBy, CancellationToken cancellationToken)
     {
-        var existing = await db.WikiPages.FirstOrDefaultAsync(page => page.SystemKey == DailyNotes.FolderSystemKey, cancellationToken);
+        var existing = await SentinelPersonalPages.FindAsync(db, DailyNotes.FolderSystemKey, performedBy, cancellationToken);
         if (existing is not null)
         {
             if (existing.TrashedAt is not null)
@@ -102,7 +102,7 @@ public sealed class DailyNoteService(IAppDbContext db, IWikiService wikiService,
         }, performedBy, cancellationToken: cancellationToken);
 
         var folder = await db.WikiPages.FirstAsync(page => page.Id == created.Id, cancellationToken);
-        folder.SystemKey = DailyNotes.FolderSystemKey;
+        folder.SystemKey = SentinelPersonalPages.KeyFor(DailyNotes.FolderSystemKey, performedBy);
         await db.SaveChangesAsync(cancellationToken);
         return folder;
     }

@@ -4,6 +4,7 @@
 @using GwsBusinessSuite.Application.Automation
 @inject IWikiDatabaseService WikiDatabaseService
 @inject ISentinelWorkspaceService SentinelWorkspaceService
+@inject ISentinelAccessService SentinelAccessService
 @inject IWikiDatabaseRecurrenceService WikiDatabaseRecurrenceService
 @inject ICurrentUserAccessor CurrentUserAccessor
 @inject IAutomationWorkflowService AutomationWorkflowService
@@ -1869,7 +1870,14 @@ else
         try
         {
             Database = await WikiDatabaseService.GetDatabaseAsync(WikiDatabaseId);
-            _databaseChoices = (await WikiDatabaseService.ListDatabasesAsync()).OrderBy(database => database.Title).ToList();
+            // Only databases this person can see (private Sentinel, 12-11-26): the relation picker
+            // listed every database's title.
+            var allDatabases = await WikiDatabaseService.ListDatabasesAsync();
+            var visibleDatabases = await SentinelAccessService.GetAccessibleTargetsAsync(
+                allDatabases.Select(database => new SentinelAccessTarget(database.Id, IsDatabase: true)).ToList(),
+                await CurrentUserNameAsync(), SentinelAccessLevels.View);
+            _databaseChoices = allDatabases.Where(database => visibleDatabases.Contains(new SentinelAccessTarget(database.Id, IsDatabase: true)))
+                .OrderBy(database => database.Title).ToList();
             _workflowChoices = (await AutomationWorkflowService.ListAsync()).OrderBy(workflow => workflow.Name).ToList();
             _usernames = await SentinelWorkspaceService.ListActiveUsernamesAsync();
             if (Database is not null)

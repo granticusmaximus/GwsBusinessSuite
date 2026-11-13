@@ -1,0 +1,227 @@
+@using System.Numerics
+@using GwsBusinessSuite.Application.DevTools
+@inject IJSRuntime JS
+
+@* Number & Binary Converter (Dev Tools, 12-11-26): every base at once, two's complement, text to
+   and from bytes, and a calculator with bitwise operators. The maths is DevToolsBaseConverter. *@
+
+<div class="devtools-tool devtools-number">
+    <h2 class="h5">Number &amp; Binary Converter</h2>
+    <div class="devtools-number-tabs" role="tablist" aria-label="Converter mode">
+        @foreach (var (key, label) in Modes)
+        {
+            <button type="button" role="tab" class="btn btn-sm @(_mode == key ? "btn-primary" : "btn-outline-secondary")"
+                    aria-selected="@(_mode == key ? "true" : "false")" @onclick="() => _mode = key">@label</button>
+        }
+    </div>
+
+    @switch (_mode)
+    {
+        case "number":
+            <div class="devtools-number-row">
+                <div class="devtools-number-grow">
+                    <label class="form-label small fw-semibold" for="dn-value">Number</label>
+                    <input id="dn-value" class="form-control font-monospace" @bind="_value" @bind:event="oninput" @bind:after="Convert"
+                           placeholder="255, 0xFF, 1111_1111, -42" autocomplete="off" spellcheck="false" />
+                </div>
+                <div>
+                    <label class="form-label small fw-semibold" for="dn-base">Typed in</label>
+                    <select id="dn-base" class="form-select" @bind="_inputBase" @bind:after="Convert">
+                        @foreach (var b in BaseChoices) { <option value="@b">@BaseName(b)</option> }
+                    </select>
+                </div>
+            </div>
+            @if (_error.Length > 0) { <div class="alert alert-danger py-1 px-2 small mt-2" role="alert">@_error</div> }
+            @if (_views is { } v)
+            {
+                <dl class="devtools-number-results">
+                    @Result("Binary (2)", DevToolsBaseConverter.Group(v.Binary, 4))
+                    @Result("Octal (8)", v.Octal)
+                    @Result("Decimal (10)", DevToolsBaseConverter.Group(v.Decimal, 3, ','))
+                    @Result("Hexadecimal (16)", DevToolsBaseConverter.Group(v.Hex, 2))
+                    <div class="devtools-number-result">
+                        <dt>
+                            Base
+                            <input type="number" class="form-control form-control-sm devtools-number-custom" min="2" max="36" aria-label="Custom base"
+                                   @bind="_customBase" @bind:event="oninput" @bind:after="Convert" />
+                        </dt>
+                        <dd><code>@v.Custom</code> <button type="button" class="btn btn-sm btn-link p-0" @onclick="() => CopyAsync(v.Custom)">Copy</button></dd>
+                    </div>
+                </dl>
+                <p class="small text-secondary mb-2">@v.BitLength.ToString("N0") bit@(v.BitLength == 1 ? "" : "s") needed@(v.Value.Sign < 0 ? " (magnitude)" : "").</p>
+                <div class="devtools-number-row align-items-center">
+                    <label class="form-label small fw-semibold mb-0" for="dn-width">As a fixed-width register</label>
+                    <select id="dn-width" class="form-select form-select-sm devtools-number-width" @bind="_width" @bind:after="Convert">
+                        @foreach (var bits in new[] { 8, 16, 32, 64, 128 }) { <option value="@bits">@bits-bit</option> }
+                    </select>
+                </div>
+                @if (_register is { } r)
+                {
+                    <dl class="devtools-number-results">
+                        @Result("Bits", DevToolsBaseConverter.Group(r.Binary, 4))
+                        @Result("Hex", DevToolsBaseConverter.Group(r.Hex, 2))
+                        @Result("Signed (two's complement)", r.Signed)
+                        @Result("Unsigned", r.Unsigned)
+                    </dl>
+                }
+                else
+                {
+                    <p class="small text-secondary">Doesn't fit in @_width bits.</p>
+                }
+            }
+            break;
+
+        case "text":
+            <div class="devtools-number-row">
+                <div>
+                    <label class="form-label small fw-semibold" for="dt-direction">Direction</label>
+                    <select id="dt-direction" class="form-select" @bind="_toBytes" @bind:after="ConvertText">
+                        <option value="true">Text → bytes</option>
+                        <option value="false">Bytes → text</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="form-label small fw-semibold" for="dt-base">Bytes as</label>
+                    <select id="dt-base" class="form-select" @bind="_textBase" @bind:after="ConvertText">
+                        <option value="2">Binary</option>
+                        <option value="16">Hexadecimal</option>
+                        <option value="10">Decimal</option>
+                        <option value="8">Octal</option>
+                    </select>
+                </div>
+            </div>
+            <label class="form-label small fw-semibold mt-2" for="dt-input">@(_toBytes ? "Text" : "Bytes (spaces, commas or new lines between them)")</label>
+            <textarea id="dt-input" class="form-control devtools-textarea" @bind="_textInput" @bind:event="oninput" @bind:after="ConvertText" spellcheck="false"></textarea>
+            @if (_textError.Length > 0) { <div class="alert alert-danger py-1 px-2 small mt-2" role="alert">@_textError</div> }
+            <div class="d-flex justify-content-between align-items-end mt-2">
+                <label class="form-label small fw-semibold mb-1" for="dt-output">@(_toBytes ? "Bytes (UTF-8)" : "Text")</label>
+                <button type="button" class="btn btn-sm btn-link p-0" @onclick="() => CopyAsync(_textOutput)" disabled="@(_textOutput.Length == 0)">Copy</button>
+            </div>
+            <textarea id="dt-output" class="form-control devtools-textarea" readonly value="@_textOutput"></textarea>
+            break;
+
+        case "calc":
+            <div class="devtools-number-row">
+                <div>
+                    <label class="form-label small fw-semibold" for="dc-base">Numbers typed in</label>
+                    <select id="dc-base" class="form-select" @bind="_calcBase" @bind:after="Calculate">
+                        @foreach (var b in BaseChoices) { <option value="@b">@BaseName(b)</option> }
+                    </select>
+                </div>
+            </div>
+            <div class="devtools-number-row mt-2">
+                <div class="devtools-number-grow">
+                    <label class="form-label small fw-semibold" for="dc-a">A</label>
+                    <input id="dc-a" class="form-control font-monospace" @bind="_a" @bind:event="oninput" @bind:after="Calculate" autocomplete="off" spellcheck="false" />
+                </div>
+                <div>
+                    <label class="form-label small fw-semibold" for="dc-op">Operation</label>
+                    <select id="dc-op" class="form-select" @bind="_op" @bind:after="Calculate">
+                        @foreach (var (key, label) in DevToolsBaseConverter.Operators) { <option value="@key">@label</option> }
+                    </select>
+                </div>
+                @if (_op != "not")
+                {
+                    <div class="devtools-number-grow">
+                        <label class="form-label small fw-semibold" for="dc-b">B</label>
+                        <input id="dc-b" class="form-control font-monospace" @bind="_b" @bind:event="oninput" @bind:after="Calculate" autocomplete="off" spellcheck="false" />
+                    </div>
+                }
+            </div>
+            @if (_calcError.Length > 0) { <div class="alert alert-danger py-1 px-2 small mt-2" role="alert">@_calcError</div> }
+            @if (_calcViews is { } c)
+            {
+                <dl class="devtools-number-results">
+                    @Result("Binary", DevToolsBaseConverter.Group(c.Binary, 4))
+                    @Result("Octal", c.Octal)
+                    @Result("Decimal", DevToolsBaseConverter.Group(c.Decimal, 3, ','))
+                    @Result("Hexadecimal", DevToolsBaseConverter.Group(c.Hex, 2))
+                </dl>
+            }
+            break;
+    }
+</div>
+
+@code {
+    private static readonly (string Key, string Label)[] Modes = [("number", "Number"), ("text", "Text ↔ binary"), ("calc", "Calculator")];
+    private static readonly int[] BaseChoices = [2, 8, 10, 16, 36];
+
+    private string _mode = "number";
+    private string _value = "255";
+    private int _inputBase = 10;
+    private int _customBase = 36;
+    private int _width = 8;
+    private string _error = string.Empty;
+    private DevToolsBaseConverter.NumberViews? _views;
+    private DevToolsBaseConverter.TwosComplementView? _register;
+
+    private bool _toBytes = true;
+    private int _textBase = 2;
+    private string _textInput = "Hi";
+    private string _textOutput = string.Empty;
+    private string _textError = string.Empty;
+
+    private int _calcBase = 10;
+    private string _a = "12";
+    private string _b = "10";
+    private string _op = "and";
+    private string _calcError = string.Empty;
+    private DevToolsBaseConverter.NumberViews? _calcViews;
+
+    protected override void OnInitialized()
+    {
+        Convert();
+        ConvertText();
+        Calculate();
+    }
+
+    private static string BaseName(int b) => b switch { 2 => "Binary (2)", 8 => "Octal (8)", 10 => "Decimal (10)", 16 => "Hexadecimal (16)", _ => $"Base {b}" };
+
+    private void Convert()
+    {
+        _customBase = Math.Clamp(_customBase, DevToolsBaseConverter.MinBase, DevToolsBaseConverter.MaxBase);
+        if (string.IsNullOrWhiteSpace(_value)) { _views = null; _register = null; _error = string.Empty; return; }
+        if (!DevToolsBaseConverter.TryParse(_value, _inputBase, out var value, out var error)) { _views = null; _register = null; _error = error; return; }
+        _error = string.Empty;
+        _views = DevToolsBaseConverter.Views(value, _customBase);
+        _register = DevToolsBaseConverter.TwosComplement(value, _width);
+    }
+
+    private void ConvertText()
+    {
+        _textError = string.Empty;
+        if (_toBytes) { _textOutput = DevToolsBaseConverter.TextToBytes(_textInput, _textBase); return; }
+        if (string.IsNullOrWhiteSpace(_textInput)) { _textOutput = string.Empty; return; }
+        _textOutput = DevToolsBaseConverter.TryBytesToText(_textInput, _textBase, out var text, out var error) ? text : string.Empty;
+        _textError = error;
+    }
+
+    private void Calculate()
+    {
+        _calcViews = null;
+        _calcError = string.Empty;
+        if (string.IsNullOrWhiteSpace(_a) || (_op != "not" && string.IsNullOrWhiteSpace(_b))) return;
+        if (!DevToolsBaseConverter.TryParse(_a, _calcBase, out var a, out var errorA)) { _calcError = "A: " + errorA; return; }
+        var b = BigInteger.Zero;
+        if (_op != "not" && !DevToolsBaseConverter.TryParse(_b, _calcBase, out b, out var errorB)) { _calcError = "B: " + errorB; return; }
+        if (!DevToolsBaseConverter.TryCalculate(a, _op, b, out var result, out var error)) { _calcError = error; return; }
+        _calcViews = DevToolsBaseConverter.Views(result, 36);
+    }
+
+    private RenderFragment Result(string label, string value) => __builder =>
+    {
+        <div class="devtools-number-result">
+            <dt>@label</dt>
+            <dd><code>@value</code> <button type="button" class="btn btn-sm btn-link p-0" @onclick="() => CopyAsync(Plain(value))">Copy</button></dd>
+        </div>
+    };
+
+    // Copies the digits only: grouping spaces and thousands commas are for reading.
+    private static string Plain(string value) => value.Replace(" ", string.Empty).Replace(",", string.Empty);
+
+    private async Task CopyAsync(string text)
+    {
+        if (string.IsNullOrEmpty(text)) return;
+        try { await JS.InvokeVoidAsync("gwsAssistant.copy", text); } catch (JSException) { }
+    }
+}

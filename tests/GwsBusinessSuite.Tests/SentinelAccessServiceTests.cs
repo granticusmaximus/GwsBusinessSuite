@@ -173,7 +173,7 @@ public sealed class SentinelAccessServiceTests
     }
 
     [Fact]
-    public async Task CanAccess_ShouldApplyPermissionRanksAndOwnerOverride()
+    public async Task CanAccess_ShouldApplyPermissionRanks_AndGiveNoWorkspaceOwnerOverride()
     {
         await using var fixture = await Fixture.CreateAsync();
         var target = AddPage(fixture, "Target");
@@ -186,7 +186,73 @@ public sealed class SentinelAccessServiceTests
 
         (await fixture.Service.CanAccessAsync(target.Id, false, "editor", SentinelAccessLevels.Comment)).Should().BeTrue();
         (await fixture.Service.CanAccessAsync(target.Id, false, "editor", SentinelAccessLevels.FullAccess)).Should().BeFalse();
-        (await fixture.Service.CanAccessAsync(Guid.NewGuid(), true, "owner", SentinelAccessLevels.FullAccess)).Should().BeTrue();
+        // Private Sentinel (12-11-26): a workspace Owner no longer sees everything.
+        (await fixture.Service.CanAccessAsync(target.Id, false, "owner", SentinelAccessLevels.View)).Should().BeFalse();
+    }
+
+    // Private Sentinel (12-11-26, Grant): each person has their own Sentinel. What A makes, B can't
+    // see, Admin or not, until A shares it; the owner of a page also owns what's added inside it.
+    [Fact]
+    public async Task PrivateSentinel_ShouldShowEachPersonOnlyWhatTheyOwnOrWasSharedWithThem()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var admin = new AppUser { Username = "grant", Role = AppRoles.Admin, IsActive = true, CreatedAt = DateTimeOffset.UtcNow.AddYears(-1) };
+        var laterAdmin = new AppUser { Username = "ops", Role = AppRoles.Admin, IsActive = true, CreatedAt = DateTimeOffset.UtcNow };
+        fixture.Db.AppUsers.AddRange(admin, laterAdmin,
+            new AppUser { Username = "ann", Role = AppRoles.Author, IsActive = true },
+            new AppUser { Username = "ben", Role = AppRoles.Contributor, IsActive = true });
+        var annPage = AddPage(fixture, "Ann's plans", createdBy: "ann");
+        var annDatabase = AddDatabase(fixture, "Ann's tasks", annPage.Id, createdBy: "ann");
+        var benPage = AddPage(fixture, "Ben's notes", createdBy: "Ben");
+        var guide = AddPage(fixture, "User guide", createdBy: "system");
+        await fixture.Db.SaveChangesAsync();
+
+        async Task<bool> Sees(Guid id, string who, bool isDatabase = false) =>
+            await fixture.Service.CanAccessAsync(id, isDatabase, who, SentinelAccessLevels.View);
+
+        (await fixture.Service.CanAccessAsync(annPage.Id, false, "ann", SentinelAccessLevels.FullAccess)).Should().BeTrue("the owner has full access");
+        (await Sees(annDatabase.Id, "ann", isDatabase: true)).Should().BeTrue();
+        (await Sees(annPage.Id, "ben")).Should().BeFalse("not shared");
+        (await Sees(annPage.Id, "grant")).Should().BeFalse("Admins don't see other people's pages");
+        (await Sees(benPage.Id, "ben")).Should().BeTrue("ownership ignores the case of the name");
+        (await Sees(benPage.Id, "ann")).Should().BeFalse();
+
+        (await Sees(guide.Id, "grant")).Should().BeTrue("app-made pages belong to the longest-standing Admin");
+        (await Sees(guide.Id, "ops")).Should().BeFalse();
+        (await Sees(guide.Id, "ann")).Should().BeFalse();
+        (await fixture.Service.GetOwnerAsync(guide.Id, false)).Should().Be("grant");
+
+        await fixture.Service.SetPermissionAsync(annPage.Id, false, "ben", SentinelAccessLevels.Edit, "ann");
+        (await Sees(annPage.Id, "ben")).Should().BeTrue("shared");
+        (await Sees(annDatabase.Id, "ben", isDatabase: true)).Should().BeTrue("a share reaches what's inside");
+        (await Sees(annPage.Id, "grant")).Should().BeFalse("sharing with Ben isn't sharing with everyone");
+
+        // Ben adds a sub-page inside Ann's page: Ann still sees it, and it's Ben's.
+        var benInside = AddPage(fixture, "Ben's addition", annPage.Id, createdBy: "ben");
+        await fixture.Db.SaveChangesAsync();
+        (await fixture.Service.CanAccessAsync(benInside.Id, false, "ann", SentinelAccessLevels.FullAccess)).Should().BeTrue();
+        (await fixture.Service.GetOwnerAsync(benInside.Id, false)).Should().Be("ben");
+
+        var configured = new SentinelAccessService(fixture.Db, systemOwnerUsername: "OPS");
+        (await configured.CanAccessAsync(guide.Id, false, "ops", SentinelAccessLevels.View)).Should().BeTrue("Sentinel:SystemOwner picks who owns app-made pages");
+        (await configured.CanAccessAsync(guide.Id, false, "grant", SentinelAccessLevels.View)).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Files_ShouldOpenForTheUploader_OrWhoeverCanSeeAPageLinkingThem()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var file = new SentinelImportedFile { NotionBlockId = "x", FileName = "a.pdf", ContentType = "application/pdf", Content = [1], CreatedBy = "ann" };
+        fixture.Db.SentinelImportedFiles.Add(file);
+        var page = AddPage(fixture, "With file", createdBy: "ann");
+        page.BlocksJson = $"[{{\"url\":\"/admin/sentinel/files/{file.Id}\"}}]";
+        await fixture.Db.SaveChangesAsync();
+
+        (await fixture.Service.CanViewFileAsync(file.Id, "ann")).Should().BeTrue();
+        (await fixture.Service.CanViewFileAsync(file.Id, "ben")).Should().BeFalse();
+        await fixture.Service.SetPermissionAsync(page.Id, false, "ben", SentinelAccessLevels.View, "ann");
+        (await fixture.Service.CanViewFileAsync(file.Id, "ben")).Should().BeTrue("Ben can see a page that links it");
+        (await fixture.Service.CanViewFileAsync(Guid.NewGuid(), "ann")).Should().BeFalse();
     }
 
     [Fact]
@@ -328,24 +394,26 @@ public sealed class SentinelAccessServiceTests
         accessible.Should().BeEquivalentTo([inheritedPageTarget, inheritedDatabaseTarget]);
     }
 
-    private static WikiPage AddPage(Fixture fixture, string title, Guid? parentWikiPageId = null)
+    private static WikiPage AddPage(Fixture fixture, string title, Guid? parentWikiPageId = null, string createdBy = "system")
     {
         var page = new WikiPage
         {
             Title = title,
             Slug = $"{title.ToLowerInvariant().Replace(' ', '-')}-{Guid.NewGuid():N}",
-            ParentWikiPageId = parentWikiPageId
+            ParentWikiPageId = parentWikiPageId,
+            CreatedBy = createdBy
         };
         fixture.Db.WikiPages.Add(page);
         return page;
     }
 
-    private static WikiDatabase AddDatabase(Fixture fixture, string title, Guid? parentWikiPageId = null)
+    private static WikiDatabase AddDatabase(Fixture fixture, string title, Guid? parentWikiPageId = null, string createdBy = "system")
     {
         var database = new WikiDatabase
         {
             Title = title,
-            ParentWikiPageId = parentWikiPageId
+            ParentWikiPageId = parentWikiPageId,
+            CreatedBy = createdBy
         };
         fixture.Db.WikiDatabases.Add(database);
         return database;

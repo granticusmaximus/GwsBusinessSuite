@@ -67,6 +67,12 @@ public interface ISentinelAccessService
     // password attempt is never counted as a view.
     Task RecordShareViewAsync(Guid shareId, CancellationToken cancellationToken = default);
     Task<bool> CanAccessAsync(Guid targetId, bool isDatabase, string username, string requiredAccessLevel, CancellationToken cancellationToken = default);
+    // Who owns a page or database (private Sentinel, 12-11-26): its creator, or the Sentinel system
+    // owner for anything the app or a sync made. Null when the target doesn't exist.
+    Task<string?> GetOwnerAsync(Guid targetId, bool isDatabase, CancellationToken cancellationToken = default);
+    // A file in Sentinel (/admin/sentinel/files/{id}) belongs to no page of its own: the person who
+    // uploaded it can open it, and so can anyone who can view a page or database that links it.
+    Task<bool> CanViewFileAsync(Guid fileId, string username, CancellationToken cancellationToken = default);
     // For targets outside the Sentinel page/database hierarchy CanAccessAsync/GetAccessibleTargetsAsync
     // otherwise assume (automation workflows, Part 4.9) - checks only a direct permission row (no
     // ancestor inheritance, since these targets have no parent/child tree) plus the same Admin

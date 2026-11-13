@@ -898,11 +898,19 @@ app.MapPost("/webhooks/stripe", async (
     .DisableAntiforgery()
     .RequireRateLimiting("public-read");
 
+// Private Sentinel (12-11-26): the uploader, or anyone who can view a page or database linking the
+// file. AdminOnly with no check before, which let any Admin open every file.
 app.MapGet("/admin/sentinel/files/{id:guid}", async (
     Guid id,
     IAppDbContext dbContext,
+    ISentinelAccessService access,
+    HttpContext httpContext,
     CancellationToken cancellationToken) =>
 {
+    if (!await access.CanViewFileAsync(id, httpContext.User.Identity?.Name ?? string.Empty, cancellationToken))
+    {
+        return Results.NotFound();
+    }
     var file = await dbContext.SentinelImportedFiles
         .AsNoTracking()
         .Where(item => item.Id == id)
@@ -926,7 +934,7 @@ app.MapGet("/admin/sentinel/files/{id:guid}", async (
         fileDownloadName: canRenderInline ? null : file.FileName,
         enableRangeProcessing: true);
 })
-    .RequireAuthorization("AdminOnly")
+    .RequireAuthorization("ContentAccess")
     .RequireRateLimiting("public-read");
 
 app.MapGet("/admin/api/performance", (
@@ -1063,16 +1071,18 @@ app.MapGet("/admin/api/privacy/requests/{requestId:guid}/export", async (
     .RequireAuthorization("AdminOnly")
     .RequireRateLimiting("admin-mutation");
 
-// Phase 4.5 Notion-parity export: a page as a standalone Markdown file, a database as CSV.
-// AdminOnly rather than a per-resource SentinelAccessService check, matching the existing
-// /admin/sentinel/files/{id:guid} download endpoint's own posture - per-resource sharing to
-// non-Admin accounts is enforced in the Wiki.razor UI itself, not on raw file-download routes.
+// Phase 4.5 Notion-parity export: a page as a standalone Markdown file, a database as CSV. The same
+// View check as opening it (private Sentinel, 12-11-26); before, any Admin could export any page.
 app.MapGet("/admin/sentinel/pages/{wikiPageId:guid}/export.md", async (
     Guid wikiPageId,
     IWikiService wikiService,
+    ISentinelAccessService access,
+    HttpContext httpContext,
     CancellationToken cancellationToken) =>
 {
-    var page = await wikiService.GetPageAsync(wikiPageId, cancellationToken);
+    var page = await access.CanAccessAsync(wikiPageId, false, httpContext.User.Identity?.Name ?? string.Empty, SentinelAccessLevels.View, cancellationToken)
+        ? await wikiService.GetPageAsync(wikiPageId, cancellationToken)
+        : null;
     if (page is null)
     {
         return Results.NotFound();
@@ -1084,7 +1094,7 @@ app.MapGet("/admin/sentinel/pages/{wikiPageId:guid}/export.md", async (
         "text/markdown; charset=utf-8",
         $"{(string.IsNullOrWhiteSpace(page.Slug) ? "sentinel-page" : page.Slug)}.md");
 })
-    .RequireAuthorization("AdminOnly")
+    .RequireAuthorization("ContentAccess")
     .RequireRateLimiting("public-read");
 
 // PDF and Word exports (Sentinel item 20): the page, plus its sub-pages with ?subpages=true.
@@ -1109,9 +1119,13 @@ foreach (var (extension, format) in new[] { ("pdf", SentinelExportFormat.Pdf), (
 app.MapGet("/admin/sentinel/databases/{wikiDatabaseId:guid}/export.csv", async (
     Guid wikiDatabaseId,
     IWikiDatabaseService wikiDatabaseService,
+    ISentinelAccessService access,
+    HttpContext httpContext,
     CancellationToken cancellationToken) =>
 {
-    var database = await wikiDatabaseService.GetDatabaseAsync(wikiDatabaseId, cancellationToken);
+    var database = await access.CanAccessAsync(wikiDatabaseId, true, httpContext.User.Identity?.Name ?? string.Empty, SentinelAccessLevels.View, cancellationToken)
+        ? await wikiDatabaseService.GetDatabaseAsync(wikiDatabaseId, cancellationToken)
+        : null;
     if (database is null)
     {
         return Results.NotFound();
@@ -1123,7 +1137,7 @@ app.MapGet("/admin/sentinel/databases/{wikiDatabaseId:guid}/export.csv", async (
         "text/csv; charset=utf-8",
         $"{SlugForFileName(database.Title)}.csv");
 })
-    .RequireAuthorization("AdminOnly")
+    .RequireAuthorization("ContentAccess")
     .RequireRateLimiting("public-read");
 
 // World News: one event's combined document (overview, how the coverage compares, every source

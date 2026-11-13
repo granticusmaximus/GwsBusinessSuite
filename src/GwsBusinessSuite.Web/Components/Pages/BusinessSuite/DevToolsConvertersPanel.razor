@@ -4,38 +4,8 @@
 @switch (SelectedTool)
 {
     case "numberbase":
-        <div class="devtools-tool">
-            <h2 class="h5">Number Base Converter</h2>
-            <div class="d-flex gap-3 align-items-end flex-wrap">
-                <div>
-                    <label class="form-label small fw-semibold">Value</label>
-                    <input class="form-control font-monospace" @bind="_numberInput" @bind:event="oninput" @bind:after="RunConvertNumberBase" />
-                </div>
-                <div>
-                    <label class="form-label small fw-semibold">From base</label>
-                    <select class="form-select" @bind="_numberFromBase" @bind:after="RunConvertNumberBase">
-                        <option value="2">Binary (2)</option>
-                        <option value="8">Octal (8)</option>
-                        <option value="10">Decimal (10)</option>
-                        <option value="16">Hexadecimal (16)</option>
-                    </select>
-                </div>
-                <div>
-                    <label class="form-label small fw-semibold">To base</label>
-                    <select class="form-select" @bind="_numberToBase" @bind:after="RunConvertNumberBase">
-                        <option value="2">Binary (2)</option>
-                        <option value="8">Octal (8)</option>
-                        <option value="10">Decimal (10)</option>
-                        <option value="16">Hexadecimal (16)</option>
-                    </select>
-                </div>
-            </div>
-            @if (!string.IsNullOrEmpty(_numberError)) { <div class="alert alert-danger py-1 px-2 small mt-2">@_numberError</div> }
-            <label class="form-label small fw-semibold mt-2">Result</label>
-            <input class="form-control font-monospace" readonly value="@_numberOutput" />
-        </div>
+        <DevToolsNumberPanel />
         break;
-
     case "timestamp":
         <div class="devtools-tool">
             <h2 class="h5">Unix Timestamp Converter</h2>
@@ -74,19 +44,7 @@
 
     protected override void OnInitialized()
     {
-        RunConvertNumberBase();
         RunConvertColor();
-    }
-
-    private string _numberInput = "255";
-    private int _numberFromBase = 10, _numberToBase = 16;
-    private string _numberOutput = string.Empty, _numberError = string.Empty;
-    private void RunConvertNumberBase()
-    {
-        if (string.IsNullOrWhiteSpace(_numberInput)) { _numberOutput = string.Empty; _numberError = string.Empty; return; }
-        var result = DevToolsConverters.ConvertNumberBase(_numberInput, _numberFromBase, _numberToBase);
-        _numberOutput = result.Success ? result.Output : string.Empty;
-        _numberError = result.Success ? string.Empty : result.Error ?? string.Empty;
     }
 
     private string _timestampInput = string.Empty, _timestampOutput = string.Empty, _timestampError = string.Empty;

@@ -7,7 +7,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace GwsBusinessSuite.Infrastructure.Services;
 
-public sealed class SentinelAccessService(IAppDbContext dbContext) : ISentinelAccessService
+public sealed class SentinelAccessService(IAppDbContext dbContext, string? systemOwnerUsername = null) : ISentinelAccessService
 {
     private static readonly IReadOnlyDictionary<string, int> AccessRanks = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
     {
@@ -262,22 +262,23 @@ public sealed class SentinelAccessService(IAppDbContext dbContext) : ISentinelAc
         }
 
         var distinctTargets = targets.ToHashSet();
-        if (await IsOwnerOrAdminAsync(username, cancellationToken))
-        {
-            // Preserve the existing owner override: owners have full access independently of
-            // resource-specific permissions (including during create/delete transition windows).
-            return distinctTargets;
-        }
+        // Private Sentinel (12-11-26, Grant): every person has their own Sentinel. A page or
+        // database is visible to its owner, to the owner of any page above it, and to whoever it
+        // was shared with (a grant on it or an ancestor, personally or through a department).
+        // Nobody else, Admins and workspace Owners included: before this, both saw everything.
 
         // The batch API is intended for full workspace tree/search filtering. Loading these small
         // projections once avoids an N+1 query per target and gives the resolver enough information
         // to validate the entire ancestry chain before trusting an inherited permission.
         var pageNodes = await dbContext.WikiPages.AsNoTracking()
-            .Select(item => new { item.Id, item.ParentWikiPageId })
+            .Select(item => new { item.Id, item.ParentWikiPageId, item.CreatedBy })
             .ToListAsync(cancellationToken);
         var databaseNodes = await dbContext.WikiDatabases.AsNoTracking()
-            .Select(item => new { item.Id, item.ParentWikiPageId })
+            .Select(item => new { item.Id, item.ParentWikiPageId, item.CreatedBy })
             .ToListAsync(cancellationToken);
+        var owners = await OwnerResolverAsync(cancellationToken);
+        var ownedPages = pageNodes.Where(item => owners(item.CreatedBy) == username).Select(item => item.Id).ToHashSet();
+        var ownedDatabases = databaseNodes.Where(item => owners(item.CreatedBy) == username).Select(item => item.Id).ToHashSet();
         var principals = await GetPrincipalsAsync(username, cancellationToken);
         var permissionRows = await dbContext.SentinelResourcePermissions.AsNoTracking()
             .Where(item => principals.Contains(item.Username))
@@ -296,7 +297,9 @@ public sealed class SentinelAccessService(IAppDbContext dbContext) : ISentinelAc
         var accessibleTargets = new HashSet<SentinelAccessTarget>();
         foreach (var target in distinctTargets)
         {
-            var effectiveAccess = ResolveEffectiveAccess(target, pageParents, databaseParents, accessByTarget);
+            var effectiveAccess = OwnsTargetOrAncestor(target, pageParents, databaseParents, ownedPages, ownedDatabases)
+                ? SentinelAccessLevels.FullAccess
+                : ResolveEffectiveAccess(target, pageParents, databaseParents, accessByTarget);
             if (effectiveAccess is not null
                 && AccessRanks.GetValueOrDefault(effectiveAccess, -1) >= requiredRank)
             {
@@ -305,6 +308,79 @@ public sealed class SentinelAccessService(IAppDbContext dbContext) : ISentinelAc
         }
 
         return accessibleTargets;
+    }
+
+    // Who owns a page or database, from its CreatedBy: the person who made it. Anything the app or
+    // a sync made ("system", an import, a feature) belongs to the Sentinel system owner, Grant's
+    // choice on 12-11-26: Sentinel:SystemOwner when set, otherwise the longest-standing Admin.
+    private async Task<Func<string, string?>> OwnerResolverAsync(CancellationToken cancellationToken)
+    {
+        var users = await dbContext.AppUsers.AsNoTracking()
+            .Select(item => new { item.Username, item.Role, item.CreatedAt })
+            .ToListAsync(cancellationToken);
+        var known = users.Select(item => item.Username).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var canonical = users.GroupBy(item => item.Username, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.First().Username, StringComparer.OrdinalIgnoreCase);
+        // SQLite can't order DateTimeOffset: sorted here, in memory.
+        var systemOwner = systemOwnerUsername is { Length: > 0 } configured && known.Contains(configured)
+            ? canonical[configured]
+            : users.Where(item => item.Role == AppRoles.Admin).OrderBy(item => item.CreatedAt).ThenBy(item => item.Username).FirstOrDefault()?.Username;
+        return createdBy => createdBy is not null && canonical.TryGetValue(createdBy, out var owner) ? owner : systemOwner;
+    }
+
+    public async Task<bool> CanViewFileAsync(Guid fileId, string username, CancellationToken cancellationToken = default)
+    {
+        var createdBy = await dbContext.SentinelImportedFiles.AsNoTracking()
+            .Where(item => item.Id == fileId).Select(item => item.CreatedBy).FirstOrDefaultAsync(cancellationToken);
+        if (createdBy is null) return false;
+        if (string.Equals(createdBy, username, StringComparison.OrdinalIgnoreCase)) return true;
+        var text = fileId.ToString();
+        var pageIds = await dbContext.WikiPages.AsNoTracking()
+            .Where(item => item.BlocksJson.Contains(text)).Select(item => item.Id).ToListAsync(cancellationToken);
+        var databaseIds = await dbContext.WikiDatabaseRows.AsNoTracking()
+            .Where(item => item.PropertyValuesJson.Contains(text) || item.BlocksJson.Contains(text))
+            .Select(item => item.WikiDatabaseId).Distinct().ToListAsync(cancellationToken);
+        var targets = pageIds.Select(id => new SentinelAccessTarget(id, IsDatabase: false))
+            .Concat(databaseIds.Select(id => new SentinelAccessTarget(id, IsDatabase: true))).ToList();
+        return targets.Count > 0 && (await GetAccessibleTargetsAsync(targets, username, SentinelAccessLevels.View, cancellationToken)).Count > 0;
+    }
+
+    public async Task<string?> GetOwnerAsync(Guid targetId, bool isDatabase, CancellationToken cancellationToken = default)
+    {
+        var createdBy = isDatabase
+            ? await dbContext.WikiDatabases.AsNoTracking().Where(item => item.Id == targetId).Select(item => item.CreatedBy).FirstOrDefaultAsync(cancellationToken)
+            : await dbContext.WikiPages.AsNoTracking().Where(item => item.Id == targetId).Select(item => item.CreatedBy).FirstOrDefaultAsync(cancellationToken);
+        if (createdBy is null) return null;
+        return (await OwnerResolverAsync(cancellationToken))(createdBy);
+    }
+
+    // True when the person owns the target or any page above it, so a sub-page someone else
+    // added inside your page (with edit access you gave them) stays visible to you.
+    private static bool OwnsTargetOrAncestor(
+        SentinelAccessTarget target,
+        IReadOnlyDictionary<Guid, Guid?> pageParents,
+        IReadOnlyDictionary<Guid, Guid?> databaseParents,
+        IReadOnlySet<Guid> ownedPages,
+        IReadOnlySet<Guid> ownedDatabases)
+    {
+        Guid? parentPageId;
+        if (target.IsDatabase)
+        {
+            if (ownedDatabases.Contains(target.TargetId)) return true;
+            if (!databaseParents.TryGetValue(target.TargetId, out parentPageId)) return false;
+        }
+        else
+        {
+            if (ownedPages.Contains(target.TargetId)) return true;
+            if (!pageParents.TryGetValue(target.TargetId, out parentPageId)) return false;
+        }
+        var visited = new HashSet<Guid> { target.TargetId };
+        while (parentPageId is { } current && visited.Add(current))
+        {
+            if (ownedPages.Contains(current)) return true;
+            if (!pageParents.TryGetValue(current, out parentPageId)) return false;
+        }
+        return false;
     }
 
     private static string? ResolveEffectiveAccess(

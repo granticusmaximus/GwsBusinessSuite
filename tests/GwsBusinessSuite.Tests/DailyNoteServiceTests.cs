@@ -22,10 +22,16 @@ public sealed class DailyNoteServiceTests
 
         again.Id.Should().Be(first.Id);
         first.Title.Should().Be("2026-10-09 Friday");
-        first.SystemKey.Should().Be("daily:2026-10-09");
-        var folder = await db.WikiPages.SingleAsync(page => page.SystemKey == DailyNotes.FolderSystemKey);
+        first.SystemKey.Should().Be("daily:2026-10-09:grant", "each person has their own day page");
+        var folder = await db.WikiPages.SingleAsync(page => page.SystemKey == DailyNotes.FolderSystemKey + ":grant");
         first.ParentWikiPageId.Should().Be(folder.Id);
         (await db.WikiPages.CountAsync(page => page.ParentWikiPageId == folder.Id)).Should().Be(1);
+
+        // Private Sentinel (12-11-26): someone else's today is their own page, in their own folder.
+        var ann = await service.OpenOrCreateAsync(Day, "ann");
+        ann.Id.Should().NotBe(first.Id);
+        ann.ParentWikiPageId.Should().NotBe(folder.Id);
+        DailyNotes.DateFromSystemKey(ann.SystemKey).Should().Be(Day);
     }
 
     [Fact]
@@ -96,6 +102,7 @@ public sealed class DailyNoteServiceTests
 
     [Theory]
     [InlineData("daily:2026-10-09", true)]
+    [InlineData("daily:2026-10-09:ann", true)]
     [InlineData("daily:not-a-date", false)]
     [InlineData("quick-notes", false)]
     [InlineData(null, false)]

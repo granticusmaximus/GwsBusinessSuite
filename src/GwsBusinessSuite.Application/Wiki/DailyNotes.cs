@@ -14,11 +14,15 @@ public static class DailyNotes
 
     public static string SystemKeyFor(DateOnly date) => DayKeyPrefix + date.ToString(DateFormat, CultureInfo.InvariantCulture);
 
+    // Each person's day page carries their name after the date (private Sentinel, 12-11-26):
+    // "daily:2026-10-09:ann". The date is what's read here.
     public static DateOnly? DateFromSystemKey(string? systemKey) =>
         systemKey is not null && systemKey.StartsWith(DayKeyPrefix, StringComparison.Ordinal)
-        && DateOnly.TryParseExact(systemKey[DayKeyPrefix.Length..], DateFormat, CultureInfo.InvariantCulture, DateTimeStyles.None, out var date)
+        && DateOnly.TryParseExact(DatePart(systemKey[DayKeyPrefix.Length..]), DateFormat, CultureInfo.InvariantCulture, DateTimeStyles.None, out var date)
             ? date
             : null;
+
+    private static string DatePart(string rest) => rest.IndexOf(':') is var colon and >= 0 ? rest[..colon] : rest;
 
     // "2026-10-09 Thursday": sorts by date and still reads naturally.
     public static string TitleFor(DateOnly date) =>

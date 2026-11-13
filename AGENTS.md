@@ -158,6 +158,12 @@ Mac app (MAUI, Mac Catalyst):
   `/app/data/logs/gwssuite-*.clef` is the same log as JSON (TraceId, UserName, CircuitId, Origin,
   Release on each event). Look there before asking Grant for screenshots or local Mac logs: the Mac
   app's map failures and browser errors are forwarded to it.
+- **Sentinel is private per person** (since 12-11-26, Grant's rule). A page or database is visible
+  only to its owner (`CreatedBy`; app-made pages belong to `Sentinel:SystemOwner`, else the oldest
+  Admin), the owner of a page above it, and whoever it's shared with. **No Admin bypass.** Any new
+  code that lists, searches, exports or downloads Sentinel content must filter through
+  `ISentinelAccessService` (`GetAccessibleTargetsAsync`/`CanAccessAsync`), and app-made personal
+  pages use `SentinelPersonalPages` keys (one per person), never one shared `SystemKey`.
 - **The Mac app** shows admin pages served by the server. A network connection made from one of
   those pages, such as mail or HTTP, runs on the droplet. A test from the Mac's terminal proves
   nothing about it.
