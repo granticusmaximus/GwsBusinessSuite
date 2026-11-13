@@ -167,4 +167,9 @@ and the write-up both draw on the evidence; then B3-B9 and N5-N15; B10 (reading)
 - 13-11-26 B4 DONE: up to 3 already-read articles per analysis are re-read after 6 h; a material change
   (word 3-gram Jaccard < 0.85, BodyChanges) is kept in article_body_edits (first text kept) and listed
   on the story's trust panel as "changed after publication" with first and current text.
+- 13-11-26 SIZE: worldnews.db 2.9 GB measured (articles 1.8 GB / 1.08 M rows, events 845 MB; FTS only
+  73 MB). ReleaseStaleVectors: event vectors cleared after 8 days once placed (15 days if not: the
+  linker reads unplaced events for 14), group hints after 3 days; batched; run after every read and
+  at startup with the existing Compact (VACUUM) when 10k+ rows were released. Dot() returns 0 for
+  empty/mismatched vectors. Expected ~0.6-0.7 GB smaller after the first compact.
 

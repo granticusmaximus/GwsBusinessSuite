@@ -7,7 +7,9 @@ internal sealed class WorldNewsTestStore : IDisposable
 {
     public static readonly DateTimeOffset Now = DateTimeOffset.UtcNow;
 
-    private readonly string _path = Path.Combine(Path.GetTempPath(), $"wn-map-{Guid.NewGuid():N}.db");
+    private readonly string _path = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"wn-map-{Guid.NewGuid():N}.db");
+
+    public string Path => _path;
 
     public WorldNewsTestStore() => Store = new WorldNewsStore(_path);
 

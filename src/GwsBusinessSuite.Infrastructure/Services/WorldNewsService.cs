@@ -160,7 +160,8 @@ public sealed partial class WorldNewsService : IDisposable
             var indexed = Store.EnsureCoveringIndex();
             // The full-text index too (World News trust plan 1.10), off the startup path.
             if (Store.EnsureFullTextIndex()) _logger.LogInformation("World News: full-text index built.");
-            var released = Store.ReleaseGroupedEmbeddings(betweenBatches: () => Thread.Sleep(50));
+            var released = Store.ReleaseGroupedEmbeddings(betweenBatches: () => Thread.Sleep(50))
+                + Store.ReleaseStaleVectors(DateTimeOffset.UtcNow, betweenBatches: () => Thread.Sleep(50));
             // Compacting holds off writers for minutes, so it takes the read's turn: a read due
             // meanwhile is skipped rather than failing on a locked database.
             var compacted = released >= CompactAfterReleasing;

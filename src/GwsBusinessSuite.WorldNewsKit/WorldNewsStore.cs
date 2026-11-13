@@ -982,7 +982,8 @@ public sealed class WorldNewsStore
     {
         using var connection = Open();
         using var command = connection.CreateCommand();
-        command.CommandText = "SELECT length(vector_sum) / 4 FROM events LIMIT 1";
+        // Skips events whose vector was released (ReleaseStaleVectors).
+        command.CommandText = "SELECT length(vector_sum) / 4 FROM events WHERE length(vector_sum) > 0 LIMIT 1";
         return command.ExecuteScalar() is long dimensions ? (int)dimensions : null;
     }
 
@@ -1977,6 +1978,42 @@ public sealed class WorldNewsStore
             to.Value = start + batchSize;
             released += command.ExecuteNonQuery();
             betweenBatches?.Invoke();
+        }
+        return released;
+    }
+
+    // Size (13-11-26): an event's meaning vector (3 KB) is only read while it can still gain reports
+    // (EventWindow, 48 h), by SentinelGPT's search (7 days) and, until it's placed in a situation, by the
+    // linker (14 days). So a placed event's vector goes after VectorsFor, an unplaced one's after
+    // UnplacedVectorsFor; an article's group hint (read within 48 h) after HintsFor. A batch at a time,
+    // so writers only wait a moment.
+    public static readonly TimeSpan VectorsFor = TimeSpan.FromDays(8);
+    public static readonly TimeSpan UnplacedVectorsFor = TimeSpan.FromDays(15);
+    public static readonly TimeSpan HintsFor = TimeSpan.FromDays(3);
+
+    public int ReleaseStaleVectors(DateTimeOffset now, int batchSize = 2_000, Action? betweenBatches = null)
+    {
+        using var connection = Open();
+        var released = 0;
+        foreach (var (sql, cutoff) in new[]
+        {
+            ("UPDATE events SET vector_sum = X'' WHERE rowid IN (SELECT rowid FROM events WHERE last_seen < $cutoff AND situation_id IS NOT NULL AND length(vector_sum) > 0 LIMIT $batch)", now - VectorsFor),
+            ("UPDATE events SET vector_sum = X'' WHERE rowid IN (SELECT rowid FROM events WHERE last_seen < $cutoff AND length(vector_sum) > 0 LIMIT $batch)", now - UnplacedVectorsFor),
+            ("UPDATE articles SET group_hint = NULL WHERE rowid IN (SELECT rowid FROM articles WHERE seen_at < $cutoff AND group_hint IS NOT NULL LIMIT $batch)", now - HintsFor),
+        })
+        {
+            using var command = connection.CreateCommand();
+            command.CommandText = sql;
+            command.Parameters.AddWithValue("$cutoff", cutoff.ToUnixTimeSeconds());
+            command.Parameters.AddWithValue("$batch", batchSize);
+            int changed;
+            do
+            {
+                changed = command.ExecuteNonQuery();
+                released += changed;
+                if (changed > 0) betweenBatches?.Invoke();
+            }
+            while (changed == batchSize);
         }
         return released;
     }

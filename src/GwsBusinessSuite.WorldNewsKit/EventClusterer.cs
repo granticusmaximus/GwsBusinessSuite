@@ -172,6 +172,8 @@ public static class EventClusterer
 
     public static float Dot(float[] a, float[] b)
     {
+        // A released vector (WorldNewsStore.ReleaseStaleVectors) or one from another model matches nothing.
+        if (a.Length == 0 || a.Length != b.Length) return 0f;
         var sum = 0f;
         var i = 0;
         if (Vector.IsHardwareAccelerated && a.Length >= Vector<float>.Count)

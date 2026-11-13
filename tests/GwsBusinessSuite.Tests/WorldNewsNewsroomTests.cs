@@ -220,4 +220,27 @@ public sealed class WorldNewsNewsroomTests
         edit.FirstText.Should().Be("first");
         edit.LatestText.Should().Be("third");
     }
+
+    [Fact]
+    public void ReleaseStaleVectors_ShouldDropOldPlacedVectorsAndHints_AndKeepWhatClusteringNeeds()
+    {
+        using var test = new WorldNewsTestStore();
+        var now = WorldNewsTestStore.Now;
+        test.SeedEvent("s1", "old", "Old story", ["A", "B"], now.AddDays(-10));
+        test.SeedEvent("s2", "new", "New story", ["A", "B"], now.AddHours(-2));
+        // Age the old one past the window (SeedEvent stamps last_seen an hour ago).
+        using (var connection = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={test.Path}"))
+        {
+            connection.Open();
+            using var age = connection.CreateCommand();
+            age.CommandText = "UPDATE events SET last_seen = $old WHERE id = 'old'; UPDATE articles SET seen_at = $old WHERE event_id = 'old'";
+            age.Parameters.AddWithValue("$old", now.AddDays(-10).ToUnixTimeSeconds());
+            age.ExecuteNonQuery();
+        }
+
+        test.Store.ReleaseStaleVectors(now).Should().BeGreaterThan(0);
+        test.Store.EmbeddingDimensions().Should().Be(2, "dimensions come from an event that still has its vector");
+        test.Store.ActiveEvents(now.AddDays(-2)).Single(e => e.Id == "new").Sum.Should().HaveCount(2);
+        EventClusterer.Dot([], [1f, 0f]).Should().Be(0);
+    }
 }
