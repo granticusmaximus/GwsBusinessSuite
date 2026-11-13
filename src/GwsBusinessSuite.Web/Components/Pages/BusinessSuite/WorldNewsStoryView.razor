@@ -101,6 +101,23 @@ else
                         @string.Join(", ", cited.Select(source => $"{source.Name} ({Count(source.Outlets, "outlet")})"))
                     </p>
                 }
+                @if (_bodyEdits.Count > 0)
+                {
+                    <details class="story-trust-checks">
+                        <summary>@_bodyEdits.Count @(_bodyEdits.Count == 1 ? "report was" : "reports were") changed after publication</summary>
+                        <ul>
+                            @foreach (var edit in _bodyEdits)
+                            {
+                                <li>
+                                    <strong>@edit.Report.Outlet</strong>, noticed @edit.At.ToLocalGwsDateTime():
+                                    <a href="@edit.Report.Url" target="_blank" rel="noopener noreferrer">@edit.Report.Title</a>
+                                    <div class="small text-secondary">First read: @Clip(edit.First)</div>
+                                    <div class="small">Now: @Clip(edit.Latest)</div>
+                                </li>
+                            }
+                        </ul>
+                    </details>
+                }
                 @if (trust.OfficialStatements is { Count: > 0 } statements)
                 {
                     @* B9 (13-11-26): what official bodies said; a statement, not independent confirmation. *@
@@ -629,8 +646,15 @@ else
     private string? _situationId;
     private string? _deskError;
 
+    // B4 (13-11-26): reports whose article text changed after World News first read it.
+    private IReadOnlyList<(WorldArticle Report, string First, string Latest, DateTimeOffset At)> _bodyEdits = [];
+
     private async Task LoadDeskAsync(StoryDocument story)
     {
+        var edits = await Task.Run(() => News.Store.BodyEdits(story.Sources.Select(source => source.Report.Id)));
+        _bodyEdits = story.Sources.Where(source => edits.ContainsKey(source.Report.Id))
+            .Select(source => (source.Report, edits[source.Report.Id].FirstText, edits[source.Report.Id].LatestText, edits[source.Report.Id].DetectedAt))
+            .ToList();
         var eventId = story.Event.Id;
         _checks = await Task.Run(() => News.Store.DeskChecks(eventId));
         _onBudget = await Task.Run(() => News.Store.Budget().Any(item => item.EventId == eventId));
@@ -650,6 +674,8 @@ else
         await Task.Run(() => News.Store.SetDeskCheck(eventId, item, done, evidence, user, DateTimeOffset.UtcNow));
         _checks = await Task.Run(() => News.Store.DeskChecks(eventId));
     }
+
+    private static string Clip(string text) => text.Length <= 400 ? text : text[..400] + "…";
 
     private IReadOnlyList<SummarySentence> CheckSummary(string summary) =>
         SummaryCheck.Check(summary, _story is null ? [] : _story.Sources.SelectMany(source =>

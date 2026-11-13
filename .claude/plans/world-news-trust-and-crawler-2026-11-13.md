@@ -164,4 +164,7 @@ and the write-up both draw on the evidence; then B3-B9 and N5-N15; B10 (reading)
 - 13-11-26 B7 DONE: SummaryCheck: SentinelGPT's story summary, sentence by sentence; one naming a number
   or proper name not in any report's headline, English headline or description is underlined, with
   a count. Full articles aren't checked (a flag = "not found in what World News holds").
+- 13-11-26 B4 DONE: up to 3 already-read articles per analysis are re-read after 6 h; a material change
+  (word 3-gram Jaccard < 0.85, BodyChanges) is kept in article_body_edits (first text kept) and listed
+  on the story's trust panel as "changed after publication" with first and current text.
 

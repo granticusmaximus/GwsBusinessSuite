@@ -20,6 +20,8 @@ public sealed class WorldNewsArticleReader(IHttpClientFactory httpClientFactory,
     private static readonly TimeSpan FetchTimeout = TimeSpan.FromSeconds(12);
     // A page that couldn't be read is tried again after this.
     public static readonly TimeSpan RetryAfter = TimeSpan.FromHours(24);
+    public static readonly TimeSpan RecheckAfter = TimeSpan.FromHours(6);
+    public const int MaxRechecks = 3;
 
     public static bool IsReadable(string url) =>
         Uri.TryCreate(url, UriKind.Absolute, out var uri) && uri.Scheme is "https" or "http"
@@ -58,10 +60,20 @@ public sealed class WorldNewsArticleReader(IHttpClientFactory httpClientFactory,
         foreach (var (id, (excerpt, _)) in known)
             if (excerpt is not null) excerpts[id] = excerpt;
         var toRead = chosen.Where(a => !known.TryGetValue(a.Id, out var before) || (before.Excerpt is null && now - before.FetchedAt > RetryAfter)).ToList();
-        await Parallel.ForEachAsync(toRead, new ParallelOptions { MaxDegreeOfParallelism = MaxParallel, CancellationToken = cancellationToken },
+        // B4 (13-11-26): a few articles read over RecheckAfter ago are read again, oldest first, and a
+        // material change is recorded (the first text kept). Bounded so outlets aren't asked often.
+        var recheck = chosen.Where(a => known.TryGetValue(a.Id, out var before) && before.Excerpt is not null && now - before.FetchedAt > RecheckAfter)
+            .OrderBy(a => known[a.Id].FetchedAt).Take(MaxRechecks).ToList();
+        await Parallel.ForEachAsync(toRead.Concat(recheck), new ParallelOptions { MaxDegreeOfParallelism = MaxParallel, CancellationToken = cancellationToken },
             async (article, ct) =>
             {
                 var (excerpt, reason) = await FetchAsync(article.Url, ct);
+                if (known.TryGetValue(article.Id, out var before) && before.Excerpt is { } earlier)
+                {
+                    // A re-read: keep the earlier text if this one failed; record a material change.
+                    if (excerpt is null) return;
+                    if (BodyChanges.IsMaterial(earlier, excerpt)) store.SaveBodyEdit(article.Id, earlier, excerpt, time.GetUtcNow());
+                }
                 store.SaveArticleText(article.Id, excerpt, reason, time.GetUtcNow());
                 if (excerpt is not null) excerpts[article.Id] = excerpt;
             });

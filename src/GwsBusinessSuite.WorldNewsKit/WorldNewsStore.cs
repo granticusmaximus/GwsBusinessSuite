@@ -95,6 +95,8 @@ public sealed class WorldNewsStore
             CREATE TABLE IF NOT EXISTS tips (
                 id TEXT PRIMARY KEY, name TEXT, contact TEXT, message TEXT NOT NULL, url TEXT, created_at INTEGER NOT NULL, status TEXT NOT NULL,
                 event_id TEXT, handled_by TEXT);
+            CREATE TABLE IF NOT EXISTS article_body_edits (
+                article_id TEXT PRIMARY KEY, first_text TEXT NOT NULL, latest_text TEXT NOT NULL, detected_at INTEGER NOT NULL);
             CREATE TABLE IF NOT EXISTS outlet_owners (outlet TEXT NOT NULL, owner TEXT NOT NULL, fetched_at INTEGER NOT NULL, PRIMARY KEY (outlet, owner));
             CREATE TABLE IF NOT EXISTS label_snapshots (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, event_id TEXT NOT NULL, level TEXT NOT NULL, reason TEXT NOT NULL, independent INTEGER NOT NULL,
@@ -1856,6 +1858,38 @@ public sealed class WorldNewsStore
     }
 
     private readonly object _articleTextWrites = new();
+
+    // B4 (13-11-26): an article whose body changed after World News first read it. The first text
+    // is kept; later changes update the latest text and time.
+    public void SaveBodyEdit(string articleId, string firstText, string latestText, DateTimeOffset detectedAt)
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            INSERT INTO article_body_edits (article_id, first_text, latest_text, detected_at) VALUES ($id, $first, $latest, $at)
+            ON CONFLICT(article_id) DO UPDATE SET latest_text = excluded.latest_text, detected_at = excluded.detected_at
+            """;
+        command.Parameters.AddWithValue("$id", articleId);
+        command.Parameters.AddWithValue("$first", firstText);
+        command.Parameters.AddWithValue("$latest", latestText);
+        command.Parameters.AddWithValue("$at", detectedAt.ToUnixTimeSeconds());
+        command.ExecuteNonQuery();
+    }
+
+    public IReadOnlyDictionary<string, (string FirstText, string LatestText, DateTimeOffset DetectedAt)> BodyEdits(IEnumerable<string> articleIds)
+    {
+        var ids = articleIds.Distinct(StringComparer.Ordinal).Take(500).ToList();
+        var edits = new Dictionary<string, (string, string, DateTimeOffset)>(StringComparer.Ordinal);
+        if (ids.Count == 0) return edits;
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = $"SELECT article_id, first_text, latest_text, detected_at FROM article_body_edits WHERE article_id IN ({string.Join(",", ids.Select((_, i) => "$p" + i))})";
+        for (var i = 0; i < ids.Count; i++) command.Parameters.AddWithValue("$p" + i, ids[i]);
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+            edits[reader.GetString(0)] = (reader.GetString(1), reader.GetString(2), DateTimeOffset.FromUnixTimeSeconds(reader.GetInt64(3)));
+        return edits;
+    }
 
     public void SaveArticleText(string articleId, string? excerpt, string? reason, DateTimeOffset fetchedAt)
     {

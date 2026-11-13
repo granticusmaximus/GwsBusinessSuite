@@ -201,4 +201,23 @@ public sealed class WorldNewsNewsroomTests
         result[2].NotFound.Should().BeEquivalentTo("Sapporo", "40");
         result[3].Supported.Should().BeTrue("nothing checkable in it");
     }
+
+    [Fact]
+    public void BodyChanges_ShouldIgnoreSmallWordingFixes_ButCatchARewrite()
+    {
+        var original = string.Join(" ", Enumerable.Range(0, 60).Select(i => $"word{i}"));
+        BodyChanges.IsMaterial(original, original.Replace("word30", "wordX")).Should().BeFalse();
+        BodyChanges.IsMaterial(original, "Officials now say the earlier report was wrong and the strike hit a different town entirely today.").Should().BeTrue();
+    }
+
+    [Fact]
+    public void Store_ShouldKeepTheFirstTextOfAnEditedArticle()
+    {
+        using var test = new WorldNewsTestStore();
+        test.Store.SaveBodyEdit("a1", "first", "second", Now);
+        test.Store.SaveBodyEdit("a1", "second", "third", Now.AddHours(1));
+        var edit = test.Store.BodyEdits(["a1", "missing"])["a1"];
+        edit.FirstText.Should().Be("first");
+        edit.LatestText.Should().Be("third");
+    }
 }
