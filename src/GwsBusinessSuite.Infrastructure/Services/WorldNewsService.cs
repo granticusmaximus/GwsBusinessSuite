@@ -44,6 +44,8 @@ public sealed partial class WorldNewsService : IDisposable
     private readonly WorldNewsMapCache? _mapCache;
     // ServerAi None: no Ollama on this server, so anything to embed waits for the Mac's relay.
     private readonly bool _serverHasNoModel;
+    // The server's model is the only source (ServerAiOptions.ServerModelOnly): no work for the Mac app.
+    private readonly bool _serverModelOnly;
 
     private readonly IServiceScopeFactory _scopes;
     private readonly IHttpClientFactory _httpClientFactory;
@@ -65,6 +67,7 @@ public sealed partial class WorldNewsService : IDisposable
         _mapCache = mapCache;
         _logger = logger;
         _serverHasNoModel = configuration.GetValue<ServerAiMode>($"{ServerAiOptions.SectionName}:Mode") == ServerAiMode.None;
+        _serverModelOnly = configuration.GetSection(ServerAiOptions.SectionName).Get<ServerAiOptions>()?.ServerModelOnly == true;
         var path = Path.GetFullPath(configuration["WorldNews:DatabasePath"] ?? "/app/data/worldnews.db");
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         Store = new WorldNewsStore(path);
@@ -291,7 +294,7 @@ public sealed partial class WorldNewsService : IDisposable
     // aside. macModels: what the Mac has installed.
     public (string Model, IReadOnlyList<WorldArticle> Jobs) EmbedJobsForRelay(IReadOnlyCollection<string> macModels, int limit)
     {
-        if (InstalledName(macModels, _options.EmbeddingModel) is null) return (_options.EmbeddingModel, []);
+        if (_serverModelOnly || InstalledName(macModels, _options.EmbeddingModel) is null) return (_options.EmbeddingModel, []);
         var now = DateTimeOffset.UtcNow;
         Store.SetLastFetched(EmbedRelayKey, now);
         return (_options.EmbeddingModel, Store.RecentArticlesToEmbed(Math.Clamp(limit, 1, MaxEmbedJobs), now - _options.EventWindow));
@@ -303,7 +306,7 @@ public sealed partial class WorldNewsService : IDisposable
     public const string KindJobPrefix = "kind:";
 
     public IReadOnlyList<(string Id, string Text)> KindExampleJobsForRelay(IReadOnlyCollection<string> macModels) =>
-        _kindExamples is not null || InstalledName(macModels, _options.EmbeddingModel) is null
+        _serverModelOnly || _kindExamples is not null || InstalledName(macModels, _options.EmbeddingModel) is null
             ? []
             : KindExampleTexts().Select((example, i) => ($"{KindJobPrefix}{i}", example.Text)).ToList();
 
@@ -359,7 +362,7 @@ public sealed partial class WorldNewsService : IDisposable
         return null;
     }
 
-    public bool EmbedRelayActive(DateTimeOffset now) => Store.LastFetched(EmbedRelayKey) is { } at && at >= now - EmbedRelayFreshness;
+    public bool EmbedRelayActive(DateTimeOffset now) => !_serverModelOnly && Store.LastFetched(EmbedRelayKey) is { } at && at >= now - EmbedRelayFreshness;
 
     // "embeddinggemma" is installed as "embeddinggemma" or "embeddinggemma:latest"; a tagged model
     // has to match its tag.
@@ -373,6 +376,7 @@ public sealed partial class WorldNewsService : IDisposable
     // Asking is also how the server knows the Mac is doing it.
     public IReadOnlyList<SummaryJob> SummaryJobsForRelay(int limit)
     {
+        if (_serverModelOnly) return [];
         Store.SetLastFetched(RelayKey, DateTimeOffset.UtcNow);
         return _summarizer.Jobs(Math.Clamp(limit, 1, 10));
     }
@@ -388,7 +392,7 @@ public sealed partial class WorldNewsService : IDisposable
         return error;
     }
 
-    public bool RelayActive(DateTimeOffset now) => Store.LastFetched(RelayKey) is { } at && at >= now - RelayFreshness;
+    public bool RelayActive(DateTimeOffset now) => !_serverModelOnly && Store.LastFetched(RelayKey) is { } at && at >= now - RelayFreshness;
 
     private IReadOnlyDictionary<string, IReadOnlyList<float[]>>? _kindExamples;
 

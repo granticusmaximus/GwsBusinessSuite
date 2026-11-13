@@ -5,6 +5,8 @@
 @inject ICurrentUserAccessor CurrentUserAccessor
 @inject IJSRuntime JS
 @inject ILogger<SentinelCleanupPanel> Logger
+@inject Microsoft.Extensions.Options.IOptions<GwsBusinessSuite.Application.Abstractions.ServerAiOptions> ServerAi
+@inject GwsBusinessSuite.Application.Abstractions.IOllamaService ServerModel
 
 @* Clean up a messy note (Sentinel item 26): before/after, then Apply. *@
 <div class="sentinel-ask sentinel-cleanup" role="dialog" aria-label="Clean up this note">
@@ -99,7 +101,7 @@
     {
         try
         {
-            _local ??= new GwsBusinessSuite.Web.Services.BrowserLocalOllamaService(JS);
+            _local ??= GwsBusinessSuite.Web.Services.BrowserLocalOllamaService.For(JS, ServerAi.Value, ServerModel);
             var status = await _local.ProbeAsync();
             if (!status.IsReachable) return null;
             var models = status.Models.Where(m => !m.Contains("embed", StringComparison.OrdinalIgnoreCase)).ToList();

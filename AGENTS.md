@@ -139,10 +139,16 @@ Mac app (MAUI, Mac Catalyst):
   - **Outgoing SMTP is blocked** there (ports 25, 465 and 587) until DigitalOcean support lifts
     the block. IMAP (993) and HTTPS work. Mail that has to send from the server uses the Gmail
     API, and an SMTP timeout in production is this block, not a bad password.
-  - **Server AI is off** (`ServerAi__Mode: None`). The droplet runs no model. AI work runs on the
-    signed-in Mac app through its relays (SentinelGPT, articles, World News summaries and
-    embeddings). Server-side AI calls fail with a clear message instead of reaching for an
-    Ollama.
+  - **Server AI runs on a separate AI droplet** (13-11-26, Grant): `gws-ai`, Ollama on its
+    private network address (in the gitignored ops guide, never in tracked files), reachable only
+    from the web droplet. The web droplet's
+    `.env` sets `SERVER_AI_MODE=Full` and `ContentStudio__BaseUrl` to it, and
+    `ServerAi__SingleSource` (on in `docker-compose.yml`) makes it SentinelGPT's only model: no
+    browser-local Ollama, no Mac relay. New AI features call `IOllamaService`. A panel that wants
+    a local model makes its client with `BrowserLocalOllamaService.For(JS, ServerAi.Value, server)`,
+    so the setting decides. The web droplet itself still runs no model.
+  - Without those `.env` lines the mode is `None`: the Mac app's relays do the AI, and server-side
+    AI calls fail with a clear message. The rest of this bullet applies only then.
     - Background work on **public data** can run on an Admin's signed-in Mac through SentinelGPT's
       agent relay (`MacRelayOllamaService`), but only inside `MacRelayScope.ForSharedWork()`:
       bill overviews, news hot takes, county meeting summaries. Never wrap a person's own content

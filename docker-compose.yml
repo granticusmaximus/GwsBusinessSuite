@@ -17,10 +17,13 @@ services:
       # Admin pages format times with ToLocalTime(), which follows the container's zone - UTC
       # unless set. Override with TZ=... in .env if the business moves.
       TZ: ${TZ:-America/New_York}
-      # Default to no model runtime, using the native relay for approved shared work. Deployments
-      # with a separate Ollama host may opt in through their private .env (SERVER_AI_MODE=Light)
-      # and ContentStudio__BaseUrl; no inference endpoint or credential belongs in this file.
+      # Server AI. Production (13-11-26): SERVER_AI_MODE=Full and ContentStudio__BaseUrl pointing at
+      # the separate Ollama droplet's private address, both in the gitignored .env; no inference
+      # endpoint or credential belongs in this file. Without them the server has no model and the
+      # Mac app's relays do the AI (None). SingleSource makes the server's model the only one used
+      # once it has one: no Ollama on the browser's computer, no Mac relay (ServerAiOptions).
       ServerAi__Mode: ${SERVER_AI_MODE:-None}
+      ServerAi__SingleSource: ${SERVER_AI_SINGLE_SOURCE:-true}
       # Email (form-submission notifications, Growth reports, bookings, campaigns, the client
       # portal) all fall back to ONE shared SMTP section - set it once in the gitignored .env:
       #   Smtp__Host=smtp.yourprovider.com   Smtp__Port=587   Smtp__Security=StartTls

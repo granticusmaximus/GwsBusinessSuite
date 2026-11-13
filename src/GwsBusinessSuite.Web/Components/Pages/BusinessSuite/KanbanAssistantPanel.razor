@@ -3,6 +3,8 @@
 @implements IAsyncDisposable
 @inject IKanbanBoardService BoardService
 @inject IJSRuntime JS
+@inject Microsoft.Extensions.Options.IOptions<GwsBusinessSuite.Application.Abstractions.ServerAiOptions> ServerAi
+@inject GwsBusinessSuite.Application.Abstractions.IOllamaService ServerModel
 
 @* SentinelGPT on a board (Boards K8b): a standup and what's stuck. The facts come from the board
    and show straight away; the Ollama on this computer then writes them up, using only those facts.
@@ -109,11 +111,11 @@
         var cancel = _cancel = new CancellationTokenSource(ModelTimeout);
         _text = string.Empty;
         _writing = true;
-        _note = "Looking for a model on this computer…";
+        _note = "Looking for a model…";
         StateHasChanged();
         try
         {
-            _local ??= new GwsBusinessSuite.Web.Services.BrowserLocalOllamaService(JS);
+            _local ??= GwsBusinessSuite.Web.Services.BrowserLocalOllamaService.For(JS, ServerAi.Value, ServerModel);
             var status = await _local.ProbeAsync(cancel.Token);
             _model = LocalModels.PickChatModel(status.Models);
             if (!status.IsReachable || _model is null)

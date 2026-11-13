@@ -73,10 +73,25 @@ public sealed class WorldNewsEmbedRelayTests : IDisposable
         news.KindExampleJobsForRelay(["embeddinggemma:latest"]).Should().BeEmpty("kinds are classified by meaning again");
     }
 
-    private WorldNewsService NewService()
+    [Fact]
+    public void WhenTheServersModelIsTheOnlySource_TheMacShouldGetNoWork_AndTheServerNeverStandsAside()
     {
+        var news = NewService(new() { ["ServerAi:Mode"] = "Full", ["ServerAi:SingleSource"] = "true" });
+        news.Store.AddArticles([Article("a1", "Flood in Izmir")]);
+        news.Store.SetLastFetched("world-news:embed-relay", DateTimeOffset.UtcNow);
+
+        news.EmbedJobsForRelay(["embeddinggemma:latest"], 64).Jobs.Should().BeEmpty();
+        news.KindExampleJobsForRelay(["embeddinggemma:latest"]).Should().BeEmpty();
+        news.SummaryJobsForRelay(5).Should().BeEmpty();
+        news.EmbedRelayActive(DateTimeOffset.UtcNow).Should().BeFalse("a Mac that asked earlier doesn't make the server stand aside");
+        news.RelayActive(DateTimeOffset.UtcNow).Should().BeFalse();
+    }
+
+    private WorldNewsService NewService(Dictionary<string, string?>? settings = null)
+    {
+        var values = new Dictionary<string, string?>(settings ?? []) { ["WorldNews:DatabasePath"] = Path.Combine(_folder, "worldnews.db") };
         var configuration = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?> { ["WorldNews:DatabasePath"] = Path.Combine(_folder, "worldnews.db") })
+            .AddInMemoryCollection(values)
             .Build();
         return new WorldNewsService(configuration, Options.Create(new ContentStudioOptions()), new PlainHttp(),
             new ServiceCollection().BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(), NullLogger<WorldNewsService>.Instance);

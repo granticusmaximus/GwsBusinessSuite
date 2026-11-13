@@ -767,7 +767,7 @@ else
             // Resource-constrained server modes: the revision is written by this computer's Ollama.
             if (ServerAi.Value.UsesLocalCompute)
             {
-                _localModels ??= new BrowserLocalOllamaService(JS);
+                _localModels ??= BrowserLocalOllamaService.For(JS, ServerAi.Value);
                 await _localModels.EnsureReachableAsync();
                 await ContentStudioService.RequestRevisionAsync(revision, _localModels);
             }

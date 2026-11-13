@@ -9,6 +9,8 @@
 @inject GwsBusinessSuite.Web.Services.ToastState Toasts
 @inject IJSRuntime JS
 @inject GwsBusinessSuite.Application.TimeTracking.ITimeTrackingService Time
+@inject Microsoft.Extensions.Options.IOptions<GwsBusinessSuite.Application.Abstractions.ServerAiOptions> ServerAi
+@inject GwsBusinessSuite.Application.Abstractions.IOllamaService ServerModel
 @implements IAsyncDisposable
 
 @* A card's fields in the board's drawer (Boards K2): everything the card shows, editable, above its
@@ -587,10 +589,10 @@
     {
         _breaking = true;
         _proposed = null;
-        _breakNote = "Looking for a model on this computer…";
+        _breakNote = "Looking for a model…";
         try
         {
-            _local ??= new GwsBusinessSuite.Web.Services.BrowserLocalOllamaService(JS);
+            _local ??= GwsBusinessSuite.Web.Services.BrowserLocalOllamaService.For(JS, ServerAi.Value, ServerModel);
             var status = await _local.ProbeAsync();
             var model = LocalModels.PickChatModel(status.Models);
             if (!status.IsReachable || model is null)

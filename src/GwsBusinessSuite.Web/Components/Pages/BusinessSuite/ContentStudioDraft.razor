@@ -333,7 +333,7 @@ else
 
         try
         {
-            _localModels ??= new BrowserLocalOllamaService(JS);
+            _localModels ??= BrowserLocalOllamaService.For(JS, ServerAi.Value);
             var status = await _localModels.ProbeAsync();
             if (status.IsReachable)
             {
@@ -508,7 +508,7 @@ else
         await RunWorkflowAction(
             async () =>
             {
-                _localModels ??= new BrowserLocalOllamaService(JS);
+                _localModels ??= BrowserLocalOllamaService.For(JS, ServerAi.Value);
                 await _localModels.EnsureReachableAsync();
                 return await ContentStudioService.RequestRevisionAsync(request, _localModels);
             },

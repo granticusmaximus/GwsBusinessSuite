@@ -8,6 +8,8 @@
 @inject ICurrentUserAccessor CurrentUserAccessor
 @inject IJSRuntime JS
 @inject IBiReportEmailService ReportEmailService
+@inject Microsoft.Extensions.Options.IOptions<GwsBusinessSuite.Application.Abstractions.ServerAiOptions> ServerAi
+@inject GwsBusinessSuite.Application.Abstractions.IOllamaService ServerModel
 @implements IAsyncDisposable
 
 <PageTitle>Business Intelligence</PageTitle>
@@ -551,7 +553,7 @@ else
             string? fallbackReason = null;
             try
             {
-                _localModels ??= new BrowserLocalOllamaService(JS);
+                _localModels ??= BrowserLocalOllamaService.For(JS, ServerAi.Value, ServerModel);
                 var status = await _localModels.ProbeAsync();
                 var model = BiQuestionPlanner.PickModel(status.Models);
                 if (!status.IsReachable || model is null)
@@ -560,7 +562,7 @@ else
                 }
                 else
                 {
-                    _askNote = $"Asking your local {model}. The first question can take a minute while it loads.";
+                    _askNote = $"Asking {model}. The first question can take a minute while it loads.";
                     StateHasChanged();
                     // A model that never answers falls back to keywords instead of leaving the box busy.
                     using var timeout = new CancellationTokenSource(AskModelTimeout);

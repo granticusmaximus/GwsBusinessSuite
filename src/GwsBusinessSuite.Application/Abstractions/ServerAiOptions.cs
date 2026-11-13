@@ -28,13 +28,22 @@ public sealed class ServerAiOptions
 
     public ServerAiMode Mode { get; init; } = ServerAiMode.Full;
 
+    // Production since 13-11-26 (Grant): the server's Ollama (the gws-ai droplet) is the one source
+    // of truth for SentinelGPT. With a server model (Full or Light), nothing looks for a model
+    // anywhere else: no Ollama on the browser's computer, no Mac relay for chat, no World News
+    // summaries or embeddings handed to the Mac app. Off by default so local development keeps its
+    // local-first behaviour; ignored in None mode, where the Mac is the only model there is.
+    public bool SingleSource { get; init; }
+
+    public bool ServerModelOnly => SingleSource && Mode != ServerAiMode.None;
+
     public bool IsLight => Mode == ServerAiMode.Light;
 
     public bool IsDisabled => Mode == ServerAiMode.None;
 
     public bool AllowsServerInference => Mode != ServerAiMode.None;
 
-    public bool UsesLocalCompute => Mode is ServerAiMode.Light or ServerAiMode.None;
+    public bool UsesLocalCompute => !ServerModelOnly && Mode is ServerAiMode.Light or ServerAiMode.None;
 }
 
 // Derives from InvalidOperationException on purpose: every UI surface that can reach one of

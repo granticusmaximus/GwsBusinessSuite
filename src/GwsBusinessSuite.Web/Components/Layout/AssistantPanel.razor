@@ -17,6 +17,7 @@
 @inject ICurrentUserAccessor CurrentUserAccessor
 @inject NavigationManager Navigation
 @inject IJSRuntime JS
+@inject Microsoft.Extensions.Options.IOptions<GwsBusinessSuite.Application.Abstractions.ServerAiOptions> ServerAi
 
 @* One SentinelGPT panel for every admin page. Since 30-10-26 it's an agent: asked to do
    something, it researches, then acts through the app's own services as this user (only what
@@ -428,7 +429,8 @@
 
         // Through this person's Mac (05-11-26): the job runs on the server (SentinelAgentTurns) and the
         // panel follows it, so it carries on if this tab closes, and the bell says when it's done.
-        if (AgentRelay.ModelsFor(user.Username).Count > 0 && await FollowMacTurnAsync(turn, user, context, stop)) return;
+        // Not when the server's model is the only source (ServerAiOptions.ServerModelOnly).
+        if (!ServerAi.Value.ServerModelOnly && AgentRelay.ModelsFor(user.Username).Count > 0 && await FollowMacTurnAsync(turn, user, context, stop)) return;
 
         await AskServerAsync(turn, context, stop);
         turn.AnswersOnlyNote = !_answersOnlyNoted;
@@ -570,7 +572,7 @@
     private async Task<IReadOnlyList<string>> LocalCandidatesAsync(CancellationToken stop)
     {
         if (DateTimeOffset.UtcNow < _localUnavailableUntil) return [];
-        _local ??= new BrowserLocalOllamaService(JS);
+        _local ??= BrowserLocalOllamaService.For(JS, ServerAi.Value);
         LocalOllamaStatus status;
         try
         {

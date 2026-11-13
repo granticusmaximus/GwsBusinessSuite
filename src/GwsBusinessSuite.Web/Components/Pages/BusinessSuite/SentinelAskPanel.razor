@@ -5,6 +5,7 @@
 @inject ICurrentUserAccessor CurrentUserAccessor
 @inject IJSRuntime JS
 @inject ILogger<SentinelAskPanel> Logger
+@inject Microsoft.Extensions.Options.IOptions<GwsBusinessSuite.Application.Abstractions.ServerAiOptions> ServerAi
 
 @* "Ask the workspace" (Sentinel item 2): the server finds the sources the asker can view; the
    model on this computer (or the server's, when this computer has none) answers from them only,
@@ -126,7 +127,7 @@
         if (!firstRender) return;
         try
         {
-            _local = new GwsBusinessSuite.Web.Services.BrowserLocalOllamaService(JS);
+            _local = GwsBusinessSuite.Web.Services.BrowserLocalOllamaService.For(JS, ServerAi.Value);
             var status = await _local.ProbeAsync();
             if (status.IsReachable)
             {

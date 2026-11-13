@@ -5,6 +5,7 @@
 @inject ICurrentUserAccessor CurrentUserAccessor
 @inject IJSRuntime JS
 @inject ILogger<SentinelAiColumnFill> Logger
+@inject Microsoft.Extensions.Options.IOptions<GwsBusinessSuite.Application.Abstractions.ServerAiOptions> ServerAi
 
 @* Fill a whole AI field column (Sentinel item 25). Runs while this page is open: on this
    computer's Ollama when it has the field's model, otherwise the server's. *@
@@ -103,7 +104,7 @@
         var useLocal = false;
         try
         {
-            _local ??= new GwsBusinessSuite.Web.Services.BrowserLocalOllamaService(JS);
+            _local ??= GwsBusinessSuite.Web.Services.BrowserLocalOllamaService.For(JS, ServerAi.Value);
             var status = await _local.ProbeAsync();
             useLocal = status.IsReachable && status.Models.Any(m => string.Equals(m, _job.Model, StringComparison.OrdinalIgnoreCase) || m.StartsWith(_job.Model + ":", StringComparison.OrdinalIgnoreCase));
         }

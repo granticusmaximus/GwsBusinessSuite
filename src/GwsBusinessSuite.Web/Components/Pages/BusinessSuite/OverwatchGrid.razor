@@ -58,6 +58,7 @@
 @inject IConfiguration Configuration
 @inject NavigationManager Navigation
 @inject ILogger<OverwatchGrid> Logger
+@inject Microsoft.Extensions.Options.IOptions<GwsBusinessSuite.Application.Abstractions.ServerAiOptions> ServerAi
 @implements IAsyncDisposable
 
 <PageTitle>Overwatch</PageTitle>
@@ -2355,7 +2356,7 @@
         if (_visionModels.Count > 0) return;
         try
         {
-            _localModels ??= new GwsBusinessSuite.Web.Services.BrowserLocalOllamaService(JS);
+            _localModels ??= GwsBusinessSuite.Web.Services.BrowserLocalOllamaService.For(JS, ServerAi.Value);
             var status = await _localModels.ProbeAsync();
             if (!status.IsReachable)
             {

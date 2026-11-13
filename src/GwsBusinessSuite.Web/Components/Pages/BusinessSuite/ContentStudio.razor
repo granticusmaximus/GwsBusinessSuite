@@ -11,6 +11,7 @@
 @inject NavigationManager Navigation
 @inject ILogger<ContentStudio> Logger
 @inject IJSRuntime JS
+@inject Microsoft.Extensions.Options.IOptions<GwsBusinessSuite.Application.Abstractions.ServerAiOptions> ServerAi
 
 <PageTitle>Content Studio</PageTitle>
 
@@ -346,7 +347,7 @@
 
         try
         {
-            _localModels ??= new BrowserLocalOllamaService(JS);
+            _localModels ??= BrowserLocalOllamaService.For(JS, ServerAi.Value);
             var status = await _localModels.ProbeAsync();
             if (status.IsReachable)
             {
@@ -581,7 +582,7 @@
             };
             // Content Studio is native-app-only: all expensive generation runs against the
             // selected model on this Mac. The server builds prompts, verifies, and persists.
-            _localModels ??= new BrowserLocalOllamaService(JS);
+            _localModels ??= BrowserLocalOllamaService.For(JS, ServerAi.Value);
             await _localModels.EnsureReachableAsync();
             var stream = ContentStudioService.GenerateArticleStreamAsync(request, _localModels);
 
