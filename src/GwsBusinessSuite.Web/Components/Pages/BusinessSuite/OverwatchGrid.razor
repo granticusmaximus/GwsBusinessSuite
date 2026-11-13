@@ -425,7 +425,24 @@
                         title="Click points on the map for distances and bearings, and draw range rings around the first point" @onclick="ToggleMeasureAsync">
                     MEASURE [@(_measureOn ? "ON" : "OFF")]
                 </button>
+                <button type="button" data-tg-toggle="layer-health" class="tg-toggle @(_layerHealthOn ? "tg-toggle-on" : "")"
+                        title="Each layer's source, and the last problem it hit since this page opened" @onclick="() => _layerHealthOn = !_layerHealthOn">
+                    LAYER HEALTH [@(_layerHealthOn ? "ON" : "OFF")]
+                </button>
             </div>
+            @if (_layerHealthOn)
+            {
+                <div class="tg-sun-tool" role="table" aria-label="Layer health">
+                    @foreach (var (name, source) in GwsBusinessSuite.Web.OverwatchLayerCatalog.Layers)
+                    {
+                        var problem = _layerProblems.GetValueOrDefault(name);
+                        <div class="tg-hazard-summary" role="row">
+                            <strong>@name.ToUpperInvariant()</strong> · @source ·
+                            @(problem is { } p ? $"LAST PROBLEM {p.At.ToGwsTime()}: {p.Message}" : "no problems since this page opened")
+                        </div>
+                    }
+                </div>
+            }
             @if (_measureOn)
             {
                 <div class="tg-sun-tool">
@@ -1630,7 +1647,7 @@
             }
             catch (JSException ex)
             {
-                Logger.LogWarning(ex, "Overwatch 3D cities failed to start");
+                Logger.LogWarning(ex, "Overwatch 3D cities failed to start"); NoteLayerProblem("3D", ex);
             }
         }
 
@@ -1988,7 +2005,7 @@
         }
         catch (Exception ex) when (ex is not OperationCanceledException and not JSDisconnectedException)
         {
-            Logger.LogWarning(ex, "Overwatch layer {Layer} failed", layer);
+            Logger.LogWarning(ex, "Overwatch layer {Layer} failed", layer); NoteLayerProblem(layer, ex);
         }
         var elapsed = System.Diagnostics.Stopwatch.GetElapsedTime(started);
         if (elapsed > SlowLayer) Logger.LogInformation("Overwatch layer {Layer} took {Seconds:0.0} s", layer, elapsed.TotalSeconds);
@@ -3761,7 +3778,7 @@
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            Logger.LogWarning(ex, "Overwatch city traffic layer failed");
+            Logger.LogWarning(ex, "Overwatch city traffic layer failed"); NoteLayerProblem("city traffic", ex);
             _cityTrafficNote = "City traffic couldn't be shown just now.";
         }
         finally
@@ -3909,7 +3926,7 @@
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            Logger.LogWarning(ex, "Overwatch aircraft layer failed");
+            Logger.LogWarning(ex, "Overwatch aircraft layer failed"); NoteLayerProblem("aircraft", ex);
             _aircraftSummary = "Aircraft couldn't be shown just now.";
         }
         UpdateAirSummary();
@@ -3936,7 +3953,7 @@
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            Logger.LogWarning(ex, "Overwatch air quality layer failed");
+            Logger.LogWarning(ex, "Overwatch air quality layer failed"); NoteLayerProblem("air quality", ex);
             _airQualitySummary = "Air quality couldn't be shown just now.";
         }
         UpdateAirSummary();
@@ -3976,7 +3993,7 @@
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            Logger.LogWarning(ex, "Overwatch power outage layer failed");
+            Logger.LogWarning(ex, "Overwatch power outage layer failed"); NoteLayerProblem("power outage", ex);
             _outageSummary = "Power outage data couldn't be shown just now.";
         }
     }
@@ -4016,7 +4033,7 @@
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            Logger.LogWarning(ex, "Overwatch internet outage layer failed");
+            Logger.LogWarning(ex, "Overwatch internet outage layer failed"); NoteLayerProblem("internet outage", ex);
             _internetSummary = "Internet outage data couldn't be shown just now.";
         }
     }
@@ -4068,7 +4085,7 @@
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            Logger.LogWarning(ex, "Overwatch convergence layer failed");
+            Logger.LogWarning(ex, "Overwatch convergence layer failed"); NoteLayerProblem("convergence", ex);
             _convergenceSummary = "Convergence couldn't be worked out just now.";
         }
     }
@@ -4131,10 +4148,17 @@
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            Logger.LogWarning(ex, "Overwatch airport status layer failed");
+            Logger.LogWarning(ex, "Overwatch airport status layer failed"); NoteLayerProblem("airport status", ex);
             _airportSummary = "Airport status couldn't be shown just now.";
         }
     }
+
+    // ---- Layer health (13-11-26): the last problem each layer hit since the page opened. ----
+    private bool _layerHealthOn;
+    private readonly Dictionary<string, (DateTimeOffset At, string Message)> _layerProblems = new(StringComparer.OrdinalIgnoreCase);
+
+    private void NoteLayerProblem(string layer, Exception ex) =>
+        _layerProblems[GwsBusinessSuite.Web.OverwatchLayerCatalog.Canonical(layer)] = (DateTimeOffset.Now, ex is HttpRequestException or TaskCanceledException ? "its source didn't answer" : ex.Message.Length > 120 ? ex.Message[..120] : ex.Message);
 
     // ---- Analyst tools (13-11-26): measure distances and bearings; range rings. ----
     private const int MaxMeasurePoints = 10;
@@ -4340,7 +4364,7 @@
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            Logger.LogWarning(ex, "Overwatch aurora layer failed");
+            Logger.LogWarning(ex, "Overwatch aurora layer failed"); NoteLayerProblem("aurora", ex);
             _auroraSummary = "The aurora couldn't be shown just now.";
         }
     }
@@ -4429,7 +4453,7 @@
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            Logger.LogWarning(ex, "Overwatch travel advice layer failed");
+            Logger.LogWarning(ex, "Overwatch travel advice layer failed"); NoteLayerProblem("travel advice", ex);
             _travelSummary = "Travel advice couldn't be shown just now.";
         }
     }
@@ -4464,7 +4488,7 @@
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            Logger.LogWarning(ex, "Overwatch fire hotspot layer failed");
+            Logger.LogWarning(ex, "Overwatch fire hotspot layer failed"); NoteLayerProblem("fire hotspot", ex);
             _fireSummary = "Fire hotspots couldn't be shown just now.";
         }
     }
@@ -4513,7 +4537,7 @@
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            Logger.LogWarning(ex, "Overwatch conflict layer failed");
+            Logger.LogWarning(ex, "Overwatch conflict layer failed"); NoteLayerProblem("conflict", ex);
             _conflictSummary = "Conflict events couldn't be shown just now.";
         }
     }
@@ -4546,7 +4570,7 @@
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            Logger.LogWarning(ex, "Overwatch humanitarian layer failed");
+            Logger.LogWarning(ex, "Overwatch humanitarian layer failed"); NoteLayerProblem("humanitarian", ex);
             _humanitarianSummary = "Humanitarian emergencies couldn't be shown just now.";
         }
     }
@@ -4571,7 +4595,7 @@
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            Logger.LogWarning(ex, "Overwatch satellites layer failed");
+            Logger.LogWarning(ex, "Overwatch satellites layer failed"); NoteLayerProblem("satellites", ex);
             _satelliteSummary = "Satellites couldn't be shown just now.";
         }
     }
@@ -4645,7 +4669,7 @@
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            Logger.LogWarning(ex, "Overwatch ships layer failed");
+            Logger.LogWarning(ex, "Overwatch ships layer failed"); NoteLayerProblem("ships", ex);
             _shipSummary = "Ships couldn't be shown just now.";
         }
     }
@@ -4696,7 +4720,7 @@
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            Logger.LogWarning(ex, "Overwatch hazard layer failed");
+            Logger.LogWarning(ex, "Overwatch hazard layer failed"); NoteLayerProblem("hazard", ex);
             _hazardSummary = "Hazard sources couldn't be reached.";
         }
     }
