@@ -183,6 +183,35 @@ public sealed class OverwatchGridScriptBrowserTestsB(PlaywrightBrowserFixture fi
         consoleErrors.Should().BeEmpty();
     }
 
+    // Mac app (12-11-26): the native map sits under the page at the container's rectangle. It was
+    // sent once at init, so after the container moved (sidebar, window resize) clicks landed ~30 pt
+    // from the pins drawn there. Now a move is sent as 'layout', and always before a click.
+    [Fact]
+    public async Task MacApp_ShouldMoveTheNativeMapWithItsContainer_BeforeAClickIsMeasured()
+    {
+        var (page, _) = await OpenHarnessAsync(fixture.Browser, macApp: true);
+        await using var pageScope = page;
+        (await InitAsync(page)).Should().BeNull();
+        await page.EvaluateAsync("() => { window.__nativeMessages = []; }");
+
+        // The container moves right, as when the sidebar opens, and the click follows at once,
+        // before any timer: the frame must still arrive first.
+        await page.EvaluateAsync("""
+            () => {
+                const container = document.getElementById('tg-viewport');
+                container.style.left = '272px';
+                container.dispatchEvent(new MouseEvent('click', { clientX: 400, clientY: 300, bubbles: true }));
+            }
+            """);
+        var json = await page.EvaluateAsync<string>("() => JSON.stringify(window.__nativeMessages.map(m => ({ operation: m.operation, args: Array.from(Object.values(m.arguments)) })))");
+        var messages = JsonDocument.Parse(json).RootElement.EnumerateArray().Select(m => m.Clone()).ToList();
+        messages.Select(m => m.GetProperty("operation").GetString()).Should().ContainInOrder("layout", "mapTap");
+        var layout = messages.First(m => m.GetProperty("operation").GetString() == "layout").GetProperty("args");
+        layout[0].GetDouble().Should().Be(272, "the container's new left edge");
+        var tap = messages.First(m => m.GetProperty("operation").GetString() == "mapTap").GetProperty("args");
+        tap[0].GetDouble().Should().BeApproximately((400 - 272) / layout[2].GetDouble(), 0.001, "measured against the same rectangle");
+    }
+
     // Mac app (12-11-26): a click with a pixel or two of trackpad jitter is still a click, a drag
     // pans once per frame, and wheel ticks become one smooth zoom instead of a queue of 2x jumps.
     [Fact]

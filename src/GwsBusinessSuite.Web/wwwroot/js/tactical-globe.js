@@ -4767,6 +4767,49 @@ window.tacticalGlobe = (function () {
         nativeOperations.forEach(function (name) {
             api[name] = function () { postNative(name, arguments); };
         });
+
+        // The native map sits under the page at the container's rectangle. It was sent once, at
+        // init (before 12-11-26), so when the container later moved or resized (sidebar, window,
+        // the page settling) the map kept its old frame and clicks, measured against the new
+        // rectangle, landed ~30 pt from the pin drawn there: pins "did nothing". Now any change
+        // is sent as 'layout', and checked again right before each click.
+        let nativeLayoutKey = '';
+        let nativeLayoutStop = null;
+        const syncNativeLayout = function () {
+            const container = document.getElementById(nativeContainerId);
+            if (!container) return;
+            const rect = container.getBoundingClientRect();
+            const values = [rect.x, rect.y, rect.width, rect.height, window.innerWidth, window.innerHeight];
+            const key = values.map(function (value) { return Math.round(value * 2) / 2; }).join(',');
+            if (key === nativeLayoutKey) return;
+            nativeLayoutKey = key;
+            postNative('layout', values);
+        };
+        const watchNativeLayout = function (container) {
+            if (nativeLayoutStop) nativeLayoutStop();
+            let pending = 0;
+            const soon = function () { if (!pending) pending = requestAnimationFrame(function () { pending = 0; syncNativeLayout(); }); };
+            const resize = typeof ResizeObserver === 'function' ? new ResizeObserver(soon) : null;
+            if (resize) { resize.observe(container); resize.observe(document.documentElement); }
+            window.addEventListener('resize', soon);
+            document.addEventListener('transitionend', soon, true);
+            // A move without a resize (the sidebar sliding) fires none of the above reliably.
+            const timer = setInterval(syncNativeLayout, 1000);
+            nativeLayoutStop = function () {
+                if (resize) resize.disconnect();
+                window.removeEventListener('resize', soon);
+                document.removeEventListener('transitionend', soon, true);
+                clearInterval(timer);
+                if (pending) cancelAnimationFrame(pending);
+                nativeLayoutStop = null;
+            };
+        };
+        api.dispose = function () {
+            if (nativeLayoutStop) nativeLayoutStop();
+            nativeLayoutKey = '';
+            postNative('dispose', arguments);
+        };
+
         api.init = async function (containerId, dotNetRef) {
             nativeContainerId = containerId || 'tg-viewport';
             nativeDotNetRef = dotNetRef;
@@ -4847,6 +4890,8 @@ window.tacticalGlobe = (function () {
                         if (nativeMoved) { nativeMoved = false; return; }
                         const bounds = container.getBoundingClientRect();
                         if (bounds.width <= 0 || bounds.height <= 0) return;
+                        // The map's frame first, so the click is measured against the same rectangle.
+                        syncNativeLayout();
                         postNative('mapTap', [
                             (event.clientX - bounds.left) / bounds.width,
                             (event.clientY - bounds.top) / bounds.height
@@ -4866,6 +4911,8 @@ window.tacticalGlobe = (function () {
             const rect = container ? container.getBoundingClientRect() : { x: 0, y: 0, width: innerWidth, height: innerHeight };
             await waitForNativeHandler();
             postNative('init', [rect.x, rect.y, rect.width, rect.height, window.innerWidth, window.innerHeight]);
+            nativeLayoutKey = '';
+            if (container) watchNativeLayout(container);
         };
         api.whenDrawn = function () { return Promise.resolve(true); };
         api.setThreeD = function (containerId, on) {

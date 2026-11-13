@@ -104,6 +104,7 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
         switch (operation)
         {
             case "init": Show(arguments); return;
+            case "layout": Place(arguments); return;
             case "dispose": _pickPointMode = false; ClearAll(); _map.Hidden = true; return;
             case "flyTo":
             case "flyToStreetLevel": FlyTo(arguments); return;
@@ -123,25 +124,30 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
         if (operation.StartsWith("set", StringComparison.Ordinal)) Render(operation, arguments);
     }
 
+    // Puts the map under the page's map container: [x, y, width, height, viewport width, viewport
+    // height] in CSS pixels. Sent at init and again whenever the container moves or resizes
+    // ('layout', 12-11-26); a stale frame put every click ~30 pt away from the pin drawn there.
+    private void Place(object?[] arguments)
+    {
+        if (!_webView.TryGetTarget(out var webView)) return;
+        if (arguments.Length < 6
+            || !AsDouble(arguments[0], out var x) || !AsDouble(arguments[1], out var y)
+            || !AsDouble(arguments[2], out var width) || !AsDouble(arguments[3], out var height)
+            || !AsDouble(arguments[4], out var viewportWidth) || viewportWidth <= 0
+            || !AsDouble(arguments[5], out var viewportHeight) || viewportHeight <= 0
+            || width <= 0 || height <= 0) return;
+        var scaleX = webView.Bounds.Width / viewportWidth;
+        var scaleY = webView.Bounds.Height / viewportHeight;
+        var frame = new CoreGraphics.CGRect(webView.Frame.X + x * scaleX, webView.Frame.Y + y * scaleY, width * scaleX, height * scaleY);
+        if (frame != _map.Frame) _map.Frame = frame;
+    }
+
     private void Show(object?[] arguments)
     {
         if (!_webView.TryGetTarget(out var webView)) return;
         if (_map.Superview is null) webView.Superview?.InsertSubviewBelow(_map, webView);
         _map.Frame = webView.Frame;
-        if (arguments.Length >= 6
-            && AsDouble(arguments[0], out var x) && AsDouble(arguments[1], out var y)
-            && AsDouble(arguments[2], out var width) && AsDouble(arguments[3], out var height)
-            && AsDouble(arguments[4], out var viewportWidth) && viewportWidth > 0
-            && AsDouble(arguments[5], out var viewportHeight) && viewportHeight > 0)
-        {
-            var scaleX = webView.Bounds.Width / viewportWidth;
-            var scaleY = webView.Bounds.Height / viewportHeight;
-            _map.Frame = new CoreGraphics.CGRect(
-                webView.Frame.X + x * scaleX,
-                webView.Frame.Y + y * scaleY,
-                width * scaleX,
-                height * scaleY);
-        }
+        Place(arguments);
         _map.Hidden = false;
         webView.Opaque = false;
         webView.BackgroundColor = UIColor.Clear;
