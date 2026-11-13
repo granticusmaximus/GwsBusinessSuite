@@ -79,3 +79,20 @@ Still to do (in order):
 4. Web .env: SERVER_AI_PRIMARY_URL=http://<mac-tailnet-ip>:11434; live failover test (quit Ollama on
    the Mac -> backup within ~10 s; reopen -> Mac within ~15 s).
 5. Then: Overwatch ten features (night lights code is in the tree, untested live).
+
+Decisions (Grant, 13-11-26, as recommended):
+- Docker socket: kept as is (Admins keep every Docker Management action). Revisit with a socket
+  proxy if remove/recreate/exec stop being used.
+- codex-audit: kept until the Mac-first setup is finished and tested; THEN lock it
+  (`sudo passwd -l codex-audit`, remove its authorized key). Do this as the last step of Phase 1b.
+
+## Phase 1b LIVE (13-11-26)
+
+- Tailscale: Mac `dagda` (Tailscale app, `tailscale serve --bg --tcp 11434 tcp://127.0.0.1:11434`,
+  Ollama "Expose to network" OFF, so Ollama is localhost-only) and web droplet `gws-web`
+  (`tailscale up --accept-dns=false --shields-up`). Web .env: SERVER_AI_PRIMARY_URL (Mac tailnet IP).
+- Live test: forward off -> "Mac stopped answering" after 6 s; forward on -> "Mac is back" after 18 s.
+- codex-audit LOCKED (passwd -l, nologin, sudoers file and key removed; backup in
+  /root/gws-ai-backups/codex-audit-<time>). Grant's root key login checked first. Assistants now
+  reach the AI droplet as root with Grant's Mac key.
+- Left for Grant: Tailscale access rule (only gws-web -> dagda:11434), Mac power settings (pmset).
