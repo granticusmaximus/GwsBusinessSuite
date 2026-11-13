@@ -116,6 +116,8 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
             case "setNightLights": SetNightLights(arguments); return;
             case "setSatelliteScene": SetSatelliteScene(arguments); return;
             case "clearSatelliteScene": SetSatelliteScene([]); return;
+            case "setMeasure": SetMeasure(arguments); return;
+            case "clearMeasure": SetMeasure([]); return;
             case "startPickPoint": _pickPointMode = true; return;
             case "cancelPickPoint": _pickPointMode = false; return;
             case "mapTap": MapTap(arguments); return;
@@ -610,6 +612,25 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
             || !template.StartsWith("https://planetarycomputer.microsoft.com/", StringComparison.Ordinal)) return;
         _satelliteScene = new StretchedTileOverlay(template, 18);
         _map.AddOverlay(_satelliteScene, MKOverlayLevel.AboveRoads);
+    }
+
+    // Analyst tools (13-11-26): the measured path and range rings, as polylines of [lat, lon].
+    private readonly List<IMKOverlay> _measure = [];
+
+    private void SetMeasure(object?[] arguments)
+    {
+        if (_measure.Count > 0) _map.RemoveOverlays(_measure.ToArray());
+        _measure.Clear();
+        var payload = arguments.FirstOrDefault() is string ? arguments.ElementAtOrDefault(1) : arguments.FirstOrDefault();
+        if (payload is not Dictionary<string, object?> spec || spec.GetValueOrDefault("lines") is not object?[] lines) return;
+        foreach (var line in lines.OfType<object?[]>())
+        {
+            var points = line.OfType<object?[]>()
+                .Select(point => point.Length >= 2 && AsDouble(point[0], out var lat) && AsDouble(point[1], out var lon) ? new CLLocationCoordinate2D(lat, lon) : (CLLocationCoordinate2D?)null)
+                .OfType<CLLocationCoordinate2D>().ToArray();
+            if (points.Length >= 2) _measure.Add(MKPolyline.FromCoordinates(points));
+        }
+        if (_measure.Count > 0) _map.AddOverlays(_measure.ToArray(), MKOverlayLevel.AboveLabels);
     }
 
     private void RefreshRadar()

@@ -3398,6 +3398,33 @@ window.tacticalGlobe = (function () {
 
     function clearSatelliteScene(containerId) { setSatelliteScene(containerId, null); }
 
+    // Analyst tools (13-11-26): the measured path and range rings, already worked out by the server
+    // as lines of [lat, lon] (AnalystGeometry), drawn as plain polylines.
+    function setMeasure(containerId, spec) {
+        const entry = viewers.get(containerId || 'tg-viewport');
+        if (!entry) return;
+        if (!entry.measureSource) {
+            entry.measureSource = new Cesium.CustomDataSource('tg-measure');
+            entry.viewer.dataSources.add(entry.measureSource);
+        }
+        const entities = entry.measureSource.entities;
+        entities.removeAll();
+        ((spec && spec.lines) || []).forEach(function (line, index) {
+            if (!line || line.length < 2) return;
+            entities.add({ polyline: {
+                positions: Cesium.Cartesian3.fromDegreesArray([].concat.apply([], line.map(function (p) { return [p[1], p[0]]; }))),
+                width: index === 0 ? 3 : 1.5, clampToGround: false,
+                material: index === 0 ? Cesium.Color.fromCssColorString('#ffe14d') : new Cesium.PolylineDashMaterialProperty({ color: Cesium.Color.fromCssColorString('#7ae0ff'), dashLength: 14 })
+            } });
+        });
+        ((spec && spec.points) || []).forEach(function (p) {
+            entities.add({ position: Cesium.Cartesian3.fromDegrees(p[1], p[0]), point: { pixelSize: 8, color: Cesium.Color.fromCssColorString('#ffe14d'), outlineColor: Cesium.Color.BLACK, outlineWidth: 1, disableDepthTestDistance: Number.POSITIVE_INFINITY } });
+        });
+        entry.viewer.scene.requestRender();
+    }
+
+    function clearMeasure(containerId) { setMeasure(containerId, null); }
+
     // Moves the before/after split (0 = all after, 1 = all before).
     function splitSatelliteScene(containerId, position) {
         const entry = viewers.get(containerId || 'tg-viewport');
@@ -4690,6 +4717,8 @@ window.tacticalGlobe = (function () {
         setSatelliteScene: setSatelliteScene,
         clearSatelliteScene: clearSatelliteScene,
         splitSatelliteScene: splitSatelliteScene,
+        setMeasure: setMeasure,
+        clearMeasure: clearMeasure,
         setCameraPins: setCameraPins,
         setSelectModeEnabled: setSelectModeEnabled,
         openWatchWall: openWatchWall,
@@ -4910,7 +4939,7 @@ window.tacticalGlobe = (function () {
 
         const nativeOperations = new Set([
             'flyTo', 'flyToBounds', 'flyToStreetLevel', 'zoom', 'home', 'dispose',
-            'setTimeMachine', 'clearTimeMachine', 'setMapNotes', 'setThreeD', 'setNightLights', 'setSatelliteScene', 'clearSatelliteScene', 'setAircraft', 'setShips',
+            'setTimeMachine', 'clearTimeMachine', 'setMapNotes', 'setThreeD', 'setNightLights', 'setSatelliteScene', 'clearSatelliteScene', 'setMeasure', 'clearMeasure', 'setAircraft', 'setShips',
             'setAirQuality', 'setPowerOutages', 'setRoadTraffic', 'setTrafficFlow', 'setDriveFollow',
             'setStreetViewMarker', 'clearStreetViewMarker', 'setCameraPins', 'setSelectModeEnabled',
             'setRadarVisible', 'setRadarTimeline', 'setHourlyForecast', 'setWeatherAlerts',

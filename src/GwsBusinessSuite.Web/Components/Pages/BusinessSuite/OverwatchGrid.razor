@@ -421,7 +421,24 @@
                         title="The recent clear-sky Sentinel-2 passes (10 m) over the centre of the view; lay one over the globe, or compare two with a slider" @onclick="ToggleScenesAsync">
                     SATELLITE SCENES [@(_scenesOn ? "ON" : "OFF")]
                 </button>
+                <button type="button" data-tg-toggle="measure" class="tg-toggle @(_measureOn ? "tg-toggle-on" : "")"
+                        title="Click points on the map for distances and bearings, and draw range rings around the first point" @onclick="ToggleMeasureAsync">
+                    MEASURE [@(_measureOn ? "ON" : "OFF")]
+                </button>
             </div>
+            @if (_measureOn)
+            {
+                <div class="tg-sun-tool">
+                    <div class="tg-favorites-empty">CLICK THE MAP TO ADD POINTS (UP TO @MaxMeasurePoints)</div>
+                    @foreach (var line in MeasureLines()) { <div class="tg-hazard-summary">@line</div> }
+                    <label class="tg-favorites-empty" for="tg-measure-rings">RANGE RINGS AROUND THE FIRST POINT (KM, E.G. 5, 25, 100)</label>
+                    <input id="tg-measure-rings" class="tg-input" @bind="_measureRings" @bind:event="oninput" @bind:after="DrawMeasureAsync" />
+                    <div class="tg-layer-buttons">
+                        <button type="button" class="tg-toggle" disabled="@(_measurePoints.Count == 0)" @onclick="UndoMeasurePointAsync">UNDO POINT</button>
+                        <button type="button" class="tg-toggle" disabled="@(_measurePoints.Count == 0)" @onclick="ClearMeasureAsync">CLEAR</button>
+                    </div>
+                </div>
+            }
             @if (_scenesOn)
             {
                 <div class="tg-sun-tool">
@@ -3474,6 +3491,7 @@
     [JSInvokable]
     public Task OnMapPointPicked(double latitude, double longitude)
     {
+        if (_measureOn && _noteDraft is not { Picking: true } && !_streetPicking && _pickingStop is null) return AddMeasurePointAsync(latitude, longitude);
         if (_noteDraft is { Picking: true } draft && !_streetPicking && _pickingStop is null) return AddNotePointAsync(draft, latitude, longitude);
         if (_streetPicking)
         {
@@ -4114,6 +4132,70 @@
             Logger.LogWarning(ex, "Overwatch airport status layer failed");
             _airportSummary = "Airport status couldn't be shown just now.";
         }
+    }
+
+    // ---- Analyst tools (13-11-26): measure distances and bearings; range rings. ----
+    private const int MaxMeasurePoints = 10;
+    private bool _measureOn;
+    private readonly List<(double Lat, double Lon)> _measurePoints = [];
+    private string _measureRings = string.Empty;
+
+    private async Task ToggleMeasureAsync()
+    {
+        _measureOn = !_measureOn;
+        if (_measureOn) await JS.InvokeVoidAsync("tacticalGlobe.startPickPoint", "tg-viewport");
+        else await ClearMeasureAsync(keepArmed: false);
+    }
+
+    private async Task AddMeasurePointAsync(double latitude, double longitude)
+    {
+        if (_measurePoints.Count < MaxMeasurePoints) _measurePoints.Add((latitude, longitude));
+        await DrawMeasureAsync();
+        if (_measureOn) await JS.InvokeVoidAsync("tacticalGlobe.startPickPoint", "tg-viewport");
+        StateHasChanged();
+    }
+
+    private async Task UndoMeasurePointAsync()
+    {
+        if (_measurePoints.Count > 0) _measurePoints.RemoveAt(_measurePoints.Count - 1);
+        await DrawMeasureAsync();
+    }
+
+    private Task ClearMeasureAsync() => ClearMeasureAsync(keepArmed: true);
+
+    private async Task ClearMeasureAsync(bool keepArmed)
+    {
+        _measurePoints.Clear();
+        await JS.InvokeVoidAsync("tacticalGlobe.clearMeasure", "tg-viewport");
+        if (!keepArmed) await JS.InvokeVoidAsync("tacticalGlobe.cancelPickPoint", "tg-viewport");
+    }
+
+    private async Task DrawMeasureAsync()
+    {
+        var lines = new List<IReadOnlyList<double[]>>();
+        if (_measurePoints.Count >= 2) lines.Add(_measurePoints.Select(p => new[] { p.Lat, p.Lon }).ToList());
+        else lines.Add([]);
+        if (_measurePoints.Count >= 1)
+        {
+            var (lat, lon) = _measurePoints[0];
+            foreach (var km in GwsBusinessSuite.Application.Overwatch.AnalystGeometry.ParseRings(_measureRings))
+                lines.Add(GwsBusinessSuite.Application.Overwatch.AnalystGeometry.Ring(lat, lon, km).Select(p => new[] { p.Lat, p.Lon }).ToList());
+        }
+        await JS.InvokeVoidAsync("tacticalGlobe.setMeasure", "tg-viewport",
+            new { lines, points = _measurePoints.Select(p => new[] { p.Lat, p.Lon }).ToList() });
+    }
+
+    private IEnumerable<string> MeasureLines()
+    {
+        var legs = GwsBusinessSuite.Application.Overwatch.AnalystGeometry.Legs(_measurePoints);
+        for (var i = 0; i < legs.Count; i++)
+            yield return $"{i + 1}→{i + 2}: {GwsBusinessSuite.Application.Overwatch.AnalystGeometry.Describe(legs[i])}";
+        if (legs.Count > 1)
+        {
+            var total = legs.Sum(leg => leg.Kilometres);
+            yield return $"TOTAL {total:0.##} km ({total * 0.621371:0.##} mi)";
+        }
+        if (_measurePoints.Count == 1) yield return $"POINT 1: {_measurePoints[0].Lat:0.#####}, {_measurePoints[0].Lon:0.#####}";
     }
 
     // ---- Satellite scenes (13-11-26): Sentinel-2 passes over the view's centre. ----

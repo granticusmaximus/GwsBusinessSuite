@@ -45,7 +45,7 @@ AI droplet:
 | 5 | Chokepoints and ports (IMF PortWatch) | done (ChokepointService, SEA group, Mac map) |
 | 6 | Flight anomalies (emergency squawks, holding, diversions) | squawks done; holding/diversions need track history (not kept) |
 | 7 | Sun and shadow tool | done (SunPosition, TOOLS group) |
-| 8 | Analyst tools (range rings, bearings, areas; saved privately) | |
+| 8 | Analyst tools (range rings, bearings, areas; saved privately) | done: MEASURE (AnalystGeometry); keeping shapes = existing private map notes |
 | 9 | Briefing export (PDF) | |
 | 10 | Multi-signal area rules | |
 
