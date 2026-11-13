@@ -34,7 +34,7 @@ public sealed class TimeMachineServiceTests : IAsyncDisposable
     }
 
     [Fact]
-    public async Task Recorder_ShouldKeepOnlyCrashesClosuresAndHazards_ExtendLastSeen_AndForgetAfter48Hours()
+    public async Task Recorder_ShouldKeepOnlyCrashesClosuresAndHazards_ExtendLastSeen_AndForgetAfter72Hours()
     {
         var factory = await CreateDbAsync();
         var recorder = new IncidentHistoryRecorder(_clock);
@@ -55,7 +55,7 @@ public sealed class TimeMachineServiceTests : IAsyncDisposable
             row.LastSeenUnix.Should().Be(Now.AddMinutes(30).ToUnixTimeSeconds());
         }
 
-        _clock.Now = Now.AddHours(49);
+        _clock.Now = Now.AddHours(73);
         await IncidentHistoryFlushService.FlushAsync(factory, recorder, _clock, default);
         await using (var db = new ApplicationDbContext(_options))
         {
@@ -91,7 +91,7 @@ public sealed class TimeMachineServiceTests : IAsyncDisposable
         snapshot.RadarTileUrl.Should().Contain("ridge::USCOMP-N0Q-202610111600");
         snapshot.IncidentHistoryStartsAt.Should().Be(Now.AddHours(-5));
 
-        (await service.GetAsync("grant", Atlanta, Now.AddDays(-3))).At.Should().Be(Now.AddHours(-24), "the window is the past 24 hours");
+        (await service.GetAsync("grant", Atlanta, Now.AddDays(-4))).At.Should().Be(Now.AddHours(-72), "the window is the past 72 hours");
     }
 
     private static TrafficIncident Incident(string id, string category) =>
@@ -147,5 +147,18 @@ public sealed class TimeMachineServiceTests : IAsyncDisposable
     {
         public Task<IAppDbContext> CreateDbContextAsync(CancellationToken cancellationToken = default) =>
             Task.FromResult<IAppDbContext>(new ApplicationDbContext(options));
+    }
+
+    [Fact]
+    public void Changes_ShouldCountIncidentsStartedAndClearedSinceTheChosenMoment()
+    {
+        var bounds = new GwsBusinessSuite.Application.CameraIntel.BoundingBox(34, 33, -84, -85);
+        GwsBusinessSuite.Domain.Entities.OverwatchIncidentSighting At(long first, long last, double lat = 33.5) =>
+            new() { Key = $"k{first}{last}{lat}", Category = "crash", Latitude = lat, Longitude = -84.5, FirstSeenUnix = first, LastSeenUnix = last };
+        var (started, cleared) = GwsBusinessSuite.Infrastructure.Services.TimeMachineService.Changes(
+            [At(50, 200), At(150, 200), At(150, 120), At(50, 120), At(150, 200, lat: 40)], bounds, atUnix: 100, stillActiveUnix: 190);
+
+        started.Should().Be(1, "began after the moment and still active");
+        cleared.Should().Be(1, "active at the moment, gone now");
     }
 }

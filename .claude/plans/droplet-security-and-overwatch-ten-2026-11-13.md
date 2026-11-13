@@ -38,7 +38,7 @@ AI droplet:
 
 | # | Feature | State |
 | --- | --- | --- |
-| 1 | Time slider for every layer (72 h replay + what changed) | |
+| 1 | Time slider for every layer (72 h replay + what changed) | done for layers with history: 72 h, all begun hazards, started/cleared since; live-only layers (aircraft, ships, outages) keep no history |
 | 2 | Layer health panel | done: TOOLS > LAYER HEALTH (OverwatchLayerCatalog; problems since page open) |
 | 3 | Satellite scenes on click (Earth Search STAC, before/after) | done via Planetary Computer (STAC + tiles, CORS); GIBS HLS too coarse in 3857 |
 | 4 | Night lights (NASA Black Marble via GIBS) | done (web + Mac map) |
@@ -97,3 +97,4 @@ Decisions (Grant, 13-11-26, as recommended):
   reach the AI droplet as root with Grant's Mac key.
 - Left for Grant: Tailscale access rule (only gws-web -> dagda:11434), Mac power settings (pmset).
 - 13-11-26: Tailscale access rule saved by Grant (gws-web -> dagda:11434 only; other Mac ports checked blocked). Mac pmset set. Overwatch 4, 6, 7 built.
+- 13-11-26: ALL TEN OVERWATCH FEATURES DONE (each pushed after the release gate).

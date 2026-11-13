@@ -52,7 +52,8 @@ public sealed class IncidentHistoryFlushService(
     TimeProvider timeProvider,
     ILogger<IncidentHistoryFlushService> logger) : BackgroundService
 {
-    public static readonly TimeSpan Retention = TimeSpan.FromHours(48);
+    // 72 h since 13-11-26, matching the time machine's window.
+    public static readonly TimeSpan Retention = TimeSpan.FromHours(72);
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -118,11 +119,16 @@ public sealed record TimeMachineSnapshot(
     DateTimeOffset At,
     string RadarTileUrl,
     IReadOnlyList<OverwatchIncidentSighting> Incidents,
-    IReadOnlyList<HazardFeature> Earthquakes,
+    // Every hazard that had begun by then and is still listed (earthquakes, fires, floods, storms...).
+    IReadOnlyList<HazardFeature> Hazards,
     IReadOnlyList<TimeMachineCamera> Cameras,
-    DateTimeOffset? IncidentHistoryStartsAt);
+    DateTimeOffset? IncidentHistoryStartsAt,
+    // What changed between then and now in the view: incidents that started, and that cleared.
+    int StartedSince = 0,
+    int ClearedSince = 0);
 
-// Overwatch's time machine: what the current view looked like at a moment in the past 24 hours.
+// Overwatch's time machine: what the current view looked like at a moment in the past 72 hours
+// (24 until 13-11-26).
 //   - radar: the Iowa Environmental Mesonet's archived national mosaic for that 5-minute slot
 //     (ridge::USCOMP-N0Q-yyyyMMddHHmm, verified live 2026-10-11);
 //   - incidents: crashes/closures/hazards Overwatch saw active then (from when recording began);
@@ -135,7 +141,7 @@ public sealed class TimeMachineService(
     CameraTimelapseStore frames,
     TimeProvider timeProvider)
 {
-    public static readonly TimeSpan Window = TimeSpan.FromHours(24);
+    public static readonly TimeSpan Window = TimeSpan.FromHours(72);
     // A sighting counts as still active this long after it was last seen (lookups are ~10 min apart).
     private static readonly TimeSpan SightingGrace = TimeSpan.FromMinutes(15);
     private static readonly TimeSpan FrameTolerance = TimeSpan.FromMinutes(20);
@@ -167,9 +173,11 @@ public sealed class TimeMachineService(
             ? await db.OverwatchIncidentSightings.AsNoTracking().MinAsync(s => s.FirstSeenUnix, ct)
             : null;
 
-        var quakes = (await hazards.GetHazardsAsync(bounds, ct)).Features
-            .Where(f => f.Kind == "earthquake" && f.ObservedAt is { } when && when <= at && when >= now - Window)
+        var begun = (await hazards.GetHazardsAsync(bounds, ct)).Features
+            .Where(f => f.ObservedAt is { } when && when <= at && when >= now - Window)
             .ToList();
+        var (started, cleared) = Changes(await db.OverwatchIncidentSightings.AsNoTracking()
+            .Where(s => s.LastSeenUnix >= graceUnix).ToListAsync(ct), bounds, atUnix, now.ToUnixTimeSeconds() - (long)SightingGrace.TotalSeconds);
 
         var cameras = new List<TimeMachineCamera>();
         foreach (var camera in await favorites.GetFavoritesAsync(username, ct))
@@ -181,7 +189,16 @@ public sealed class TimeMachineService(
                 $"/admin/api/overwatch/timelapse/{Uri.EscapeDataString(camera.Id)}/{Uri.EscapeDataString(nearest.FileName)}", nearest.CapturedAt));
         }
 
-        return new TimeMachineSnapshot(at, RadarTileUrl(at, now), inView, quakes, cameras,
-            earliest is { } first ? DateTimeOffset.FromUnixTimeSeconds(first) : null);
+        return new TimeMachineSnapshot(at, RadarTileUrl(at, now), inView, begun, cameras,
+            earliest is { } first ? DateTimeOffset.FromUnixTimeSeconds(first) : null, started, cleared);
+    }
+
+    // Incidents in the view that started after the chosen moment, and those active then that have
+    // since cleared (not seen within the grace period of now).
+    public static (int Started, int Cleared) Changes(IEnumerable<OverwatchIncidentSighting> sightings, BoundingBox bounds, long atUnix, long stillActiveUnix)
+    {
+        var inView = sightings.Where(s => bounds.Contains(s.Latitude, s.Longitude)).ToList();
+        return (inView.Count(s => s.FirstSeenUnix > atUnix && s.LastSeenUnix >= stillActiveUnix),
+            inView.Count(s => s.FirstSeenUnix <= atUnix && s.LastSeenUnix < stillActiveUnix));
     }
 }

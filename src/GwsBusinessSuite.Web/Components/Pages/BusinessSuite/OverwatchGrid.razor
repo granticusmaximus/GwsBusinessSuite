@@ -620,7 +620,7 @@
                     <i class="bi @(_tmPlaying ? "bi-pause-fill" : "bi-play-fill")" aria-hidden="true"></i>
                 </button>
                 <input type="range" class="tg-tm-slider" min="0" max="@TimeMachineSteps" step="1" value="@(TimeMachineSteps - _tmMinutesAgo / 10)"
-                       aria-label="Time in the past 24 hours" @oninput="OnTimeMachineSliding" @onchange="OnTimeMachineChangedAsync" />
+                       aria-label="Time in the past 72 hours" @oninput="OnTimeMachineSliding" @onchange="OnTimeMachineChangedAsync" />
                 <button type="button" class="tg-pill" @onclick="ToggleTimeMachineAsync">LIVE</button>
             </div>
             <div class="tg-tm-label" role="status">
@@ -632,7 +632,8 @@
                 }
                 @if (_timeMachine is { } tm)
                 {
-                    <span>· RADAR · @tm.Incidents.Count INCIDENTS · @tm.Earthquakes.Count QUAKES · @tm.Cameras.Count CAMERAS</span>
+                    <span>· RADAR · @tm.Incidents.Count INCIDENTS · @tm.Hazards.Count HAZARDS · @tm.Cameras.Count CAMERAS</span>
+                    <span>· SINCE THEN: @tm.StartedSince STARTED, @tm.ClearedSince CLEARED</span>
                     @if (tm.IncidentHistoryStartsAt is { } since && since > TimeMachineAt)
                     {
                         <span class="tg-tm-note">Incident history starts @since.ToLocalGwsDateTime()</span>
@@ -1473,7 +1474,7 @@
         <button type="button" class="tg-icon-btn" aria-label="Zoom in" title="Zoom in" @onclick="() => ZoomAsync(true)"><i class="bi bi-plus-lg" aria-hidden="true"></i></button>
         <button type="button" class="tg-icon-btn" aria-label="Zoom out" title="Zoom out" @onclick="() => ZoomAsync(false)"><i class="bi bi-dash-lg" aria-hidden="true"></i></button>
         <button type="button" class="tg-icon-btn" aria-label="Whole globe" title="Whole globe" @onclick="GoHomeAsync"><i class="bi bi-globe-americas" aria-hidden="true"></i></button>
-        <button type="button" class="tg-icon-btn @(_timeMachineOn ? "is-active" : "")" aria-label="Time machine: see the past 24 hours" title="Time machine: see the past 24 hours"
+        <button type="button" class="tg-icon-btn @(_timeMachineOn ? "is-active" : "")" aria-label="Time machine: see the past 72 hours" title="Time machine: see the past 72 hours"
                 aria-pressed="@(_timeMachineOn ? "true" : "false")" @onclick="ToggleTimeMachineAsync"><i class="bi bi-clock-history" aria-hidden="true"></i></button>
         <button type="button" class="tg-icon-btn @(_briefFacts is not null ? "is-active" : "")" aria-label="Brief me on this view" title="Brief me on this view"
                 @onclick="BriefViewAsync"><i class="bi bi-card-text" aria-hidden="true"></i></button>
@@ -2821,8 +2822,9 @@
     private GwsBusinessSuite.Domain.Entities.OverwatchAreaAlert? _detection;
     private GwsBusinessSuite.Domain.Entities.OverwatchCameraWatchState? _detectionCamera;
 
-    // ---- Time machine (TimeMachineService): the past 24 hours, 10 minutes at a time ----
-    private const int TimeMachineSteps = 144;
+    // ---- Time machine (TimeMachineService): the past 72 hours, 10 minutes at a time ----
+    // 72 hours in 10-minute steps (13-11-26; was 24 hours).
+    private const int TimeMachineSteps = 432;
     private bool _timeMachineOn;
     private int _tmMinutesAgo = 60;
     private bool _tmBusy;
@@ -2890,7 +2892,7 @@
                     lat = i.Latitude, lon = i.Longitude, category = i.Category,
                     title = $"{GwsBusinessSuite.Application.TrafficIncidents.IncidentCategories.Label(i.Category)}: {i.RoadwayName}"
                 }),
-                earthquakes = snapshot.Earthquakes.Select(q => new { lat = q.Latitude, lon = q.Longitude, title = q.Title })
+                earthquakes = snapshot.Hazards.Select(q => new { lat = q.Latitude, lon = q.Longitude, title = q.Title })
             });
             if (_worldNewsOn) await PushWorldNewsAsync();
             if (_worldNewsShading) await PushWorldNewsShadingAsync();
