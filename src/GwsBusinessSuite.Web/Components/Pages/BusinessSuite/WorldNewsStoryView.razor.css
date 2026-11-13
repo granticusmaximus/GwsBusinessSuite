@@ -441,3 +441,11 @@
 .story-trust del { color: var(--gws-text-soft); }
 .story-trust ins { text-decoration: none; color: var(--gws-text-strong); }
 .story-trust-edit-kind { font-size: .75rem; text-transform: uppercase; letter-spacing: .04em; color: var(--gws-text-soft); }
+
+.story-trust-cited { margin: .4rem 0 0; color: var(--gws-text-strong); }
+.story-trust-cited-label { margin-right: .4rem; color: var(--gws-text-soft); }
+.story-trust-rules { margin: .4rem 0 0; font-size: .78rem; color: var(--gws-text-soft); }
+
+.story-trust-challenge-item { margin: .35rem 0; color: var(--gws-text-strong); font-size: .88rem; }
+.story-trust-challenge-form { display: grid; gap: .4rem; margin-top: .5rem; max-width: 40rem; }
+.story-trust-challenge-form button { justify-self: start; }

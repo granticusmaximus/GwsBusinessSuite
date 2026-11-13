@@ -87,6 +87,14 @@ public sealed class WorldNewsStore
                 PRIMARY KEY (username, event_id));
             CREATE TABLE IF NOT EXISTS article_translations (article_id TEXT PRIMARY KEY, english TEXT NOT NULL, created_at INTEGER NOT NULL);
             CREATE TABLE IF NOT EXISTS surge_alerts_sent (situation_id TEXT PRIMARY KEY, sent_at INTEGER NOT NULL);
+            CREATE TABLE IF NOT EXISTS outlet_owners (outlet TEXT NOT NULL, owner TEXT NOT NULL, fetched_at INTEGER NOT NULL, PRIMARY KEY (outlet, owner));
+            CREATE TABLE IF NOT EXISTS label_snapshots (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, event_id TEXT NOT NULL, level TEXT NOT NULL, reason TEXT NOT NULL, independent INTEGER NOT NULL,
+                outlets INTEGER NOT NULL, rules_version TEXT NOT NULL, taken_at INTEGER NOT NULL, previous_hash TEXT NOT NULL, hash TEXT NOT NULL);
+            CREATE INDEX IF NOT EXISTS ix_label_snapshots_event ON label_snapshots (event_id, id);
+            CREATE TABLE IF NOT EXISTS label_challenges (
+                id TEXT PRIMARY KEY, event_id TEXT NOT NULL, username TEXT NOT NULL, note TEXT NOT NULL, evidence_url TEXT, created_at INTEGER NOT NULL,
+                status TEXT NOT NULL, resolved_by TEXT, resolution TEXT, resolved_at INTEGER);
             CREATE TABLE IF NOT EXISTS custom_feeds (
                 url TEXT PRIMARY KEY, name TEXT NOT NULL, language TEXT NOT NULL, country TEXT NOT NULL, kind TEXT NOT NULL,
                 added_by TEXT NOT NULL, added_at INTEGER NOT NULL);
@@ -274,6 +282,163 @@ public sealed class WorldNewsStore
         command.CommandText = "SELECT COUNT(*) FROM events WHERE first_seen >= $since";
         command.Parameters.AddWithValue("$since", since.ToUnixTimeSeconds());
         return Convert.ToInt32(command.ExecuteScalar());
+    }
+
+    // A3: outlets' current owners from Wikidata, replaced in full by each weekly refresh.
+    public IReadOnlyList<(string Outlet, string Owner)> OutletOwners(out DateTimeOffset? fetchedAt)
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT outlet, owner, fetched_at FROM outlet_owners";
+        using var reader = command.ExecuteReader();
+        var rows = new List<(string, string)>();
+        fetchedAt = null;
+        while (reader.Read())
+        {
+            rows.Add((reader.GetString(0), reader.GetString(1)));
+            fetchedAt = DateTimeOffset.FromUnixTimeSeconds(reader.GetInt64(2));
+        }
+        return rows;
+    }
+
+    public void ReplaceOutletOwners(IEnumerable<(string Outlet, string Owner)> rows, DateTimeOffset now)
+    {
+        using var connection = Open();
+        using var transaction = connection.BeginTransaction();
+        Execute(connection, "DELETE FROM outlet_owners");
+        using var command = connection.CreateCommand();
+        command.CommandText = "INSERT OR IGNORE INTO outlet_owners (outlet, owner, fetched_at) VALUES ($outlet, $owner, $at)";
+        var outlet = command.Parameters.Add(new SqliteParameter { ParameterName = "$outlet" });
+        var owner = command.Parameters.Add(new SqliteParameter { ParameterName = "$owner" });
+        command.Parameters.AddWithValue("$at", now.ToUnixTimeSeconds());
+        foreach (var row in rows)
+        {
+            outlet.Value = row.Outlet;
+            owner.Value = row.Owner;
+            command.ExecuteNonQuery();
+        }
+        transaction.Commit();
+    }
+
+    // A7/A8: labels over time, hash-chained. Only a change of label (level, reason, counts or rules)
+    // adds a snapshot. Never pruned: a gap would break the chain.
+    public int AppendLabelSnapshots(IEnumerable<(string EventId, string Level, string Reason, int Independent, int Outlets)> labels, string rulesVersion, DateTimeOffset now)
+    {
+        using var connection = Open();
+        using var transaction = connection.BeginTransaction();
+        string previous;
+        using (var last = connection.CreateCommand())
+        {
+            last.CommandText = "SELECT hash FROM label_snapshots ORDER BY id DESC LIMIT 1";
+            previous = last.ExecuteScalar() as string ?? LabelLedger.Genesis;
+        }
+        using var latest = connection.CreateCommand();
+        latest.CommandText = "SELECT level, reason, independent, outlets, rules_version FROM label_snapshots WHERE event_id = $event ORDER BY id DESC LIMIT 1";
+        var latestEvent = latest.Parameters.Add(new SqliteParameter { ParameterName = "$event" });
+        using var insert = connection.CreateCommand();
+        insert.CommandText = "INSERT INTO label_snapshots (event_id, level, reason, independent, outlets, rules_version, taken_at, previous_hash, hash) "
+            + "VALUES ($event, $level, $reason, $independent, $outlets, $rules, $at, $previous, $hash)";
+        var names = new[] { "$event", "$level", "$reason", "$independent", "$outlets", "$rules", "$at", "$previous", "$hash" };
+        var parameters = names.Select(name => insert.Parameters.Add(new SqliteParameter { ParameterName = name })).ToArray();
+        var added = 0;
+        foreach (var label in labels)
+        {
+            latestEvent.Value = label.EventId;
+            using (var reader = latest.ExecuteReader())
+            {
+                if (reader.Read() && reader.GetString(0) == label.Level && reader.GetString(1) == label.Reason && reader.GetInt32(2) == label.Independent
+                    && reader.GetInt32(3) == label.Outlets && reader.GetString(4) == rulesVersion) continue;
+            }
+            var hash = LabelLedger.HashOf(previous, label.EventId, label.Level, label.Reason, label.Independent, label.Outlets, rulesVersion, now);
+            object[] values = [label.EventId, label.Level, label.Reason, label.Independent, label.Outlets, rulesVersion, now.ToUnixTimeSeconds(), previous, hash];
+            for (var i = 0; i < values.Length; i++) parameters[i].Value = values[i];
+            insert.ExecuteNonQuery();
+            previous = hash;
+            added++;
+        }
+        transaction.Commit();
+        return added;
+    }
+
+    public IReadOnlyList<LabelSnapshot> LabelSnapshots(string? eventId = null)
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT id, event_id, level, reason, independent, outlets, rules_version, taken_at, previous_hash, hash FROM label_snapshots "
+            + (eventId is null ? "" : "WHERE event_id = $event ") + "ORDER BY id";
+        if (eventId is not null) command.Parameters.AddWithValue("$event", eventId);
+        using var reader = command.ExecuteReader();
+        var snapshots = new List<LabelSnapshot>();
+        while (reader.Read())
+            snapshots.Add(new LabelSnapshot(reader.GetInt64(0), reader.GetString(1), reader.GetString(2), reader.GetString(3), reader.GetInt32(4), reader.GetInt32(5),
+                reader.GetString(6), DateTimeOffset.FromUnixTimeSeconds(reader.GetInt64(7)), reader.GetString(8), reader.GetString(9)));
+        return snapshots;
+    }
+
+    // A7: each story labelled at least minAge ago: its first label, its latest, and whether any of its
+    // reports carries a correction.
+    public IReadOnlyList<(string First, string Latest, bool Corrected)> CalibrationOutcomes(DateTimeOffset firstLabelledBefore)
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT f.level, l.level, EXISTS (SELECT 1 FROM article_edits ae JOIN articles a ON a.id = ae.article_id WHERE a.event_id = g.event_id AND ae.kind = 'correction')
+            FROM (SELECT event_id, MIN(id) AS first_id, MAX(id) AS last_id FROM label_snapshots GROUP BY event_id HAVING MIN(taken_at) <= $before) g
+            JOIN label_snapshots f ON f.id = g.first_id JOIN label_snapshots l ON l.id = g.last_id
+            """;
+        command.Parameters.AddWithValue("$before", firstLabelledBefore.ToUnixTimeSeconds());
+        using var reader = command.ExecuteReader();
+        var outcomes = new List<(string, string, bool)>();
+        while (reader.Read()) outcomes.Add((reader.GetString(0), reader.GetString(1), reader.GetInt64(2) != 0));
+        return outcomes;
+    }
+
+    // A9: challenges to a label.
+    public LabelChallenge AddChallenge(string eventId, string username, string note, string? evidenceUrl, DateTimeOffset now)
+    {
+        var challenge = new LabelChallenge(Guid.NewGuid().ToString("N"), eventId, username, note.Trim(), evidenceUrl?.Trim() is { Length: > 0 } url ? url : null,
+            now, LabelChallengeStatuses.Open, null, null, null);
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "INSERT INTO label_challenges (id, event_id, username, note, evidence_url, created_at, status) VALUES ($id, $event, $user, $note, $url, $at, 'open')";
+        command.Parameters.AddWithValue("$id", challenge.Id);
+        command.Parameters.AddWithValue("$event", eventId);
+        command.Parameters.AddWithValue("$user", username);
+        command.Parameters.AddWithValue("$note", challenge.Note);
+        command.Parameters.AddWithValue("$url", (object?)challenge.EvidenceUrl ?? DBNull.Value);
+        command.Parameters.AddWithValue("$at", now.ToUnixTimeSeconds());
+        command.ExecuteNonQuery();
+        return challenge;
+    }
+
+    public IReadOnlyList<LabelChallenge> Challenges(string? eventId = null)
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT id, event_id, username, note, evidence_url, created_at, status, resolved_by, resolution, resolved_at FROM label_challenges "
+            + (eventId is null ? "" : "WHERE event_id = $event ") + "ORDER BY created_at DESC";
+        if (eventId is not null) command.Parameters.AddWithValue("$event", eventId);
+        using var reader = command.ExecuteReader();
+        var challenges = new List<LabelChallenge>();
+        while (reader.Read())
+            challenges.Add(new LabelChallenge(reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3),
+                reader.IsDBNull(4) ? null : reader.GetString(4), DateTimeOffset.FromUnixTimeSeconds(reader.GetInt64(5)), reader.GetString(6),
+                reader.IsDBNull(7) ? null : reader.GetString(7), reader.IsDBNull(8) ? null : reader.GetString(8),
+                reader.IsDBNull(9) ? null : DateTimeOffset.FromUnixTimeSeconds(reader.GetInt64(9))));
+        return challenges;
+    }
+
+    public bool ResolveChallenge(string id, bool upheld, string resolvedBy, string resolution, DateTimeOffset now)
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "UPDATE label_challenges SET status = $status, resolved_by = $by, resolution = $resolution, resolved_at = $at WHERE id = $id AND status = 'open'";
+        command.Parameters.AddWithValue("$status", upheld ? LabelChallengeStatuses.Upheld : LabelChallengeStatuses.Rejected);
+        command.Parameters.AddWithValue("$by", resolvedBy);
+        command.Parameters.AddWithValue("$resolution", resolution.Trim());
+        command.Parameters.AddWithValue("$at", now.ToUnixTimeSeconds());
+        command.Parameters.AddWithValue("$id", id);
+        return command.ExecuteNonQuery() > 0;
     }
 
     // Feeds added on the sources page (1.15) and feeds paused there, built-in or added.

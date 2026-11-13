@@ -132,8 +132,15 @@ public static partial class SourceIndependence
         return new StoryIndependence(news.Select(a => a.Outlet).Distinct(StringComparer.OrdinalIgnoreCase).Count(), origins);
     }
 
+    // Owners found on Wikidata (OwnershipGraph), set by the host when it loads or refreshes them; the
+    // hand list wins where both name an outlet.
+    public static volatile IReadOnlyDictionary<string, string> ImportedOwners = new Dictionary<string, string>();
+
+    private static string? OwnerOf(string outlet) =>
+        Owners.TryGetValue(outlet.Trim(), out var owner) ? owner : ImportedOwners.TryGetValue(outlet.Trim(), out var imported) ? imported : null;
+
     private static (string Name, string Kind) OwnOrigin(string outlet) =>
-        Owners.TryGetValue(outlet.Trim(), out var owner) ? (owner, "owner") : (outlet, "outlet");
+        OwnerOf(outlet) is { } owner ? (owner, "owner") : (outlet, "outlet");
 
     public static (string Name, string Kind) OriginOf(WorldArticle article)
     {
@@ -142,7 +149,7 @@ public static partial class SourceIndependence
         {
             if (credit.IsMatch(text)) return (name, "wire");
         }
-        if (Owners.TryGetValue(article.Outlet.Trim(), out var owner)) return (owner, "owner");
+        if (OwnerOf(article.Outlet) is { } owner) return (owner, "owner");
         return (article.Outlet, "outlet");
     }
 
@@ -151,13 +158,14 @@ public static partial class SourceIndependence
 
     private static string Letters(string text) => new(text.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
 
-    [GeneratedRegex(@"\(Reuters\)|\bReuters\s*[-–—]|\|\s*Reuters\b|via Reuters\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    // "told Reuters", "citing Reuters", "Reuters reported" too (A2, 13-11-26): the report rests on Reuters.
+    [GeneratedRegex(@"\(Reuters\)|\bReuters\s*[-–—]|\|\s*Reuters\b|via Reuters\b|\b(told|according to|citing|cited by|reported by)\s+Reuters\b|\bReuters\s+(reported|reports)\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex ReutersCredit();
 
-    [GeneratedRegex(@"\(AP\)|\bAP\s*[-–—]\s|\(Associated Press\)|\bAssociated Press\s*[-–—]|via AP\b", RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"\(AP\)|\bAP\s*[-–—]\s|\(Associated Press\)|\bAssociated Press\s*[-–—]|via AP\b|\b(?i:told|according to|citing|reported by)\s+(?i:the\s+)?(AP|Associated Press)\b|\b[Tt]he Associated Press\s+(reported|reports)\b", RegexOptions.CultureInvariant)]
     private static partial Regex ApCredit();
 
-    [GeneratedRegex(@"\(AFP\)|\bAFP\s*[-–—]\s|via AFP\b|Agence France-Presse\s*[-–—]", RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"\(AFP\)|\bAFP\s*[-–—]\s|via AFP\b|Agence France-Presse\s*[-–—]|\b(?i:told|according to|citing|reported by)\s+AFP\b|\bAFP\s+(reported|reports)\b", RegexOptions.CultureInvariant)]
     private static partial Regex AfpCredit();
 
     [GeneratedRegex(@"\(dpa\)|\bdpa\s*[-–—]\s", RegexOptions.CultureInvariant)]
@@ -194,9 +202,15 @@ public sealed record StoryConfidence(StoryConfidenceLevel Level, string Reason)
 // Single source is one, however many outlets repeated it.
 public static class StoryConfidenceRules
 {
+    // The version of every rule behind a label (independence, confidence, the gate). Each label is
+    // stamped with it (A7), so a later change of rules can be traced and old labels re-scored.
+    public const string RulesVersion = "2026-11-13.1";
     public const int ConfirmedIndependent = 3;
+    // A4: a story still on one source this long after its first report is called unconfirmed.
+    public static readonly TimeSpan RumourClock = TimeSpan.FromHours(12);
 
-    public static StoryConfidence Assess(StoryIndependence independence, string? primarySource = null, int disputedFigures = 0, string? factCheckVerdict = null)
+    public static StoryConfidence Assess(StoryIndependence independence, string? primarySource = null, int disputedFigures = 0, string? factCheckVerdict = null,
+        DateTimeOffset? firstSeen = null, DateTimeOffset? now = null)
     {
         if (factCheckVerdict is not null)
             return new(StoryConfidenceLevel.Disputed, $"A fact-check rates it {factCheckVerdict}.");
@@ -208,6 +222,8 @@ public static class StoryConfidenceRules
         {
             >= ConfirmedIndependent => new(StoryConfidenceLevel.Confirmed, $"{independence.Independent} independent sources."),
             2 => new(StoryConfidenceLevel.Reported, "2 independent sources."),
+            _ when firstSeen is { } first && now is { } at && at - first >= RumourClock =>
+                new(StoryConfidenceLevel.SingleSource, $"Still one source after {(int)(at - first).TotalHours} hours: unconfirmed."),
             _ => new(StoryConfidenceLevel.SingleSource, independence.Outlets > 1
                 ? $"One source, repeated by {independence.Outlets} outlets."
                 : "One outlet so far."),
@@ -243,7 +259,8 @@ public static partial class ArticleEdits
 // What the story page shows about trust: independent sources, the label, the edits, and what
 // confirmed or disputed it.
 public sealed record StoryTrustSummary(StoryIndependence Independence, StoryConfidence Confidence, IReadOnlyList<ArticleEdit> Edits,
-    string? PrimarySource, string? FactCheckVerdict, IReadOnlyList<FactCheck>? FactChecks = null);
+    string? PrimarySource, string? FactCheckVerdict, IReadOnlyList<FactCheck>? FactChecks = null, IReadOnlyList<CitedSource>? CitedSources = null,
+    string RulesVersion = StoryConfidenceRules.RulesVersion);
 
 // 1.7: a fact-checker's report in a story. Verdict is the rating its headline or description gives
 // ("False", "Misleading"), or null when it gives none (FactCheck.org rarely does).
@@ -544,4 +561,258 @@ public static partial class WikipediaCurrentEvents
 
     [GeneratedRegex(@"\s+([,.;:)])", RegexOptions.CultureInvariant)]
     private static partial Regex SpaceBeforePunctuation();
+}
+
+// A1/A2 (13-11-26): who the coverage relies on. "According to the health ministry", "police said
+// in a statement": the sources reports quote, counted by how many outlets lean on each. Thirty
+// outlets quoting one ministry are one source for that claim, however independent they are.
+public sealed record CitedSource(string Name, int Outlets, string FirstOutlet, DateTimeOffset FirstSeen);
+
+public static partial class CitedSources
+{
+    public static IReadOnlyList<CitedSource> Find(IEnumerable<WorldArticle> articles, int max = 8)
+    {
+        var bySource = new Dictionary<string, (HashSet<string> Outlets, string First, DateTimeOffset At)>(StringComparer.OrdinalIgnoreCase);
+        foreach (var article in articles.OrderBy(a => a.SeenAt))
+        {
+            foreach (var name in NamesIn(article.Title + ". " + article.Snippet))
+            {
+                if (!bySource.TryGetValue(name, out var entry)) bySource[name] = entry = (new HashSet<string>(StringComparer.OrdinalIgnoreCase), article.Outlet, article.SeenAt);
+                entry.Outlets.Add(article.Outlet);
+            }
+        }
+        return bySource.Select(pair => new CitedSource(pair.Key, pair.Value.Outlets.Count, pair.Value.First, pair.Value.At))
+            .OrderByDescending(source => source.Outlets).ThenBy(source => source.FirstSeen)
+            .Take(max).ToList();
+    }
+
+    public static IEnumerable<string> NamesIn(string text)
+    {
+        foreach (Match match in AccordingTo().Matches(text)) if (Clean(match.Groups["who"].Value) is { } name) yield return name;
+        foreach (Match match in Statement().Matches(text)) if (Clean(match.Groups["who"].Value) is { } name) yield return name;
+    }
+
+    // "the Health Ministry" -> "health ministry"; nothing for pronouns and fillers.
+    private static string? Clean(string raw)
+    {
+        var name = Regex.Replace(raw.Trim(), @"^(the|a|an|local|senior|top)\s+", string.Empty, RegexOptions.IgnoreCase).Trim().TrimEnd('.', ',', ';');
+        if (name.Length < 2 || name.Length > 60) return null;
+        if (Filler.Contains(name)) return null;
+        return name.ToLowerInvariant();
+    }
+
+    private static readonly HashSet<string> Filler = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "he", "she", "they", "it", "we", "him", "her", "them", "reports", "a report", "report", "data", "figures", "estimates", "sources", "media reports", "some", "many",
+    };
+
+    // "according to [the] X" where X is a capitalised name or a known role.
+    [GeneratedRegex(@"\baccording to (?<who>(?:the\s+)?(?:[A-Z][\w'’&.-]*(?:\s+(?:of|for|and)\s+|\s+)?){1,6}|(?:the\s+)?(?:local\s+)?(?:police|officials|authorities|witnesses|residents|rescuers|doctors|the military|the army|(?:health|interior|foreign|defen[cs]e|finance)\s+ministry|government))", RegexOptions.CultureInvariant)]
+    private static partial Regex AccordingTo();
+
+    // "[The] X said in a statement".
+    [GeneratedRegex(@"(?<who>(?:[Tt]he\s+)?(?:[A-Z][\w'’&.-]*\s+){1,5}|(?:[Tt]he\s+)?(?:police|officials|authorities|military|army|ministry|government)\s+)said in a statement", RegexOptions.CultureInvariant)]
+    private static partial Regex Statement();
+}
+
+// A7: a story's label at one moment, stamped with the rules that made it. Hash chains each snapshot
+// to the one before it (A8): rewriting or deleting any snapshot breaks every hash after it.
+public sealed record LabelSnapshot(long Id, string EventId, string Level, string Reason, int Independent, int Outlets, string RulesVersion,
+    DateTimeOffset TakenAt, string PreviousHash, string Hash);
+
+public static class LabelLedger
+{
+    public const string Genesis = "genesis";
+
+    public static string HashOf(string previousHash, string eventId, string level, string reason, int independent, int outlets, string rulesVersion, DateTimeOffset takenAt)
+    {
+        var canonical = string.Join('\u001f', previousHash, eventId, level, reason, independent.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            outlets.ToString(System.Globalization.CultureInfo.InvariantCulture), rulesVersion, takenAt.ToUnixTimeSeconds().ToString(System.Globalization.CultureInfo.InvariantCulture));
+        return Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(canonical)));
+    }
+
+    // Null when every snapshot hashes to what it says and points at the one before it; otherwise the
+    // id of the first one that doesn't.
+    public static long? FirstBroken(IEnumerable<LabelSnapshot> snapshotsInOrder)
+    {
+        var previous = Genesis;
+        foreach (var snapshot in snapshotsInOrder)
+        {
+            if (snapshot.PreviousHash != previous
+                || snapshot.Hash != HashOf(snapshot.PreviousHash, snapshot.EventId, snapshot.Level, snapshot.Reason, snapshot.Independent, snapshot.Outlets, snapshot.RulesVersion, snapshot.TakenAt))
+                return snapshot.Id;
+            previous = snapshot.Hash;
+        }
+        return null;
+    }
+}
+
+// The label a story would get now from its reports alone (the snapshots' rule: no network checks),
+// so every snapshot is reproducible from the stored reports.
+public static class StoryLabel
+{
+    public static StoryConfidence For(IReadOnlyList<WorldArticle> articles, DateTimeOffset firstSeen, DateTimeOffset now, out StoryIndependence independence)
+    {
+        independence = SourceIndependence.Assess(articles);
+        return StoryConfidenceRules.Assess(independence, PrimarySources.InReports(articles), CoverageClaims.For(articles).Count(f => f.Disputed),
+            FactChecks.DisputingVerdict(FactChecks.In(articles)), firstSeen, now);
+    }
+}
+
+// A7: how well first labels held up. For each first label: how many stories, how many still carry
+// it or a stronger one, how many became Disputed, and how many had a correction among their reports.
+public sealed record CalibrationRow(string Level, int Stories, int Held, int BecameDisputed, int Corrected)
+{
+    public int HeldPercent => Stories == 0 ? 0 : (int)Math.Round(100.0 * Held / Stories);
+}
+
+public static class Calibration
+{
+    private static int Rank(string level) => level switch { "Confirmed" => 3, "Reported" => 2, "SingleSource" => 1, _ => 0 };
+
+    // outcomes: each story's first label, its latest label, and whether a correction appeared.
+    public static IReadOnlyList<CalibrationRow> Score(IEnumerable<(string First, string Latest, bool Corrected)> outcomes) =>
+        outcomes.GroupBy(o => o.First)
+            .Select(group => new CalibrationRow(group.Key, group.Count(),
+                group.Count(o => o.Latest != "Disputed" && Rank(o.Latest) >= Rank(o.First)),
+                group.Count(o => o.Latest == "Disputed" && o.First != "Disputed"),
+                group.Count(o => o.Corrected)))
+            .OrderByDescending(row => Rank(row.Level))
+            .ToList();
+}
+
+// A9: a challenge to a story's label, and what came of it.
+public sealed record LabelChallenge(string Id, string EventId, string Username, string Note, string? EvidenceUrl, DateTimeOffset CreatedAt,
+    string Status, string? ResolvedBy, string? Resolution, DateTimeOffset? ResolvedAt);
+
+public static class LabelChallengeStatuses
+{
+    public const string Open = "open";
+    public const string Upheld = "upheld";
+    public const string Rejected = "rejected";
+}
+
+// A5: whose voice the coverage carries. For each region: its share of the stories (by where they
+// happen), its share of the reports (by where the outlet is based), and how often a story about it
+// was first reported by an outlet from it.
+public sealed record BalanceRow(string Region, int Stories, double StoryShare, double ReportShare, int LedLocally)
+{
+    public int LocalLeadPercent => Stories == 0 ? 0 : (int)Math.Round(100.0 * LedLocally / Stories);
+}
+
+public static class CoverageBalance
+{
+    public static IReadOnlyList<BalanceRow> Compute(IEnumerable<(string StoryRegion, string LeadRegion)> stories, IReadOnlyDictionary<string, int> reportsByRegion)
+    {
+        var list = stories.ToList();
+        var totalReports = Math.Max(1, reportsByRegion.Values.Sum());
+        var totalStories = Math.Max(1, list.Count);
+        return list.Select(s => s.StoryRegion).Concat(reportsByRegion.Keys).Distinct(StringComparer.OrdinalIgnoreCase)
+            .Select(region =>
+            {
+                var about = list.Where(s => string.Equals(s.StoryRegion, region, StringComparison.OrdinalIgnoreCase)).ToList();
+                return new BalanceRow(region, about.Count, (double)about.Count / totalStories, (double)reportsByRegion.GetValueOrDefault(region) / totalReports,
+                    about.Count(s => string.Equals(s.LeadRegion, region, StringComparison.OrdinalIgnoreCase)));
+            })
+            .OrderByDescending(row => row.StoryShare)
+            .ToList();
+    }
+}
+
+// A6: of the events an official record says happened, how many World News surfaced, and how fast.
+public sealed record RecallResult(string Source, int Records, int Found, TimeSpan? MedianDelay, IReadOnlyList<string> Missed)
+{
+    public int FoundPercent => Records == 0 ? 0 : (int)Math.Round(100.0 * Found / Records);
+}
+
+public static class Recall
+{
+    public static RecallResult Score(string source, string kind, IReadOnlyList<PrimarySignal> records,
+        IReadOnlyList<(string Headline, double Latitude, double Longitude, DateTimeOffset FirstSeen)> stories)
+    {
+        var delays = new List<TimeSpan>();
+        var missed = new List<string>();
+        foreach (var record in records)
+        {
+            var match = stories
+                .Where(story => PrimarySources.KindOf(story.Headline) == kind
+                    && record.ObservedAt is { } at && story.FirstSeen >= at - TimeSpan.FromHours(1) && story.FirstSeen <= at + PrimarySources.MaxGap
+                    && PrimarySources.Kilometres(story.Latitude, story.Longitude, record.Latitude, record.Longitude) <= PrimarySources.CountryKilometres)
+                .OrderBy(story => story.FirstSeen)
+                .Select(story => (TimeSpan?)(story.FirstSeen - record.ObservedAt!.Value))
+                .FirstOrDefault();
+            if (match is { } delay) delays.Add(delay < TimeSpan.Zero ? TimeSpan.Zero : delay);
+            else missed.Add(record.Title);
+        }
+        delays.Sort();
+        return new RecallResult(source, records.Count, delays.Count, delays.Count == 0 ? null : delays[delays.Count / 2], missed);
+    }
+}
+
+// A10: the rules, in words, and every change to them.
+public static class TrustMethodology
+{
+    public static readonly IReadOnlyList<(string Version, string Change)> Changelog =
+    [
+        ("2026-11-13.1", "First published rules: independence by wire credit, attribution, identical text and owner; one origin per outlet; Confirmed at 3 independent sources or an official record; Disputed on conflicting figures or a false-type fact-check; unconfirmed after 12 hours on one source; alerts need 2 independent sources or an official record."),
+    ];
+
+    public static readonly IReadOnlyList<string> Rules =
+    [
+        "A report's origin is the wire it credits or rests on (\"(Reuters)\", \"told AP\", \"citing AFP\"), else the group that owns its outlet, else the outlet. Reports with identical text share an origin.",
+        "Each outlet counts once: as itself (or its owner) if any of its reports is its own work, otherwise as the wire it repeated. Independent sources can never outnumber outlets.",
+        "Fact-checkers and Wikipedia's Current events are shown but never counted as sources; press releases, listicles and service pages are kept out entirely.",
+        "Confirmed: an official record of the event (USGS, GDACS, NOAA, NASA, WHO) or three or more independent sources. Reported: two. Single source: one, however many outlets repeated it.",
+        "Disputed outranks everything: outlets giving conflicting figures, or a fact-checker rating the claim false or misleading.",
+        "A story still on one independent source 12 hours after its first report is labelled unconfirmed.",
+        "No alert (surge, watch, watchlist) goes out for a story on one independent source.",
+        "Labels come from counted evidence and these rules, never from AI. AI writes summaries only, and they are marked as such.",
+    ];
+}
+
+// Everything the methodology page shows (A5-A10).
+public sealed record TrustReport(DateTimeOffset At, string RulesVersion, IReadOnlyList<BalanceRow> Balance, RecallResult? Recall,
+    IReadOnlyList<CalibrationRow> Calibration, int Snapshots, long? LedgerBrokenAt, IReadOnlyList<LabelChallenge> Challenges);
+
+// A3 (13-11-26): who owns which outlet, from Wikidata (free SPARQL, no key), on top of the hand list.
+// Outlets that share any current owner join one group; a group is named by its most common owner.
+public static class OwnershipGraph
+{
+    public static IReadOnlyDictionary<string, string> Build(IEnumerable<(string Outlet, string Owner)> rows)
+    {
+        var list = rows.Where(r => r.Outlet.Length > 0 && r.Owner.Length > 0).Distinct().ToList();
+        var parent = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        string Find(string x)
+        {
+            while (parent.TryGetValue(x, out var p) && !string.Equals(p, x, StringComparison.OrdinalIgnoreCase)) x = p;
+            return x;
+        }
+        void Union(string a, string b)
+        {
+            parent.TryAdd(a, a);
+            parent.TryAdd(b, b);
+            var ra = Find(a);
+            var rb = Find(b);
+            if (!string.Equals(ra, rb, StringComparison.OrdinalIgnoreCase)) parent[ra] = rb;
+        }
+        foreach (var (outlet, owner) in list) Union("o:" + outlet, "w:" + owner);
+        var groups = list.GroupBy(r => Find("o:" + r.Outlet), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.GroupBy(r => r.Owner).OrderByDescending(o => o.Count()).ThenBy(o => o.Key, StringComparer.Ordinal).First().Key,
+                StringComparer.OrdinalIgnoreCase);
+        // An outlet alone with its owner is still named by that owner, so its reports read as the owner's.
+        return list.Select(r => r.Outlet).Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(outlet => outlet, outlet => groups[Find("o:" + outlet)], StringComparer.OrdinalIgnoreCase);
+    }
+
+    // "rss.nytimes.com" -> "nytimes.com", "news.bbc.co.uk" -> "bbc.co.uk": enough to tell one outlet's site from another's.
+    public static string? RootDomain(string? urlOrHost)
+    {
+        if (string.IsNullOrWhiteSpace(urlOrHost)) return null;
+        var host = Uri.TryCreate(urlOrHost, UriKind.Absolute, out var uri) ? uri.Host : urlOrHost;
+        var labels = host.ToLowerInvariant().TrimEnd('.').Split('.');
+        if (labels.Length < 2) return null;
+        var secondLevel = labels[^2];
+        var keep = labels.Length >= 3 && labels[^1].Length == 2 && secondLevel is "co" or "com" or "org" or "net" or "gov" or "ac" or "or" or "ne" ? 3 : 2;
+        return string.Join('.', labels[^keep..]);
+    }
 }

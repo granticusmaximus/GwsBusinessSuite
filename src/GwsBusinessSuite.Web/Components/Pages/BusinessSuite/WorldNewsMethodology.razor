@@ -1,0 +1,175 @@
+@page "/admin/world-news/methodology"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = "AdminOnly")]
+@using Microsoft.AspNetCore.Authorization
+@using GwsBusinessSuite.Application.Abstractions
+@using GwsBusinessSuite.Infrastructure.Services
+@using GwsBusinessSuite.WorldNewsKit
+@inject WorldNewsService News
+@inject ICurrentUserAccessor CurrentUserAccessor
+
+@* World News trust plan A5-A10 (13-11-26): how labels are made, and the measurements that hold the
+   system to account: calibration, recall, coverage balance, the ledger, challenges, corrections. *@
+
+<PageTitle>How World News labels stories</PageTitle>
+
+<PageHeader Title="Methodology" Icon="bi-clipboard-check" Description="How World News labels stories, and how well those labels hold up: measured, not claimed.">
+    <Actions>
+        <a class="btn btn-outline-secondary" href="admin/world-news"><i class="bi bi-arrow-left me-1" aria-hidden="true"></i>World News</a>
+        <a class="btn btn-outline-secondary" href="admin/world-news/sources"><i class="bi bi-broadcast me-1" aria-hidden="true"></i>Sources</a>
+    </Actions>
+</PageHeader>
+
+<section class="card border-0 shadow-sm mb-3" aria-labelledby="method-rules">
+    <div class="card-header"><strong id="method-rules">The rules</strong> <small class="text-secondary">version @StoryConfidenceRules.RulesVersion</small></div>
+    <div class="card-body">
+        <ol class="method-rules">
+            @foreach (var rule in TrustMethodology.Rules) { <li>@rule</li> }
+        </ol>
+        <details>
+            <summary>Every change to the rules</summary>
+            <ul class="method-changelog">
+                @foreach (var (version, change) in TrustMethodology.Changelog) { <li><strong>@version</strong>: @change</li> }
+            </ul>
+        </details>
+    </div>
+</section>
+
+@if (_report is null)
+{
+    <LoadingIndicator Message="Measuring how the labels hold up…" />
+}
+else
+{
+    var r = _report;
+    <section class="card border-0 shadow-sm mb-3" aria-labelledby="method-calibration">
+        <div class="card-header"><strong id="method-calibration">Do the labels hold up?</strong> <small class="text-secondary">each story's first label against how it stands now</small></div>
+        @if (r.Calibration.Count == 0)
+        {
+            <div class="card-body text-secondary">Not enough history yet: stories need to have been labelled for a day.</div>
+        }
+        else
+        {
+            <div class="table-responsive">
+                <table class="table align-middle mb-0">
+                    <thead><tr><th>First label</th><th class="text-end">Stories</th><th class="text-end">Held up</th><th class="text-end">Became disputed</th><th class="text-end">Had a correction</th></tr></thead>
+                    <tbody>
+                        @foreach (var row in r.Calibration)
+                        {
+                            <tr><td>@LevelLabel(row.Level)</td><td class="text-end">@row.Stories</td><td class="text-end"><strong>@row.HeldPercent%</strong></td>
+                                <td class="text-end">@row.BecameDisputed</td><td class="text-end">@row.Corrected</td></tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </section>
+
+    <section class="card border-0 shadow-sm mb-3" aria-labelledby="method-recall">
+        <div class="card-header"><strong id="method-recall">What did we miss?</strong> <small class="text-secondary">official records World News should have surfaced</small></div>
+        <div class="card-body">
+            @if (r.Recall is { } recall)
+            {
+                <p class="mb-2">
+                    <strong>@recall.FoundPercent%</strong> of @recall.Source (@recall.Found of @recall.Records) became a World News story@(recall.MedianDelay is { } delay ? $", a median of {Hours(delay)} after the record" : "").
+                </p>
+                @if (recall.Missed.Count > 0)
+                {
+                    <details><summary>Missed (@recall.Missed.Count)</summary><ul class="mb-0">@foreach (var missed in recall.Missed) { <li>@missed</li> }</ul></details>
+                }
+            }
+            else { <p class="text-secondary mb-0">USGS couldn't be read just now; this check runs again within the hour.</p> }
+        </div>
+    </section>
+
+    <section class="card border-0 shadow-sm mb-3" aria-labelledby="method-balance">
+        <div class="card-header"><strong id="method-balance">Whose voice leads?</strong> <small class="text-secondary">the last week's biggest stories, by where they happened</small></div>
+        <div class="table-responsive">
+            <table class="table align-middle mb-0">
+                <thead><tr><th>Region</th><th class="text-end">Share of stories</th><th class="text-end">Share of reports</th><th class="text-end">Stories led by an outlet from there</th></tr></thead>
+                <tbody>
+                    @foreach (var row in r.Balance)
+                    {
+                        <tr class="@(row.Stories > 0 && row.LocalLeadPercent < 25 ? "method-gap" : "")">
+                            <td>@row.Region</td>
+                            <td class="text-end">@Percent(row.StoryShare)</td>
+                            <td class="text-end">@Percent(row.ReportShare)</td>
+                            <td class="text-end">@(row.Stories == 0 ? "—" : $"{row.LocalLeadPercent}%")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+        <div class="card-footer small text-secondary">A region whose stories are rarely led by its own outlets is told mostly from outside. Add its outlets on the Sources page.</div>
+    </section>
+
+    <section class="card border-0 shadow-sm mb-3" aria-labelledby="method-ledger">
+        <div class="card-header"><strong id="method-ledger">The record</strong></div>
+        <div class="card-body">
+            @if (r.LedgerBrokenAt is { } broken)
+            {
+                <p class="text-danger mb-0" role="alert"><i class="bi bi-exclamation-triangle me-1" aria-hidden="true"></i>The label record doesn't check out from entry @broken onward: something was changed or removed.</p>
+            }
+            else
+            {
+                <p class="mb-0"><i class="bi bi-shield-check me-1 text-success" aria-hidden="true"></i>@r.Snapshots.ToString("N0") label changes recorded, each chained to the one before. The chain checks out: nothing has been rewritten.</p>
+            }
+        </div>
+    </section>
+
+    <section class="card border-0 shadow-sm mb-3" aria-labelledby="method-challenges">
+        <div class="card-header"><strong id="method-challenges">Challenges and corrections</strong></div>
+        <div class="card-body">
+            @if (r.Challenges.Count == 0) { <p class="text-secondary mb-0">No label has been challenged yet. Anyone can challenge one from a story's page.</p> }
+            @foreach (var challenge in r.Challenges)
+            {
+                <div class="method-challenge">
+                    <div>
+                        <span class="method-status method-status-@challenge.Status">@challenge.Status</span>
+                        <a href="@($"admin/world-news?event={challenge.EventId}")">story</a> · @challenge.CreatedAt.ToLocalGwsDateTime() · @challenge.Username
+                    </div>
+                    <p class="mb-1">@challenge.Note</p>
+                    @if (challenge.EvidenceUrl is { } url) { <a href="@url" target="_blank" rel="noopener noreferrer" class="small">@url</a> }
+                    @if (challenge.Status == LabelChallengeStatuses.Open)
+                    {
+                        <div class="method-resolve">
+                            <input class="form-control form-control-sm" placeholder="What you found" aria-label="Resolution" @bind="_resolutions[challenge.Id]" @bind:event="oninput" />
+                            <button type="button" class="btn btn-sm btn-outline-success" @onclick="() => ResolveAsync(challenge, true)">Uphold (it was wrong)</button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => ResolveAsync(challenge, false)">Reject</button>
+                        </div>
+                    }
+                    else if (challenge.Resolution is { Length: > 0 } resolution)
+                    {
+                        <p class="small text-secondary mb-0">@challenge.ResolvedBy, @challenge.ResolvedAt?.ToLocalGwsDateTime(): @resolution</p>
+                    }
+                </div>
+            }
+        </div>
+    </section>
+    <p class="small text-secondary">Measured @r.At.ToLocalGwsDateTime(); calibration, recall and balance are worked out at most once an hour.</p>
+}
+
+@code {
+    private TrustReport? _report;
+    private readonly Dictionary<string, string> _resolutions = new();
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _report = await News.TrustReportAsync();
+        foreach (var challenge in _report.Challenges) _resolutions.TryAdd(challenge.Id, string.Empty);
+    }
+
+    private async Task ResolveAsync(LabelChallenge challenge, bool upheld)
+    {
+        var by = await CurrentUserAccessor.GetCurrentUsernameAsync();
+        var resolution = _resolutions.GetValueOrDefault(challenge.Id) is { Length: > 0 } text ? text : upheld ? "Upheld." : "Rejected.";
+        await Task.Run(() => News.Store.ResolveChallenge(challenge.Id, upheld, by, resolution, DateTimeOffset.UtcNow));
+        await LoadAsync();
+    }
+
+    private static string LevelLabel(string level) => level == nameof(StoryConfidenceLevel.SingleSource) ? "Single source" : level;
+    private static string Percent(double share) => $"{share * 100:0}%";
+    private static string Hours(TimeSpan delay) => delay.TotalHours >= 1 ? $"{delay.TotalHours:0.#} h" : $"{delay.TotalMinutes:0} min";
+}

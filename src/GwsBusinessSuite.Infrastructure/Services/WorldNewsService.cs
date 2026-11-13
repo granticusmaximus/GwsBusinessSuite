@@ -68,6 +68,7 @@ public sealed partial class WorldNewsService : IDisposable
         var path = Path.GetFullPath(configuration["WorldNews:DatabasePath"] ?? "/app/data/worldnews.db");
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         Store = new WorldNewsStore(path);
+        LoadOwners();
         var baseUrl = string.IsNullOrWhiteSpace(ollamaOptions.Value.BaseUrl) ? ContentStudioOptions.DefaultBaseUrl : ollamaOptions.Value.BaseUrl;
         _ollama = new OllamaClient(new Uri(baseUrl.TrimEnd('/') + "/"), new HttpClient { Timeout = TimeSpan.FromMinutes(5) });
         var http = httpClientFactory.CreateClient(HttpClientName);
@@ -231,6 +232,11 @@ public sealed partial class WorldNewsService : IDisposable
             var alerts = Store.CreateWatchAlerts(DateTimeOffset.UtcNow, MayAlert).Concat(CreateSurgeAlerts(DateTimeOffset.UtcNow))
                 .Concat(Store.CreateKeywordAlerts(DateTimeOffset.UtcNow, MayAlert));
             foreach (var alert in alerts) AlertCreated?.Invoke(alert.Username, alert);
+            // Outlets' owners from Wikidata, weekly (A3); quietly skipped when Wikidata can't be read.
+            await RefreshOwnershipAsync(cancellationToken: ct);
+            // Labels into the tamper-evident ledger, at most hourly (World News trust plan A7/A8).
+            try { SnapshotLabels(DateTimeOffset.UtcNow); }
+            catch (Exception ex) when (ex is Microsoft.Data.Sqlite.SqliteException or InvalidOperationException) { _logger.LogWarning(ex, "World News: label snapshot failed"); }
             LastRefreshed = DateTimeOffset.UtcNow;
             Store.SetLastFetched(LastReadKey, LastRefreshed.Value);
             ClearLists();
@@ -565,7 +571,8 @@ public sealed partial class WorldNewsService : IDisposable
             }
         }
         if (primary is null) return story;
-        var confidence = StoryConfidenceRules.Assess(trust.Independence, primary, story.Figures.Count(figure => figure.Disputed), trust.FactCheckVerdict);
+        var confidence = StoryConfidenceRules.Assess(trust.Independence, primary, story.Figures.Count(figure => figure.Disputed), trust.FactCheckVerdict,
+            story.Event.FirstSeen, DateTimeOffset.UtcNow);
         return story with { Trust = trust with { PrimarySource = primary, Confidence = confidence } };
     }
 
@@ -650,6 +657,139 @@ public sealed partial class WorldNewsService : IDisposable
             }
         }
         return (found, found.Count == 0 ? $"No working RSS feed or news sitemap found on {page.Host}." : null);
+    }
+
+    // A7/A8: once an hour, the current label of the last day's biggest stories goes into the
+    // hash-chained ledger (only when it changed). From stored reports alone, so it can be re-derived.
+    private DateTimeOffset _lastLabelSnapshot = DateTimeOffset.MinValue;
+    public static readonly TimeSpan LabelSnapshotEvery = TimeSpan.FromHours(1);
+
+    public int SnapshotLabels(DateTimeOffset now, bool force = false)
+    {
+        if (!force && now - _lastLabelSnapshot < LabelSnapshotEvery) return 0;
+        _lastLabelSnapshot = now;
+        var labels = Store.TopEvents(now.AddDays(-1), 150).Select(e =>
+        {
+            var confidence = StoryLabel.For(Store.ArticlesForEvent(e.Id), e.FirstSeen, now, out var independence);
+            return (e.Id, confidence.Level.ToString(), confidence.Reason, independence.Independent, independence.Outlets);
+        }).ToList();
+        return Store.AppendLabelSnapshots(labels, StoryConfidenceRules.RulesVersion, now);
+    }
+
+    // A5-A10: what the methodology page shows, worked out at most once an hour.
+    private (DateTimeOffset At, TrustReport Report)? _trustReport;
+
+    public async Task<TrustReport> TrustReportAsync(CancellationToken cancellationToken = default)
+    {
+        var now = DateTimeOffset.UtcNow;
+        if (_trustReport is { } cached && now - cached.At < TimeSpan.FromHours(1)) return cached.Report with { Challenges = Store.Challenges() };
+        var week = await Task.Run(() => Store.TopEvents(now.AddDays(-7), 400), cancellationToken);
+        var places = WorldNewsPlaces.Instance;
+        var balanceStories = new List<(string, string)>();
+        var located = new List<(string Headline, double Latitude, double Longitude, DateTimeOffset FirstSeen)>();
+        foreach (var e in week)
+        {
+            var headline = e.Headline ?? e.Title;
+            if (places.Locate(headline) is not { } place) continue;
+            located.Add((headline, place.Latitude, place.Longitude, e.FirstSeen));
+            var lead = await Task.Run(() => Store.ArticlesForEvent(e.Id).FirstOrDefault(), cancellationToken);
+            balanceStories.Add((WorldRegions.Of(place.Country), WorldRegions.Of(lead?.Country)));
+        }
+        var reportsByRegion = Store.CountryHours(now.AddDays(-7)).GroupBy(row => WorldRegions.Of(row.Country))
+            .ToDictionary(group => group.Key, group => group.Sum(row => row.Reports), StringComparer.OrdinalIgnoreCase);
+        var recall = await EarthquakeRecallAsync(now, located, cancellationToken);
+        var snapshots = Store.LabelSnapshots();
+        var report = new TrustReport(now, StoryConfidenceRules.RulesVersion,
+            CoverageBalance.Compute(balanceStories, reportsByRegion), recall,
+            Calibration.Score(Store.CalibrationOutcomes(now.AddDays(-1))),
+            snapshots.Count, LabelLedger.FirstBroken(snapshots), Store.Challenges());
+        _trustReport = (now, report);
+        return report;
+    }
+
+    // USGS's M4.5+ week feed (free, no key), M5.5 and up: big enough that a news service should notice.
+    public const string QuakeWeekFeed = "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/4.5_week.geojson";
+
+    private async Task<RecallResult?> EarthquakeRecallAsync(DateTimeOffset now, IReadOnlyList<(string, double, double, DateTimeOffset)> stories, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var http = _httpClientFactory.CreateClient(HttpClientName);
+            using var document = System.Text.Json.JsonDocument.Parse(await http.GetStringAsync(QuakeWeekFeed, cancellationToken));
+            var records = new List<PrimarySignal>();
+            foreach (var feature in document.RootElement.GetProperty("features").EnumerateArray())
+            {
+                var properties = feature.GetProperty("properties");
+                var coordinates = feature.GetProperty("geometry").GetProperty("coordinates");
+                if (!properties.TryGetProperty("mag", out var mag) || mag.ValueKind != System.Text.Json.JsonValueKind.Number || mag.GetDouble() < 5.5) continue;
+                var at = DateTimeOffset.FromUnixTimeMilliseconds(properties.GetProperty("time").GetInt64());
+                if (at > now - TimeSpan.FromHours(6)) continue; // too recent to judge
+                records.Add(new PrimarySignal("USGS", "earthquake", $"M{mag.GetDouble():0.0} {properties.GetProperty("place").GetString()}",
+                    coordinates[1].GetDouble(), coordinates[0].GetDouble(), at, properties.GetProperty("url").GetString() ?? string.Empty));
+            }
+            return Recall.Score("USGS earthquakes M5.5+ (last 7 days)", "earthquake", records, stories);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or System.Text.Json.JsonException or KeyNotFoundException
+            && !cancellationToken.IsCancellationRequested)
+        {
+            _logger.LogInformation(ex, "World News: couldn't read USGS for the recall check");
+            return null;
+        }
+    }
+
+    // A3: Wikidata's current owners of the outlets World News reads, refreshed weekly. A match must
+    // share its website's domain with one of the outlet's feeds ("The Guardian" is also a paper in
+    // Belize); former owners (with an end date) are left out.
+    public static readonly TimeSpan OwnershipRefreshEvery = TimeSpan.FromDays(7);
+    public const string WikidataSparql = "https://query.wikidata.org/sparql";
+
+    private void LoadOwners()
+    {
+        try { SourceIndependence.ImportedOwners = OwnershipGraph.Build(Store.OutletOwners(out _)); }
+        catch (Microsoft.Data.Sqlite.SqliteException ex) { _logger.LogWarning(ex, "World News: couldn't load outlet owners"); }
+    }
+
+    public async Task<int> RefreshOwnershipAsync(bool force = false, CancellationToken cancellationToken = default)
+    {
+        Store.OutletOwners(out var fetchedAt);
+        if (!force && fetchedAt is { } at && DateTimeOffset.UtcNow - at < OwnershipRefreshEvery) return 0;
+        var outlets = OutletFeeds.Outlets.Concat(Store.CustomFeeds()).GroupBy(o => o.Name, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.Select(o => OwnershipGraph.RootDomain(o.Url)).OfType<string>().ToHashSet(StringComparer.OrdinalIgnoreCase),
+                StringComparer.OrdinalIgnoreCase);
+        var http = _httpClientFactory.CreateClient(HttpClientName);
+        var rows = new List<(string Outlet, string Owner)>();
+        foreach (var batch in outlets.Keys.Chunk(60))
+        {
+            var values = string.Join(' ', batch.Select(name => "\"" + name.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"@en"));
+            var query = "SELECT ?name ?site ?ownerLabel WHERE { VALUES ?name { " + values + " } ?item rdfs:label ?name ; wdt:P856 ?site . "
+                + "{ ?item p:P127 ?st . ?st ps:P127 ?owner } UNION { ?item p:P749 ?st . ?st ps:P749 ?owner } FILTER NOT EXISTS { ?st pq:P582 ?end } "
+                + "SERVICE wikibase:label { bd:serviceParam wikibase:language \"en\". } }";
+            using var request = new HttpRequestMessage(HttpMethod.Get, WikidataSparql + "?query=" + Uri.EscapeDataString(query));
+            request.Headers.Accept.ParseAdd("application/sparql-results+json");
+            try
+            {
+                using var response = await http.SendAsync(request, cancellationToken);
+                if (!response.IsSuccessStatusCode) { _logger.LogInformation("World News: Wikidata answered {Status}", (int)response.StatusCode); return 0; }
+                using var document = System.Text.Json.JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
+                foreach (var binding in document.RootElement.GetProperty("results").GetProperty("bindings").EnumerateArray())
+                {
+                    var name = binding.GetProperty("name").GetProperty("value").GetString() ?? string.Empty;
+                    var site = binding.GetProperty("site").GetProperty("value").GetString();
+                    var owner = binding.GetProperty("ownerLabel").GetProperty("value").GetString() ?? string.Empty;
+                    if (owner.StartsWith('Q') && owner.Skip(1).All(char.IsDigit)) continue; // no English label
+                    if (outlets.TryGetValue(name, out var domains) && OwnershipGraph.RootDomain(site) is { } root && domains.Contains(root)) rows.Add((name, owner));
+                }
+            }
+            catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or System.Text.Json.JsonException or KeyNotFoundException
+                && !cancellationToken.IsCancellationRequested)
+            {
+                _logger.LogInformation(ex, "World News: couldn't read Wikidata owners");
+                return 0;
+            }
+        }
+        Store.ReplaceOutletOwners(rows, DateTimeOffset.UtcNow);
+        LoadOwners();
+        return rows.Count;
     }
 
     // The reader has seen this analysis: the next "what changed" starts from it.

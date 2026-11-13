@@ -38,7 +38,7 @@ public static class EventDocument
     // their article was read in full, the sources, the figures, English headlines and what changed.
     public static StoryDocument Build(EventOverview e, IReadOnlyList<WorldArticle> articles, EventSummary? summary, EventAnalysis? analysis,
         IReadOnlyDictionary<string, string>? english = null, IReadOnlySet<string>? readInFull = null, StoryChanges? changes = null,
-        IReadOnlyList<ArticleEdit>? edits = null, string? primarySource = null, string? factCheckVerdict = null)
+        IReadOnlyList<ArticleEdit>? edits = null, string? primarySource = null, string? factCheckVerdict = null, DateTimeOffset? now = null)
     {
         var outlets = articles.GroupBy(a => a.Outlet)
             .Select(outlet => new StoryOutlet(outlet.Key,
@@ -52,11 +52,12 @@ public static class EventDocument
         var independence = SourceIndependence.Assess(articles);
         var factChecks = FactChecks.In(articles);
         factCheckVerdict ??= FactChecks.DisputingVerdict(factChecks);
-        var confidence = StoryConfidenceRules.Assess(independence, primarySource, figures.Count(figure => figure.Disputed), factCheckVerdict);
+        var confidence = StoryConfidenceRules.Assess(independence, primarySource, figures.Count(figure => figure.Disputed), factCheckVerdict,
+            e.FirstSeen, now ?? DateTimeOffset.UtcNow);
         return new StoryDocument(e, summary, analysis, outlets, Sources(articles), figures,
             english ?? new Dictionary<string, string>(), changes,
             articles.MinBy(a => a.SeenAt), articles.MaxBy(a => a.SeenAt),
-            new StoryTrustSummary(independence, confidence, edits ?? [], primarySource, factCheckVerdict, factChecks));
+            new StoryTrustSummary(independence, confidence, edits ?? [], primarySource, factCheckVerdict, factChecks, CitedSources.Find(articles)));
     }
 
     public static string ToMarkdown(EventOverview e, IReadOnlyList<WorldArticle> articles, EventSummary? summary,

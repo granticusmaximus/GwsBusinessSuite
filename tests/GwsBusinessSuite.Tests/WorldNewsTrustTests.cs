@@ -324,4 +324,129 @@ public sealed class WorldNewsTrustTests
         independence.Independent.Should().Be(2, "Local Paper's own report makes it its own source; Other Paper only repeated AP");
         independence.Origins.Select(o => o.Name).Should().BeEquivalentTo(["Local Paper", "Associated Press"]);
     }
+
+    [Theory]
+    [InlineData("The minister told Reuters the talks had failed", "Reuters")]
+    [InlineData("Citing AP, the paper said ten died", "Associated Press")]
+    [InlineData("Officials told AFP the border was shut", "AFP")]
+    [InlineData("Reuters reported the deal on Tuesday", "Reuters")]
+    public void Origin_ShouldFollowWireAttributions(string snippet, string origin) =>
+        SourceIndependence.OriginOf(Report("Some Outlet", "Talks collapse", snippet)).Name.Should().Be(origin);
+
+    [Fact]
+    public void CitedSources_ShouldShowWhoTheCoverageReliesOn()
+    {
+        var reports = new[]
+        {
+            Report("Reuters", "Floods kill 10", "Ten people died, according to the Health Ministry of Brazil."),
+            Report("BBC", "Brazil floods", "The death toll rose to 12, according to the Health Ministry of Brazil.", minutes: 5),
+            Report("DW", "Brazil floods", "Local police said in a statement that roads were closed.", minutes: 9),
+            Report("CNN", "Floods", "According to them, it was bad.", minutes: 12),
+        };
+        var cited = CitedSources.Find(reports);
+        cited.Select(c => (c.Name, c.Outlets, c.FirstOutlet)).Should().Equal(
+            ("health ministry of brazil", 2, "Reuters"),
+            ("police", 1, "DW"));
+    }
+
+    [Fact]
+    public void RumourClock_ShouldCallAStoryUnconfirmedAfterTwelveHoursOnOneSource()
+    {
+        var single = new StoryIndependence(3, [new SourceOrigin("Reuters", "wire", ["Reuters", "Yahoo", "MSN"])]);
+        StoryConfidenceRules.Assess(single, firstSeen: Now.AddHours(-13), now: Now).Reason.Should().Be("Still one source after 13 hours: unconfirmed.");
+        StoryConfidenceRules.Assess(single, firstSeen: Now.AddHours(-2), now: Now).Reason.Should().Be("One source, repeated by 3 outlets.");
+        StoryConfidenceRules.RulesVersion.Should().NotBeNullOrWhiteSpace();
+    }
+
+    [Fact]
+    public void Ledger_ShouldChainLabelChanges_AndCatchARewrite()
+    {
+        using var test = new WorldNewsTestStore();
+        var store = test.Store;
+        store.AppendLabelSnapshots([("e1", "SingleSource", "One outlet so far.", 1, 1), ("e2", "Reported", "2 independent sources.", 2, 4)], "v1", Now).Should().Be(2);
+        store.AppendLabelSnapshots([("e1", "SingleSource", "One outlet so far.", 1, 1)], "v1", Now.AddHours(1)).Should().Be(0, "unchanged labels aren't recorded again");
+        store.AppendLabelSnapshots([("e1", "Confirmed", "3 independent sources.", 3, 5)], "v1", Now.AddHours(2)).Should().Be(1);
+
+        var snapshots = store.LabelSnapshots();
+        snapshots.Should().HaveCount(3);
+        snapshots[0].PreviousHash.Should().Be(LabelLedger.Genesis);
+        LabelLedger.FirstBroken(snapshots).Should().BeNull();
+        LabelLedger.FirstBroken([snapshots[0], snapshots[1] with { Level = "Confirmed" }, snapshots[2]]).Should().Be(snapshots[1].Id, "a rewritten label breaks the chain");
+        LabelLedger.FirstBroken([snapshots[0], snapshots[2]]).Should().Be(snapshots[2].Id, "a removed entry breaks it too");
+    }
+
+    [Fact]
+    public void Calibration_ShouldScoreHowFirstLabelsHeldUp()
+    {
+        var rows = Calibration.Score(
+        [
+            ("Confirmed", "Confirmed", false), ("Confirmed", "Disputed", true), ("Confirmed", "Confirmed", false), ("Confirmed", "Confirmed", false),
+            ("SingleSource", "Reported", false), ("SingleSource", "SingleSource", false), ("SingleSource", "Disputed", false),
+        ]);
+        rows.Select(r => (r.Level, r.Stories, r.Held, r.BecameDisputed, r.Corrected, r.HeldPercent)).Should().Equal(
+            ("Confirmed", 4, 3, 1, 1, 75), ("SingleSource", 3, 2, 1, 0, 67));
+    }
+
+    [Fact]
+    public void Challenges_ShouldBeRecordedAndResolvedOnce()
+    {
+        using var test = new WorldNewsTestStore();
+        var challenge = test.Store.AddChallenge("e1", "ann", " The toll was revised to 12. ", "https://ministry.example/statement", Now);
+        test.Store.Challenges("e1").Should().ContainSingle().Which.Note.Should().Be("The toll was revised to 12.");
+        test.Store.ResolveChallenge(challenge.Id, true, "grant", "Confirmed by the ministry's statement.", Now.AddHours(1)).Should().BeTrue();
+        test.Store.ResolveChallenge(challenge.Id, false, "grant", "Changed my mind", Now.AddHours(2)).Should().BeFalse("a resolved challenge stays resolved");
+        var resolved = test.Store.Challenges().Single();
+        resolved.Status.Should().Be(LabelChallengeStatuses.Upheld);
+        resolved.ResolvedBy.Should().Be("grant");
+    }
+
+    [Fact]
+    public void Balance_AndRecall_ShouldMeasureWhoLeadsAndWhatWasMissed()
+    {
+        var balance = CoverageBalance.Compute(
+            [("Sub-Saharan Africa", "Europe"), ("Sub-Saharan Africa", "Sub-Saharan Africa"), ("Sub-Saharan Africa", "North America"), ("Europe", "Europe")],
+            new Dictionary<string, int> { ["Europe"] = 70, ["North America"] = 25, ["Sub-Saharan Africa"] = 5 });
+        var africa = balance.Single(r => r.Region == "Sub-Saharan Africa");
+        africa.StoryShare.Should().Be(0.75);
+        africa.ReportShare.Should().Be(0.05);
+        africa.LocalLeadPercent.Should().Be(33);
+        balance[0].Region.Should().Be("Sub-Saharan Africa", "ordered by share of stories");
+
+        var quake = new PrimarySignal("USGS", "earthquake", "M6.2 Kermadec Islands", -29.5, -177.9, Now.AddHours(-30), "u1");
+        var missedQuake = new PrimarySignal("USGS", "earthquake", "M5.6 Mid-Atlantic Ridge", 0.5, -25.0, Now.AddHours(-20), "u2");
+        var recall = Recall.Score("USGS", "earthquake", [quake, missedQuake],
+            [("Strong earthquake strikes near New Zealand's Kermadec Islands", -29.0, -177.0, Now.AddHours(-29)), ("Election in Brazil", -15, -47, Now)]);
+        recall.Found.Should().Be(1);
+        recall.FoundPercent.Should().Be(50);
+        recall.MedianDelay.Should().Be(TimeSpan.FromHours(1));
+        recall.Missed.Should().Equal("M5.6 Mid-Atlantic Ridge");
+    }
+
+    [Fact]
+    public void Ownership_ShouldGroupOutletsSharingAnOwner_AndCountThemOnce()
+    {
+        var groups = OwnershipGraph.Build(
+        [
+            ("Paper Alpha", "Acme Media"), ("Paper Beta", "Acme Media"), ("Paper Beta", "Acme Holdings"), ("Paper Gamma", "Acme Holdings"),
+            ("Paper Delta", "Delta Trust"),
+        ]);
+        groups["Paper Alpha"].Should().Be(groups["Paper Gamma"], "Alpha and Gamma are linked through Beta's two owners");
+        groups["Paper Delta"].Should().Be("Delta Trust");
+
+        OwnershipGraph.RootDomain("https://rss.nytimes.com/services/xml/rss/nyt/World.xml").Should().Be("nytimes.com");
+        OwnershipGraph.RootDomain("https://feeds.bbci.co.uk/news/world/rss.xml").Should().Be("bbci.co.uk");
+        OwnershipGraph.RootDomain("http://www.guardian.bz").Should().Be("guardian.bz");
+
+        var before = SourceIndependence.ImportedOwners;
+        try
+        {
+            SourceIndependence.ImportedOwners = groups;
+            SourceIndependence.Assess([Report("Paper Alpha", "Port strike"), Report("Paper Gamma", "Dock workers walk out"), Report("Paper Delta", "Strike at the port")])
+                .Independent.Should().Be(2, "Alpha and Gamma share an owner");
+        }
+        finally
+        {
+            SourceIndependence.ImportedOwners = before;
+        }
+    }
 }

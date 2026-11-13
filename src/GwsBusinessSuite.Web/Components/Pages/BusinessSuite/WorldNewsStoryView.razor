@@ -92,6 +92,14 @@ else
                         </details>
                     }
                 </p>
+                @if (trust.CitedSources is { Count: > 0 } cited)
+                {
+                    @* Who the coverage relies on (A1/A2, 13-11-26). *@
+                    <p class="story-trust-cited">
+                        <span class="story-trust-cited-label">The coverage relies on</span>
+                        @string.Join(", ", cited.Select(source => $"{source.Name} ({Count(source.Outlets, "outlet")})"))
+                    </p>
+                }
                 @if (trust.FactChecks is { Count: > 0 } checks)
                 {
                     <ul class="story-trust-checks">
@@ -104,6 +112,24 @@ else
                         }
                     </ul>
                 }
+                <p class="story-trust-rules">Rules @trust.RulesVersion · <a href="admin/world-news/methodology">how these labels are made</a></p>
+                @* Challenges (World News trust plan A9, 13-11-26): anyone can question a label with evidence. *@
+                <details class="story-trust-challenge">
+                    <summary>Challenge this label@(_challenges.Count > 0 ? $" ({_challenges.Count} so far)" : "")</summary>
+                    @foreach (var challenge in _challenges)
+                    {
+                        <p class="story-trust-challenge-item">
+                            <span class="story-trust-edit-kind">@challenge.Status</span> @challenge.CreatedAt.ToLocalGwsDateTime(), @challenge.Username: @challenge.Note
+                            @if (challenge.Resolution is { Length: > 0 } resolution) { <span class="d-block text-secondary">Resolution: @resolution</span> }
+                        </p>
+                    }
+                    <form class="story-trust-challenge-form" @onsubmit="ChallengeAsync" @onsubmit:preventDefault>
+                        <textarea class="form-control form-control-sm" rows="2" maxlength="1000" placeholder="What's wrong with this label, and how do you know?"
+                                  aria-label="Why you challenge this label" @bind="_challengeNote" @bind:event="oninput"></textarea>
+                        <input class="form-control form-control-sm" type="url" maxlength="500" placeholder="Link to your evidence (optional)" aria-label="Evidence link" @bind="_challengeUrl" @bind:event="oninput" />
+                        <button type="submit" class="btn btn-sm btn-outline-primary" disabled="@(string.IsNullOrWhiteSpace(_challengeNote) || _username is null)">Send challenge</button>
+                    </form>
+                </details>
                 @if (trust.Edits.Count > 0)
                 {
                     <details class="story-trust-edits">
@@ -482,6 +508,22 @@ else
 }
 
 @code {
+    private IReadOnlyList<LabelChallenge> _challenges = [];
+    private string _challengeNote = string.Empty;
+    private string _challengeUrl = string.Empty;
+
+    private async Task ChallengeAsync()
+    {
+        if (_story is null || _username is null || string.IsNullOrWhiteSpace(_challengeNote)) return;
+        var eventId = _story.Event.Id;
+        var note = _challengeNote.Length > 1000 ? _challengeNote[..1000] : _challengeNote;
+        var url = Uri.TryCreate(_challengeUrl.Trim(), UriKind.Absolute, out var link) && link.Scheme is "https" or "http" ? link.AbsoluteUri : null;
+        var user = _username;
+        await Task.Run(() => News.Store.AddChallenge(eventId, user, note, url, DateTimeOffset.UtcNow));
+        _challengeNote = _challengeUrl = string.Empty;
+        _challenges = await Task.Run(() => News.Store.Challenges(eventId));
+    }
+
     private static string OriginKind(string kind) => kind switch { "wire" => "wire copy", "owner" => "same owner", _ => "same text" };
 
     // The event whose story this shows.
@@ -542,6 +584,7 @@ else
         if (id != EventId || _disposed) return;
         _story = story;
         _gone = story is null;
+        _challenges = story is null ? [] : await Task.Run(() => News.Store.Challenges(story.Event.Id));
         // A primary source can confirm it (World News trust plan 1.13); checked after it shows.
         if (story is not null)
         {
