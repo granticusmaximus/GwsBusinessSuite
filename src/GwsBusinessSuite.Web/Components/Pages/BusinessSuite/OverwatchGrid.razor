@@ -4136,7 +4136,7 @@
         else
         {
             _airportSummary = null;
-            await JS.InvokeVoidAsync("tacticalGlobe.clearAirportStatus");
+            _drawnSources.Remove("airports"); await JS.InvokeVoidAsync("tacticalGlobe.clearAirportStatus");
         }
     }
 
@@ -4145,6 +4145,7 @@
         try
         {
             var airports = await AirportStatusService.GetAsync();
+            if (AlreadyDrawn("airports", ContentKey(airports))) return;
             await JS.InvokeVoidAsync("tacticalGlobe.setAirportStatus", HazardPayload(airports));
             var stops = airports.Where(a => a.Severity == "major").Select(a => a.Id["faa-".Length..]).ToList();
             _airportSummary = airports.Count == 0
@@ -4197,6 +4198,27 @@
         {
             _briefingPdfBusy = false;
         }
+    }
+
+    // ---- Worldwide layers drawn once (13-11-26) ----
+    // Conflict, travel advice, humanitarian and airport status don't depend on the view, and their
+    // data only changes every few minutes; a pan used to resend them all (measured: about 1.6 MB a pan
+    // with several layers on). A layer is redrawn only when its content (ContentKey) or a filter on it
+    // changed. Switching a layer off forgets it, so switching it on draws again.
+    private readonly Dictionary<string, object?[]> _drawnSources = new(StringComparer.Ordinal);
+
+    // What a list of pins holds, as one number: its ids, severities and titles.
+    private static int ContentKey(IEnumerable<GwsBusinessSuite.Application.Hazards.HazardFeature> features) =>
+        features.Aggregate(17, (hash, f) => HashCode.Combine(hash, f.Id, f.Severity, f.Title));
+
+    private bool AlreadyDrawn(string layer, params object?[] sources)
+    {
+        if (_drawnSources.TryGetValue(layer, out var last) && last.Length == sources.Length
+            && last.Zip(sources).All(pair => pair.First is null ? pair.Second is null
+                : pair.First.GetType().IsValueType ? pair.First.Equals(pair.Second) : ReferenceEquals(pair.First, pair.Second)))
+            return true;
+        _drawnSources[layer] = sources;
+        return false;
     }
 
     // ---- Layer health (13-11-26): the last problem each layer hit since the page opened. ----
@@ -4478,7 +4500,7 @@
         else
         {
             _travelSummary = null;
-            await JS.InvokeVoidAsync("tacticalGlobe.clearTravelAdvice");
+            _drawnSources.Remove("travel advice"); await JS.InvokeVoidAsync("tacticalGlobe.clearTravelAdvice");
         }
     }
 
@@ -4487,6 +4509,7 @@
         try
         {
             var advisories = await TravelAdvisoryService.GetAsync();
+            if (AlreadyDrawn("travel advice", advisories.Aggregate(advisories.Count, (hash, a) => HashCode.Combine(hash, a.Code, a.Level)))) return;
             var pins = GwsBusinessSuite.Infrastructure.Services.TravelAdvisoryService.Pins(advisories,
                 GwsBusinessSuite.Infrastructure.Services.WorldNewsPlaces.Instance);
             await JS.InvokeVoidAsync("tacticalGlobe.setTravelAdvice", HazardPayload(pins),
@@ -4549,7 +4572,7 @@
         else
         {
             _conflictSummary = null;
-            await JS.InvokeVoidAsync("tacticalGlobe.clearConflict");
+            _drawnSources.Remove("conflict"); await JS.InvokeVoidAsync("tacticalGlobe.clearConflict");
         }
     }
 
@@ -4570,6 +4593,7 @@
         try
         {
             var layer = await ConflictEventService.GetAsync();
+            if (AlreadyDrawn("conflict", ContentKey(layer.Reported), ContentKey(layer.Confirmed), _conflictConfirmed, _conflictReported)) return;
             var shown = (_conflictConfirmed ? layer.Confirmed : Array.Empty<GwsBusinessSuite.Application.Hazards.HazardFeature>())
                 .Concat(_conflictReported ? layer.Reported : Array.Empty<GwsBusinessSuite.Application.Hazards.HazardFeature>())
                 .ToList();
@@ -4598,7 +4622,7 @@
         else
         {
             _humanitarianSummary = null;
-            await JS.InvokeVoidAsync("tacticalGlobe.clearHumanitarian");
+            _drawnSources.Remove("humanitarian"); await JS.InvokeVoidAsync("tacticalGlobe.clearHumanitarian");
         }
     }
 
@@ -4607,6 +4631,7 @@
         try
         {
             var items = await HumanitarianService.GetAsync();
+            if (AlreadyDrawn("humanitarian", ContentKey(items))) return;
             await JS.InvokeVoidAsync("tacticalGlobe.setHumanitarian", HazardPayload(items));
             var emergencies = items.Select(i => i.Url).Distinct(StringComparer.Ordinal).Count();
             _humanitarianSummary = items.Count == 0
