@@ -237,7 +237,9 @@ public sealed partial class WorldNewsService : IDisposable
             }
             await ClassifySituationsAsync(ct);
             var alerts = Store.CreateWatchAlerts(DateTimeOffset.UtcNow, MayAlert).Concat(CreateSurgeAlerts(DateTimeOffset.UtcNow))
-                .Concat(Store.CreateKeywordAlerts(DateTimeOffset.UtcNow, MayAlert));
+                .Concat(Store.CreateKeywordAlerts(DateTimeOffset.UtcNow, MayAlert))
+                // N5: new stories on people's beats (the last day's), gated like every other alert.
+                .Concat(Store.CreateBeatAlerts(DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddDays(-1), MayAlert));
             foreach (var alert in alerts) AlertCreated?.Invoke(alert.Username, alert);
             // Outlets' owners from Wikidata, weekly (A3); quietly skipped when Wikidata can't be read.
             await RefreshOwnershipAsync(cancellationToken: ct);
@@ -468,6 +470,8 @@ public sealed partial class WorldNewsService : IDisposable
     // story costs a bounded number of rows.
     private bool MayAlert(string situationId)
     {
+        // N11: a story on hold sends nothing until its release time.
+        if (Store.IsSituationHeld(situationId, DateTimeOffset.UtcNow)) return false;
         var articles = Store.EventsForSituation(situationId).OrderByDescending(e => e.LastSeen).Take(5)
             .SelectMany(e => Store.ArticlesForEvent(e.Id)).ToList();
         return StoryConfidenceRules.MayAlert(SourceIndependence.Assess(articles));
@@ -970,6 +974,33 @@ public sealed partial class WorldNewsService : IDisposable
 
     // B1/B2: what records and sensors saw near a story's place since two days before its first
     // report, and its physical claims checked against them. Asked after the story shows.
+    // N7: a desk note, with a bell entry for each @mention of a real user. Raised through the same
+    // event as every other World News alert, so the bell and Web Push pick it up.
+    public DeskNote AddDeskNote(string eventId, string username, string text, Func<string, bool> knownUser)
+    {
+        var (note, alerts) = Store.AddDeskNote(eventId, username, text, DateTimeOffset.UtcNow, knownUser);
+        foreach (var alert in alerts) AlertCreated?.Invoke(alert.Username, alert);
+        return note;
+    }
+
+    // N6: the handover note for the last `hours`.
+    public string HandoverMarkdown(int hours)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var since = now.AddHours(-Math.Clamp(hours, 1, 72));
+        var titles = new Dictionary<string, string?>(StringComparer.Ordinal);
+        string? TitleOf(string eventId)
+        {
+            if (!titles.TryGetValue(eventId, out var title)) titles[eventId] = title = Store.Event(eventId) is { } e ? e.Headline ?? e.Title : null;
+            return title;
+        }
+        return ShiftHandover.Markdown(since, now, Store.Budget(), Store.Holds(),
+            Store.LabelSnapshots().Where(s => s.TakenAt >= since.AddHours(-1)).ToList(),
+            Store.Challenges().Where(c => c.Status == "open").ToList(),
+            Store.Tips().Where(t => t.CreatedAt >= since).ToList(),
+            Store.DeskNotes(limit: 200), Store.LiveUpdates(limit: 200), TitleOf, at => at.ToLocalGwsDateTime());
+    }
+
     // B3: a story's pictures that were used earlier in other stories, and how many carry Content
     // Credentials. The archive of prints is read at most every ten minutes.
     private (DateTimeOffset At, IReadOnlyList<PhotoPrint> Prints)? _photoArchive;

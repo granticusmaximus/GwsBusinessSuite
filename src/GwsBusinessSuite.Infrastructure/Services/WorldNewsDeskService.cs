@@ -12,6 +12,9 @@ public sealed partial class WorldNewsDeskService(IAppDbContext db, WorldNewsServ
 {
     public async Task<Guid> CreateDraftAsync(StoryDocument story, EvidenceBoard? board, string username, CancellationToken cancellationToken = default)
     {
+        // N11: nothing is drafted from a story on hold until its release time.
+        if (news.Store.Hold(story.Event.Id) is { } hold && Holds.IsHeld(hold, DateTimeOffset.UtcNow))
+            throw new InvalidOperationException(Holds.Describe(hold, at => at.ToLocalGwsDateTime()));
         var checks = news.Store.DeskChecks(story.Event.Id);
         var title = story.Event.Headline ?? story.Event.Title;
         var site = await db.SiteSettings.AsNoTracking().OrderBy(s => s.Id).FirstOrDefaultAsync(cancellationToken);

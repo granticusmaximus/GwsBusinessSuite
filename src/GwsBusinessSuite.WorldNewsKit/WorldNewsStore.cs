@@ -38,7 +38,7 @@ public sealed record WorldSnapshot(DateTimeOffset Since, IReadOnlyList<WorldCoun
 
 // The Mac app's local world-news database (SQLite). Times are stored as Unix seconds and vectors
 // as little-endian float32 blobs.
-public sealed class WorldNewsStore
+public sealed partial class WorldNewsStore
 {
     private readonly string _connectionString;
 
@@ -126,6 +126,8 @@ public sealed class WorldNewsStore
                 article_id TEXT NOT NULL, field TEXT NOT NULL, before TEXT NOT NULL, after TEXT NOT NULL,
                 kind TEXT NOT NULL, seen_at INTEGER NOT NULL, PRIMARY KEY (article_id, field, seen_at));
             """);
+        // The desk's tables (N5-N15, 14-11-26) live in WorldNewsStore.Desk.cs.
+        Execute(connection, DeskSchema);
         // Databases from before outlet feeds (21-10-26) have no snippet column.
         using var columns = connection.CreateCommand();
         columns.CommandText = "SELECT COUNT(*) FROM pragma_table_info('articles') WHERE name = 'snippet'";
@@ -359,6 +361,8 @@ public sealed class WorldNewsStore
         command.Parameters.AddWithValue("$at", item.UpdatedAt.ToUnixTimeSeconds());
         command.Parameters.AddWithValue("$by", item.UpdatedBy);
         command.ExecuteNonQuery();
+        // N15: when a story's status changed, for time-to-verdict.
+        RecordBudgetStatus(item.EventId, item.Status, item.UpdatedAt, item.UpdatedBy);
     }
 
     public void RemoveBudgetItem(string eventId)
