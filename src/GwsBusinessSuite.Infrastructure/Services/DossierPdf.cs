@@ -1,3 +1,4 @@
+using GwsBusinessSuite.Application.Abstractions;
 using GwsBusinessSuite.WorldNewsKit;
 using QuestPDF.Fluent;
 using QuestPDF.Helpers;

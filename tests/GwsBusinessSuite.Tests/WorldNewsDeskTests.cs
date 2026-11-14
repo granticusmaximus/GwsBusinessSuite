@@ -14,13 +14,13 @@ public sealed class WorldNewsDeskTests : IDisposable
     [Fact]
     public void Beats_ShouldMatchRegionsAndTopics_AndRefuseUnknownOnes()
     {
-        var africa = new Beat("b1", "ana", BeatRules.Region, "Africa", Now);
+        var africa = new Beat("b1", "ana", BeatRules.Region, WorldRegions.Africa, Now);
         var cyber = new Beat("b2", "ana", BeatRules.Topic, SituationKinds.Cyber, Now);
 
         Assert.True(BeatRules.Matches(africa, ["Kenya", "France"], "politics"));
         Assert.False(BeatRules.Matches(africa, ["France"], "politics"));
         Assert.True(BeatRules.Matches(cyber, ["France"], SituationKinds.Cyber));
-        Assert.Null(BeatRules.Problem(BeatRules.Region, "Africa"));
+        Assert.Null(BeatRules.Problem(BeatRules.Region, WorldRegions.Africa));
         Assert.NotNull(BeatRules.Problem(BeatRules.Region, "Narnia"));
         Assert.NotNull(BeatRules.Problem("colour", "red"));
     }

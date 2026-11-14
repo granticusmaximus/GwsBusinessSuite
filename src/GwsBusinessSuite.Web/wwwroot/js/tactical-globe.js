@@ -11,13 +11,16 @@
 // <script> block in the .razor page (the usual place this line lives in Cesium's own getting-
 // started docs) would simply never run.
 window.CESIUM_BASE_URL = 'https://cdn.jsdelivr.net/npm/cesium@1.144.0/Build/Cesium/';
-const cesiumVersionCacheBuster = 'v=1.144.0';
-if (window.Cesium && typeof window.Cesium.buildModuleUrl === 'function') {
+// In a block, once: this file can run twice (see the guard below), and a top-level const threw
+// "already declared" on the second run, on every Overwatch visit (found 12-11-26).
+if (window.Cesium && typeof window.Cesium.buildModuleUrl === 'function' && !window.Cesium.buildModuleUrl.__gwsVersioned) {
+    const cesiumVersionCacheBuster = 'v=1.144.0';
     const originalBuildModuleUrl = window.Cesium.buildModuleUrl.bind(window.Cesium);
     window.Cesium.buildModuleUrl = function (url) {
         const resolved = originalBuildModuleUrl(url);
         return resolved.includes('?') ? resolved : resolved + '?' + cesiumVersionCacheBuster;
     };
+    window.Cesium.buildModuleUrl.__gwsVersioned = true;
 }
 
 
@@ -214,6 +217,98 @@ window.tacticalGlobe = (function () {
         return true;
     }
 
+    // Any other render error stops Cesium's render loop for good: the globe froze or went black
+    // until a reload, every layer with it, and nothing was logged (13-11-26: one pin with a size
+    // that wasn't a number did it). Now the error is reported, items with a position or size that
+    // isn't a number are removed, and drawing starts again (at most 3 times a minute).
+    function healRender(containerId, error) {
+        const entry = viewers.get(containerId);
+        if (!entry || entry.viewer.isDestroyed()) return;
+        const reason = error && error.message ? error.message : String(error || '');
+        const now = Date.now();
+        entry.renderHeals = (entry.renderHeals || []).filter(function (t) { return now - t < 60000; });
+        if (entry.renderHeals.length >= 3) {
+            reportGlobeProblem('Overwatch globe stopped drawing and could not recover: ' + reason, error);
+            return;
+        }
+        entry.renderHeals.push(now);
+        queueMicrotask(function () {
+            const viewer = entry.viewer;
+            if (viewer.isDestroyed()) return;
+            const removed = removeUndrawable(viewer);
+            reportGlobeProblem('Overwatch globe stopped drawing (' + reason + '); removed ' + removed + ' item(s) that could not be drawn and started again.', error);
+            viewer.useDefaultRenderLoop = true;
+            viewer.scene.requestRender();
+        });
+    }
+
+    // To the console and to /admin/logs (client-errors.js), so a stopped globe leaves a trace.
+    function reportGlobeProblem(message, error) {
+        console.error(message);
+        if (window.gwsClientLog && typeof window.gwsClientLog.report === 'function') {
+            window.gwsClientLog.report({ origin: 'browser', kind: 'error', message: message, stack: error && error.stack });
+        }
+    }
+
+    function isNumber(value) { return value === undefined || value === null || Number.isFinite(value); }
+
+    function removeUndrawable(viewer) {
+        const time = viewer.clock.currentTime;
+        const read = function (property) {
+            return property && typeof property.getValue === 'function' ? property.getValue(time) : property;
+        };
+        const undrawable = function (entity) {
+            try {
+                const position = read(entity.position);
+                if (position && !(Number.isFinite(position.x) && Number.isFinite(position.y) && Number.isFinite(position.z))) return true;
+                const graphic = entity.billboard || entity.point;
+                if (graphic && ![graphic.width, graphic.height, graphic.scale, graphic.pixelSize].map(read).every(isNumber)) return true;
+                return false;
+            } catch (e) {
+                return true;
+            }
+        };
+        let removed = 0;
+        removed += viewer.entities.values.filter(undrawable).map(function (entity) { return viewer.entities.remove(entity); }).length;
+        // A layer's drawing state can be left broken by the bad item, so each data source is also
+        // taken off the globe and put back, which rebuilds it from its (now good) entities.
+        const sources = [];
+        for (let i = 0; i < viewer.dataSources.length; i++) sources.push(viewer.dataSources.get(i));
+        sources.forEach(function (source) {
+            removed += source.entities.values.filter(undrawable).map(function (entity) { return source.entities.remove(entity); }).length;
+            viewer.dataSources.remove(source, false);
+            viewer.dataSources.add(source);
+        });
+        return removed;
+    }
+
+    // Prevention (13-11-26): every layer adds its items through EntityCollection.add, so an item
+    // whose position or pin size isn't a number is turned away there (and reported once), before
+    // it can stop the globe. The caller gets a detached Entity so its own bookkeeping still works.
+    function guardEntityAdds() {
+        if (!window.Cesium || Cesium.EntityCollection.prototype.__gwsGuarded) return;
+        const add = Cesium.EntityCollection.prototype.add;
+        let reported = false;
+        const finite = function (value) { return value === undefined || value === null || typeof value === 'object' || Number.isFinite(value); };
+        Cesium.EntityCollection.prototype.add = function (entity) {
+            const options = entity || {};
+            const position = options.position instanceof Cesium.Cartesian3 ? options.position : null;
+            const graphic = options.billboard || options.point;
+            const bad = (position && !(Number.isFinite(position.x) && Number.isFinite(position.y) && Number.isFinite(position.z)))
+                || (graphic && !(finite(graphic.width) && finite(graphic.height) && finite(graphic.scale) && finite(graphic.pixelSize)));
+            if (bad) {
+                if (!reported) {
+                    reported = true;
+                    reportGlobeProblem('Overwatch: an item with no usable position or size was left off the map (' + (options.name || options.id || 'unnamed') + ').');
+                }
+                return options instanceof Cesium.Entity ? options : new Cesium.Entity();
+            }
+            return add.apply(this, arguments);
+        };
+        Cesium.EntityCollection.prototype.__gwsGuarded = true;
+    }
+    guardEntityAdds();
+
     function installShaderFallbackListener() {
         if (window.__tacticalGlobeShaderFallbackInstalled) return;
         window.__tacticalGlobeShaderFallbackInstalled = true;
@@ -230,6 +325,7 @@ window.tacticalGlobe = (function () {
     async function init(containerId, dotNetRef, options) {
         const container = document.getElementById(containerId);
         if (!container || viewers.has(containerId)) return;
+        guardEntityAdds();
 
         // Real incident history for this one basemap: it first hit tile.openstreetmap.org
         // directly, which looked fine in every automated check (200 OK, valid PNG, CORS-open)
@@ -326,6 +422,11 @@ window.tacticalGlobe = (function () {
         viewer.scene.logarithmicDepthBuffer = false;
         viewer.scene.fxaa = false;
         viewer.scene.useDepthPicking = false;
+        // Faster imagery (13-11-26, Grant: "laggy rendering images on the globe"): keep 1,000 tiles
+        // in memory rather than Cesium's 100, so panning back doesn't fetch them again, and load the
+        // tiles beside the view so its edges are ready as it moves.
+        viewer.scene.globe.tileCacheSize = 1000;
+        viewer.scene.globe.preloadSiblings = true;
         if (window.__gwsMacCatalystWebView === true) {
             // WebKit's Metal backend rejects Cesium's cosmetic SunTextureFS burst shader. The
             // sun and moon have no tactical value here; hiding them preserves the interactive
@@ -344,7 +445,9 @@ window.tacticalGlobe = (function () {
         const onRenderError = function (scene, error) {
             if (handleShaderFailure(containerId, error)) {
                 console.warn('Overwatch 3D globe unavailable on this GPU/browser; falling back to a non-3D placeholder.', error);
+                return;
             }
+            healRender(containerId, error);
         };
         viewer.scene.renderError.addEventListener(onRenderError);
 
@@ -487,6 +590,8 @@ window.tacticalGlobe = (function () {
         await viewer.dataSources.add(convergenceDataSource);
         const airportDataSource = new Cesium.CustomDataSource('tg-airports');
         await viewer.dataSources.add(airportDataSource);
+        const chokepointDataSource = new Cesium.CustomDataSource('tg-chokepoints');
+        await viewer.dataSources.add(chokepointDataSource);
         const satelliteDataSource = new Cesium.CustomDataSource('tg-satellites');
         await viewer.dataSources.add(satelliteDataSource);
         // Key-less world layers (07-11-26): travel advice, fire hotspots, conflict, humanitarian.
@@ -527,7 +632,8 @@ window.tacticalGlobe = (function () {
                     Cesium.Math.toDegrees(rectangle.north),
                     Cesium.Math.toDegrees(rectangle.south),
                     Cesium.Math.toDegrees(rectangle.east),
-                    Cesium.Math.toDegrees(rectangle.west));
+                    Cesium.Math.toDegrees(rectangle.west))
+                    .catch(function () { /* the Overwatch page has closed (navigated away): nothing to tell */ });
             }, 500);
         });
 
@@ -623,7 +729,7 @@ window.tacticalGlobe = (function () {
 
         viewers.set(containerId, {
             containerId, viewer, dotNetRef, cameraDataSource, cameraEntities, alertEntities, incidentDataSource, incidentEntities, worldNewsDataSource,
-            hazardDataSource, internetDataSource, convergenceDataSource, airportDataSource, auroraLayers: [], satelliteDataSource, signDataSource, roadWeatherDataSource, radar, clickHandler, selectMode: false, selectedCameras: new Map(), currentView: null,
+            hazardDataSource, internetDataSource, convergenceDataSource, airportDataSource, chokepointDataSource, auroraLayers: [], satelliteDataSource, signDataSource, roadWeatherDataSource, radar, clickHandler, selectMode: false, selectedCameras: new Map(), currentView: null,
             travelDataSource, fireDataSource, conflictDataSource, humanitarianDataSource, satelliteImagery: null,
             ionToken: options && typeof options.ionToken === 'string' && options.ionToken.length > 0 ? options.ionToken : null, threeD: null,
             renderTimer, pulseTimer: null, onRenderError
@@ -637,7 +743,8 @@ window.tacticalGlobe = (function () {
                     Cesium.Math.toDegrees(rectangle.north),
                     Cesium.Math.toDegrees(rectangle.south),
                     Cesium.Math.toDegrees(rectangle.east),
-                    Cesium.Math.toDegrees(rectangle.west));
+                    Cesium.Math.toDegrees(rectangle.west))
+                    .catch(function () { /* the Overwatch page has closed (navigated away): nothing to tell */ });
             }
         }, 400);
 
@@ -1134,6 +1241,22 @@ window.tacticalGlobe = (function () {
         return el;
     }
 
+    // Camera pins by difference (13-11-26): the server sends only the pins added or changed and the
+    // ids removed since its last send; this keeps the full set and draws it through setCameraPins
+    // (looked up at call time, so the Mac app's adapter gets the whole list locally). A pan used to
+    // resend every pin in view (measured ~480 KB a pan).
+    const cameraPinSets = new Map();
+
+    function updateCameraPins(added, removedIds) {
+        let pins = cameraPinSets.get('tg-viewport');
+        if (!pins) { pins = new Map(); cameraPinSets.set('tg-viewport', pins); }
+        (removedIds || []).forEach(function (id) { pins.delete(id); });
+        (added || []).forEach(function (pin) { pins.set(pin.id, pin); });
+        return window.tacticalGlobe.setCameraPins(Array.from(pins.values()));
+    }
+
+    function resetCameraPins() { cameraPinSets.delete('tg-viewport'); }
+
     function setCameraPins(containerIdOrPins, maybePins) {
         // Supports being called as setCameraPins(pins) for the single-globe case this page
         // actually uses today, or setCameraPins(containerId, pins) if a future page ever hosts
@@ -1282,7 +1405,8 @@ window.tacticalGlobe = (function () {
     // Time machine: the past view drawn on its own layers - an archived radar mosaic, plus the
     // incidents and earthquakes that were active then - so the live layers (which the page
     // switches off meanwhile) never mix with history.
-    const TIME_MACHINE_COLOURS = { crash: '#ff4d4d', closure: '#ff9f1c', hazard: '#ffd166', earthquake: '#c77dff' };
+    const TIME_MACHINE_COLOURS = { crash: '#ff4d4d', closure: '#ff9f1c', hazard: '#ffd166', earthquake: '#c77dff',
+        aircraft: '#e6f1ff', ship: '#4cc9f0', outage: '#f72585' };
 
     function setTimeMachine(containerId, snapshot) {
         const entry = viewers.get(containerId || 'tg-viewport');
@@ -1308,6 +1432,8 @@ window.tacticalGlobe = (function () {
         }));
         (snapshot.incidents || []).forEach(item => add(item, TIME_MACHINE_COLOURS[item.category] || '#ffffff', 10));
         (snapshot.earthquakes || []).forEach(item => add(item, TIME_MACHINE_COLOURS.earthquake, 12));
+        // #6: aircraft, ships and outage areas recorded near that moment (live-layer history).
+        (snapshot.tracks || []).forEach(item => add(item, TIME_MACHINE_COLOURS[item.category] || '#ffffff', item.category === 'outage' ? 11 : 7));
     }
 
     function clearTimeMachine(containerId) {
@@ -1361,7 +1487,8 @@ window.tacticalGlobe = (function () {
             const position = Cesium.Cartesian3.fromDegrees(Number(plane.lon), Number(plane.lat));
             const altitude = Number.isFinite(plane.altitudeFeet) ? Math.round(plane.altitudeFeet / 100) * 100 : null;
             const selected = plane.id === selectedId;
-            const colour = Cesium.Color.fromCssColorString(selected ? AIRCRAFT_PATH_COLOUR : AIRCRAFT_COLOUR);
+            // A plane squawking 7500/7600/7700 is red and always labelled (flight anomalies, 13-11-26).
+            const colour = Cesium.Color.fromCssColorString(plane.emergency ? '#ff3b30' : selected ? AIRCRAFT_PATH_COLOUR : AIRCRAFT_COLOUR);
             // The id is what scene.pick hands the click handler, so clicking a plane opens its panel.
             const pickId = { _tacticalGlobeAircraft: plane };
             billboards.add({
@@ -1370,13 +1497,13 @@ window.tacticalGlobe = (function () {
                 disableDepthTestDistance: 0
             });
             if (selected) updateSelectedAircraft(entry, plane);
-            if (!withLabels) return;
+            if (!withLabels && !plane.emergency) return;
             labels.add({
                 id: pickId, position: position,
-                text: (plane.callsign || plane.id) + (altitude !== null ? '  ' + altitude.toLocaleString('en-US') + ' FT' : ''),
+                text: (plane.emergency ? plane.emergency.toUpperCase() + '  ' : '') + (plane.callsign || plane.id) + (altitude !== null ? '  ' + altitude.toLocaleString('en-US') + ' FT' : ''),
                 font: '10px monospace', fillColor: colour, outlineColor: Cesium.Color.BLACK, outlineWidth: 3,
                 style: Cesium.LabelStyle.FILL_AND_OUTLINE, pixelOffset: new Cesium.Cartesian2(0, -16),
-                distanceDisplayCondition: nearOnly, disableDepthTestDistance: 0
+                distanceDisplayCondition: plane.emergency ? undefined : nearOnly, disableDepthTestDistance: 0
             });
         });
     }
@@ -1412,11 +1539,26 @@ window.tacticalGlobe = (function () {
     // speed), then fills in GetAircraftDetailAsync's lookup and draws the path. Unlike the other
     // info panels this one floats without the darkening backdrop, so the path stays visible and
     // the globe can still be panned and zoomed while it's open.
+    // On the Mac app the map is native MapKit, so there is no Cesium viewer entry. The adapter
+    // below sets this stand-in so panels and camera selection work the same there.
+    // { containerId, viewer: null, dotNetRef, selectMode, selectedCameras, cameraEntities, aircraftPath, post }
+    let nativeEntry = null;
+
+    function entryFor(containerId) {
+        const id = containerId || 'tg-viewport';
+        return viewers.get(id) || (nativeEntry && nativeEntry.containerId === id ? nativeEntry : null);
+    }
+
+    function shellFor(entry) {
+        const container = entry.viewer ? entry.viewer.container : document.getElementById(entry.containerId);
+        return container ? container.closest('.tg-shell') : null;
+    }
+
     function openAircraftPanel(containerId, plane) {
-        const entry = viewers.get(containerId || 'tg-viewport');
+        const entry = entryFor(containerId);
         if (!entry) return;
         closeAircraftPanel();
-        const shell = entry.viewer.container.closest('.tg-shell');
+        const shell = shellFor(entry);
         if (!shell) return;
         const readings = formatAircraftReadings(plane);
         const panel = document.createElement('div');
@@ -1501,6 +1643,10 @@ window.tacticalGlobe = (function () {
     function drawAircraftPath(entry) {
         const path = entry.aircraftPath;
         if (!path) return;
+        if (!entry.viewer) {
+            drawNativeAircraftPath(entry, path);
+            return;
+        }
         path.entities.forEach(function (e) { entry.viewer.entities.remove(e); });
         path.entities = [];
         const add = function (spec) { path.entities.push(entry.viewer.entities.add(spec)); };
@@ -1525,6 +1671,19 @@ window.tacticalGlobe = (function () {
                         style: Cesium.LabelStyle.FILL_AND_OUTLINE, pixelOffset: new Cesium.Cartesian2(0, -16), disableDepthTestDistance: 0 }
                 });
         });
+    }
+
+    // The same path on the Mac's native map: lines and airport points through its generic layer.
+    function drawNativeAircraftPath(entry, path) {
+        if (!entry.post) return;
+        const items = [];
+        if (path.track.length > 0) items.push({ path: path.track.concat([path.current]) });
+        else if (path.origin) items.push({ path: [[path.origin.longitude, path.origin.latitude], path.current] });
+        if (path.destination) items.push({ path: [path.current, [path.destination.longitude, path.destination.latitude]] });
+        [path.origin, path.destination].filter(Boolean).forEach(function (airport) {
+            items.push({ lat: airport.latitude, lon: airport.longitude, title: airport.code });
+        });
+        entry.post('setAircraftPath', [items]);
     }
 
     // Each minute's aircraft refresh moves the selected plane: extend its path and update the readings.
@@ -1552,6 +1711,10 @@ window.tacticalGlobe = (function () {
         });
         const padLon = Math.max(0.2, (east - west) * 0.15);
         const padLat = Math.max(0.2, (north - south) * 0.15);
+        if (!entry.viewer) {
+            if (entry.post) entry.post('flyToBounds', [west - padLon, south - padLat, east + padLon, north + padLat]);
+            return;
+        }
         entry.viewer.camera.flyTo({ destination: Cesium.Rectangle.fromDegrees(west - padLon, south - padLat, east + padLon, north + padLat) });
     }
 
@@ -1559,6 +1722,10 @@ window.tacticalGlobe = (function () {
         aircraftRequestToken++;
         if (aircraftPanel && aircraftPanel.parentNode) aircraftPanel.parentNode.removeChild(aircraftPanel);
         aircraftPanel = null;
+        if (nativeEntry && nativeEntry.aircraftPath) {
+            if (nativeEntry.post) nativeEntry.post('clearAircraftPath', []);
+            nativeEntry.aircraftPath = null;
+        }
         viewers.forEach(function (entry) {
             if (!entry.aircraftPath) return;
             entry.aircraftPath.entities.forEach(function (e) { entry.viewer.entities.remove(e); });
@@ -1922,20 +2089,79 @@ window.tacticalGlobe = (function () {
 
     // 3D cities: Cesium World Terrain (ion asset 1) and Cesium OSM Buildings (ion asset 96188),
     // streamed with the server's scoped ion token. Loaded on first use and kept, so switching
-    // off and on again doesn't re-download. Returns 'on', 'off', 'no-token' or 'failed: ...'.
+    // off and on again doesn't re-download. Returns 'on', 'off' or 'failed: ...'. Without an ion token
+    // (13-11-26) it's terrain only, from the open Terrain Tiles on AWS through the server's proxy.
     const ION_TERRAIN_ASSET = 1;
     const ION_OSM_BUILDINGS_ASSET = 96188;
+
+    // Terrarium tiles: height in metres = R * 256 + G + B / 256 - 32768. Each Cesium tile (Web
+    // Mercator, the same grid) samples its own tile, or the zoom-14 tile it lies inside, on a 65 x 65
+    // grid whose edges fall on the tile edges, so neighbouring tiles meet without seams.
+    const TERRAIN_SIZE = 65;
+    const TERRAIN_MAX_ZOOM = 14;
+    const terrainImages = new Map();
+
+    function terrainPixels(z, x, y) {
+        const key = z + '/' + x + '/' + y;
+        if (!terrainImages.has(key)) {
+            if (terrainImages.size > 256) terrainImages.delete(terrainImages.keys().next().value);
+            terrainImages.set(key, fetch('admin/api/overwatch/terrain/' + key, { credentials: 'same-origin' })
+                .then(function (response) { if (!response.ok) throw new Error('terrain ' + response.status); return response.blob(); })
+                .then(function (blob) { return createImageBitmap(blob); })
+                .then(function (bitmap) {
+                    const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+                    const context = canvas.getContext('2d', { willReadFrequently: true });
+                    context.drawImage(bitmap, 0, 0);
+                    return { width: bitmap.width, height: bitmap.height, data: context.getImageData(0, 0, bitmap.width, bitmap.height).data };
+                })
+                .catch(function (error) { terrainImages.delete(key); throw error; }));
+        }
+        return terrainImages.get(key);
+    }
+
+    function keylessTerrain() {
+        return new Cesium.CustomHeightmapTerrainProvider({
+            width: TERRAIN_SIZE,
+            height: TERRAIN_SIZE,
+            tilingScheme: new Cesium.WebMercatorTilingScheme(),
+            callback: function (x, y, level) {
+                const z = Math.min(level, TERRAIN_MAX_ZOOM);
+                const scale = Math.pow(2, level - z);
+                const sourceX = Math.floor(x / scale);
+                const sourceY = Math.floor(y / scale);
+                return terrainPixels(z, sourceX, sourceY).then(function (image) {
+                    const heights = new Float32Array(TERRAIN_SIZE * TERRAIN_SIZE);
+                    const span = 1 / scale;
+                    const offsetX = (x - sourceX * scale) * span;
+                    const offsetY = (y - sourceY * scale) * span;
+                    for (let row = 0; row < TERRAIN_SIZE; row++) {
+                        const v = offsetY + span * row / (TERRAIN_SIZE - 1);
+                        const py = Math.min(image.height - 1, Math.round(v * (image.height - 1)));
+                        for (let column = 0; column < TERRAIN_SIZE; column++) {
+                            const u = offsetX + span * column / (TERRAIN_SIZE - 1);
+                            const px = Math.min(image.width - 1, Math.round(u * (image.width - 1)));
+                            const i = (py * image.width + px) * 4;
+                            heights[row * TERRAIN_SIZE + column] = image.data[i] * 256 + image.data[i + 1] + image.data[i + 2] / 256 - 32768;
+                        }
+                    }
+                    return heights;
+                }).catch(function () { return undefined; });
+            }
+        });
+    }
 
     async function setThreeD(containerId, on) {
         const entry = viewers.get(containerId || 'tg-viewport');
         if (!entry) return 'failed: no globe';
-        if (!entry.ionToken) return 'no-token';
         const viewer = entry.viewer;
         try {
             if (!on) {
                 viewer.terrainProvider = new Cesium.EllipsoidTerrainProvider();
-                if (entry.threeD) entry.threeD.buildings.show = false;
+                if (entry.threeD && entry.threeD.buildings) entry.threeD.buildings.show = false;
                 return 'off';
+            }
+            if (!entry.threeD && !entry.ionToken) {
+                entry.threeD = { terrain: keylessTerrain(), buildings: null };
             }
             if (!entry.threeD) {
                 Cesium.Ion.defaultAccessToken = entry.ionToken;
@@ -1947,7 +2173,7 @@ window.tacticalGlobe = (function () {
                 entry.threeD = { terrain: terrain, buildings: buildings };
             }
             viewer.terrainProvider = entry.threeD.terrain;
-            entry.threeD.buildings.show = true;
+            if (entry.threeD.buildings) entry.threeD.buildings.show = true;
             return 'on';
         } catch (error) {
             viewer.terrainProvider = new Cesium.EllipsoidTerrainProvider();
@@ -2108,7 +2334,7 @@ window.tacticalGlobe = (function () {
         if (key === radar.key) return;
 
         const shownTime = radar.index >= 0 && radar.frames[radar.index] ? Date.parse(radar.frames[radar.index].validUtc) : null;
-        radar.layers.forEach(function (layer) { entry.viewer.imageryLayers.remove(layer, true); });
+        radar.layers.forEach(function (layer) { layer.remove(); });
         radar.layers = new Map();
         radar.key = key;
         radar.frames = timeline.frames;
@@ -2148,17 +2374,39 @@ window.tacticalGlobe = (function () {
         updateRadarForecastLine(entry);
     }
 
+    // One frame of radar: the whole planet (RainViewer, 12-11-26; its tiles stop at zoom 7 and
+    // Cesium stretches them) with the sharper US layer (NEXRAD / HRRR) on top. The pair shows,
+    // fades and is removed as one, so the rest of the timeline code treats it as a single layer.
     function ensureRadarLayer(entry, index) {
         const radar = entry.radar;
         let layer = radar.layers.get(index);
         if (!layer) {
-            layer = entry.viewer.imageryLayers.addImageryProvider(new Cesium.UrlTemplateImageryProvider({
-                url: radar.frames[index].tileUrlTemplate,
+            const frame = radar.frames[index];
+            const layers = entry.viewer.imageryLayers;
+            const parts = [];
+            if (frame.globalTileUrlTemplate) {
+                parts.push(layers.addImageryProvider(new Cesium.UrlTemplateImageryProvider({
+                    url: frame.globalTileUrlTemplate,
+                    maximumLevel: 7,
+                    credit: 'Radar: RainViewer'
+                })));
+            }
+            parts.push(layers.addImageryProvider(new Cesium.UrlTemplateImageryProvider({
+                url: frame.tileUrlTemplate,
                 // Radar is ~1 km resolution; beyond this Cesium upsamples instead of requesting
                 // street-level tiles the source doesn't really have.
                 maximumLevel: 10,
                 credit: 'Radar: NOAA NEXRAD / HRRR via Iowa Environmental Mesonet'
-            }));
+            })));
+            let shown = false;
+            let opacity = 1;
+            layer = {
+                get show() { return shown; },
+                set show(value) { shown = !!value; parts.forEach(function (part) { part.show = shown; }); },
+                get alpha() { return opacity; },
+                set alpha(value) { opacity = value; parts.forEach(function (part) { part.alpha = value; }); },
+                remove: function () { parts.forEach(function (part) { layers.remove(part, true); }); }
+            };
             layer.show = false;
             radar.layers.set(index, layer);
         }
@@ -2211,8 +2459,10 @@ window.tacticalGlobe = (function () {
         });
         current.alpha = 0.75;
         current.show = true;
-        // Start the next frame's tiles loading invisibly so playback doesn't flash empty frames.
-        const nextIndex = index + 1 < radar.frames.length ? index + 1 : null;
+        // Start the next frame's tiles loading invisibly so playback doesn't flash empty frames;
+        // only while playing (13-11-26): a hidden layer still costs a full draw of its tiles,
+        // and a paused radar was paying for two layers on every frame.
+        const nextIndex = radar.timer && index + 1 < radar.frames.length ? index + 1 : null;
         if (nextIndex !== null) {
             const next = ensureRadarLayer(entry, nextIndex);
             next.alpha = 0;
@@ -2233,8 +2483,9 @@ window.tacticalGlobe = (function () {
         const radar = entry.radar;
         if (radar.timer) {
             stopRadarPlayback(radar);
+            // Paused: drop the hidden next-frame layer.
+            if (radar.frames.length > 0) showRadarFrame(entry, radar.index);
         } else {
-            if (radar.index >= radar.frames.length - 1) showRadarFrame(entry, 0);
             let holdAtEnd = 0;
             radar.timer = setInterval(function () {
                 if (radar.index >= radar.frames.length - 1) {
@@ -2246,6 +2497,8 @@ window.tacticalGlobe = (function () {
                     showRadarFrame(entry, radar.index + 1);
                 }
             }, 700);
+            // Now playing: show the start frame and begin loading the next one.
+            showRadarFrame(entry, radar.index >= radar.frames.length - 1 ? 0 : radar.index);
         }
         updateRadarBarState(entry);
     }
@@ -2323,10 +2576,11 @@ window.tacticalGlobe = (function () {
         const kind = bar.querySelector('.tg-radar-kind');
         if (frame.kind === 'Forecast') {
             const run = radar.modelRunUtc ? new Date(radar.modelRunUtc) : null;
-            kind.textContent = 'FUTURE RADAR \u00b7 HRRR MODEL' + (run && !isNaN(run.getTime()) ? ' ' + String(run.getUTCHours()).padStart(2, '0') + 'Z' : '');
+            // The forecast model covers the US only; say so, since the past frames are worldwide.
+            kind.textContent = 'FUTURE RADAR \u00b7 HRRR MODEL' + (run && !isNaN(run.getTime()) ? ' ' + String(run.getUTCHours()).padStart(2, '0') + 'Z' : '') + ' \u00b7 US ONLY';
             kind.className = 'tg-radar-kind tg-radar-kind-forecast';
         } else {
-            kind.textContent = radar.index === radar.nowIndex ? 'LATEST RADAR' : 'PAST RADAR';
+            kind.textContent = (radar.index === radar.nowIndex ? 'LATEST RADAR' : 'PAST RADAR') + (frame.globalTileUrlTemplate ? ' \u00b7 WORLDWIDE' : ' \u00b7 US');
             kind.className = 'tg-radar-kind';
         }
         const play = bar.querySelector('.tg-radar-play');
@@ -2517,7 +2771,7 @@ window.tacticalGlobe = (function () {
         const reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
         (signals || []).forEach(function (signal) {
             // Bigger for wider coverage (3 outlets ~12px, 50+ ~30px); faded once a story goes quiet.
-            const size = Math.min(30, 8 + Math.log2(Math.max(2, signal.outletCount)) * 4);
+            const size = Math.min(30, 8 + Math.log2(Math.max(2, Number(signal.outletCount) || 2)) * 4);
             const color = Cesium.Color.fromCssColorString('#c77dff').withAlpha(signal.active === false ? 0.45 : 1);
             const billboard = {
                 image: pinBillboardImage,
@@ -2957,7 +3211,7 @@ window.tacticalGlobe = (function () {
         cyclone: '#00e0c6', flood: '#2f6bff', volcano: '#ff2e4d', drought: '#d4a72c', internet: '#9dff3c', airport: '#ffe14d',
         // 07-11-26: NASA EONET's natural events, and the travel, fire, conflict and humanitarian layers.
         landslide: '#b5794a', dust: '#d9b26f', ice: '#bfe8ff',
-        travel: '#ffd166', hotspot: '#ff7b00', conflict: '#ff4d6d', 'conflict-confirmed': '#c1121f', humanitarian: '#4cc9f0'
+        travel: '#ffd166', chokepoint: '#7ae0ff', hotspot: '#ff7b00', conflict: '#ff4d6d', 'conflict-confirmed': '#c1121f', humanitarian: '#4cc9f0'
     };
     const hazardSizes = { major: 20, moderate: 15, minor: 11 };
 
@@ -2979,6 +3233,17 @@ window.tacticalGlobe = (function () {
     function setAirportStatus(airports, containerId) {
         const entry = viewers.get(containerId || 'tg-viewport');
         if (entry) drawHazardPins(entry.airportDataSource, airports);
+    }
+
+    // Chokepoints and ports (13-11-26): IMF PortWatch transits as pins (ChokepointService).
+    function setChokepoints(points, containerId) {
+        const entry = viewers.get(containerId || 'tg-viewport');
+        if (entry) drawHazardPins(entry.chokepointDataSource, points);
+    }
+
+    function clearChokepoints(containerId) {
+        const entry = viewers.get(containerId || 'tg-viewport');
+        if (entry) entry.chokepointDataSource.entities.removeAll();
     }
 
     function clearAirportStatus(containerId) {
@@ -3208,6 +3473,90 @@ window.tacticalGlobe = (function () {
         entry.viewer.scene.requestRender();
     }
 
+    // Night lights (13-11-26): one GIBS night (or the Black Marble baseline) just above the base map,
+    // so every other layer still draws on top. spec null removes it.
+    function setNightLights(containerId, spec) {
+        const entry = viewers.get(containerId || 'tg-viewport');
+        if (!entry) return;
+        if (entry.nightLights) {
+            entry.viewer.imageryLayers.remove(entry.nightLights, true);
+            entry.nightLights = null;
+        }
+        if (spec) {
+            const provider = new Cesium.WebMapTileServiceImageryProvider({
+                url: 'https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/' + spec.layer + '/default/' + spec.time + '/' +
+                    spec.tileMatrixSet + '/{TileMatrix}/{TileRow}/{TileCol}.png',
+                layer: spec.layer, style: 'default', format: 'image/png', tileMatrixSetID: spec.tileMatrixSet,
+                maximumLevel: spec.maxLevel, tilingScheme: new Cesium.WebMercatorTilingScheme(), credit: 'NASA GIBS (VIIRS)'
+            });
+            entry.nightLights = entry.viewer.imageryLayers.addImageryProvider(provider, 1);
+        }
+        entry.viewer.scene.requestRender();
+    }
+
+    // Satellite scenes (13-11-26): a Sentinel-2 scene ("after") over the globe, and optionally an
+    // earlier one ("before") on the left of a split the slider moves (Cesium's splitDirection).
+    function sceneLayer(entry, template) {
+        const provider = new Cesium.UrlTemplateImageryProvider({ url: template, maximumLevel: 18, credit: 'Sentinel-2 (ESA Copernicus) via Microsoft Planetary Computer' });
+        return entry.viewer.imageryLayers.addImageryProvider(provider);
+    }
+
+    function setSatelliteScene(containerId, spec) {
+        const entry = viewers.get(containerId || 'tg-viewport');
+        if (!entry) return;
+        (entry.satelliteScenes || []).forEach(function (layer) { entry.viewer.imageryLayers.remove(layer, true); });
+        entry.satelliteScenes = [];
+        if (spec && spec.after) {
+            const after = sceneLayer(entry, spec.after);
+            entry.satelliteScenes.push(after);
+            if (spec.before) {
+                const before = sceneLayer(entry, spec.before);
+                before.splitDirection = Cesium.SplitDirection.LEFT;
+                after.splitDirection = Cesium.SplitDirection.RIGHT;
+                entry.satelliteScenes.push(before);
+                entry.viewer.scene.splitPosition = typeof spec.split === 'number' ? spec.split : 0.5;
+            }
+        }
+        entry.viewer.scene.requestRender();
+    }
+
+    function clearSatelliteScene(containerId) { setSatelliteScene(containerId, null); }
+
+    // Analyst tools (13-11-26): the measured path and range rings, already worked out by the server
+    // as lines of [lat, lon] (AnalystGeometry), drawn as plain polylines.
+    function setMeasure(containerId, spec) {
+        const entry = viewers.get(containerId || 'tg-viewport');
+        if (!entry) return;
+        if (!entry.measureSource) {
+            entry.measureSource = new Cesium.CustomDataSource('tg-measure');
+            entry.viewer.dataSources.add(entry.measureSource);
+        }
+        const entities = entry.measureSource.entities;
+        entities.removeAll();
+        ((spec && spec.lines) || []).forEach(function (line, index) {
+            if (!line || line.length < 2) return;
+            entities.add({ polyline: {
+                positions: Cesium.Cartesian3.fromDegreesArray([].concat.apply([], line.map(function (p) { return [p[1], p[0]]; }))),
+                width: index === 0 ? 3 : 1.5, clampToGround: false,
+                material: index === 0 ? Cesium.Color.fromCssColorString('#ffe14d') : new Cesium.PolylineDashMaterialProperty({ color: Cesium.Color.fromCssColorString('#7ae0ff'), dashLength: 14 })
+            } });
+        });
+        ((spec && spec.points) || []).forEach(function (p) {
+            entities.add({ position: Cesium.Cartesian3.fromDegrees(p[1], p[0]), point: { pixelSize: 8, color: Cesium.Color.fromCssColorString('#ffe14d'), outlineColor: Cesium.Color.BLACK, outlineWidth: 1, disableDepthTestDistance: Number.POSITIVE_INFINITY } });
+        });
+        entry.viewer.scene.requestRender();
+    }
+
+    function clearMeasure(containerId) { setMeasure(containerId, null); }
+
+    // Moves the before/after split (0 = all after, 1 = all before).
+    function splitSatelliteScene(containerId, position) {
+        const entry = viewers.get(containerId || 'tg-viewport');
+        if (!entry) return;
+        entry.viewer.scene.splitPosition = Math.min(1, Math.max(0, Number(position) || 0));
+        entry.viewer.scene.requestRender();
+    }
+
     function hideSatelliteImagery(entry) {
         if (!entry || !entry.satelliteImagery) return;
         entry.viewer.imageryLayers.remove(entry.satelliteImagery.layer, true);
@@ -3317,6 +3666,10 @@ window.tacticalGlobe = (function () {
         entities.suspendEvents();
         entities.removeAll();
         (cells || []).forEach(function (cell) {
+            if (cell.blackout) {
+                addReportingBlackout(entities, cell);
+                return;
+            }
             const color = Cesium.Color.fromCssColorString(convergenceColors[cell.severity] || convergenceColors.moderate);
             const square = entities.add({
                 rectangle: {
@@ -3348,6 +3701,39 @@ window.tacticalGlobe = (function () {
             marker._tacticalGlobeConvergence = cell;
         });
         entities.resumeEvents();
+    }
+
+    // A reporting blackout: a dashed perimeter with no fill, because the point is what's missing.
+    // cell: { blackout: true, south, west, north, east, lat, lon, label, kinds, reason, signals }
+    function addReportingBlackout(entities, cell) {
+        const color = Cesium.Color.fromCssColorString('#b0b8c4');
+        const perimeter = entities.add({
+            polyline: {
+                positions: Cesium.Cartesian3.fromDegreesArray([
+                    cell.west, cell.south, cell.east, cell.south, cell.east, cell.north,
+                    cell.west, cell.north, cell.west, cell.south
+                ]),
+                width: 2,
+                clampToGround: false,
+                material: new Cesium.PolylineDashMaterialProperty({ color: color, dashLength: 12 })
+            }
+        });
+        perimeter._tacticalGlobeConvergence = cell;
+        const marker = entities.add({
+            position: Cesium.Cartesian3.fromDegrees(cell.lon, cell.lat),
+            billboard: { image: pinBillboardImage, width: 16, height: 16, color: color, disableDepthTestDistance: 0 },
+            label: {
+                text: 'NO REPORTING',
+                font: '600 11px monospace',
+                fillColor: Cesium.Color.WHITE,
+                outlineColor: Cesium.Color.BLACK,
+                outlineWidth: 3,
+                style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+                pixelOffset: new Cesium.Cartesian2(0, -18),
+                disableDepthTestDistance: 0
+            }
+        });
+        marker._tacticalGlobeConvergence = cell;
     }
 
     function clearConvergence(containerId) {
@@ -3505,7 +3891,32 @@ window.tacticalGlobe = (function () {
         incidentPanel = panel;
     }
 
+    function openReportingBlackoutPanel(cell) {
+        closeIncidentPanel();
+        const panel = document.createElement('div');
+        panel.className = 'tg-stream-panel tg-incident-panel';
+        const signal = (cell.signals || [])[0] || {};
+        const title = escapeHtml(cell.label || signal.title || '');
+        panel.innerHTML =
+            '<div class="tg-stream-panel-header">' +
+            '<span>REPORTING BLACKOUT - ' + title + '</span>' +
+            '<button type="button" class="tg-stream-panel-close" aria-label="Close">X</button>' +
+            '</div>' +
+            '<div class="tg-stream-panel-body">' +
+            '<dl class="tg-incident-facts"><dt>KIND</dt><dd>' + escapeHtml(String((cell.kinds || [])[0] || '').toUpperCase()) + '</dd></dl>' +
+            '<div>' + escapeHtml(cell.reason || '') + '. Silence can mean the place can\'t report, or that nobody has reported it yet. Worth a look, not proof of anything.</div>' +
+            (signal.url ? '<ul class="tg-convergence-items"><li><a href="' + escapeHtml(signal.url) + '" target="_blank" rel="noopener noreferrer">Source</a></li></ul>' : '') +
+            '</div>';
+        panel.querySelector('.tg-stream-panel-close').addEventListener('click', closeIncidentPanel);
+        if (!openAsModal(panel, closeIncidentPanel)) return;
+        incidentPanel = panel;
+    }
+
     function openConvergencePanel(cell) {
+        if (cell && cell.blackout) {
+            openReportingBlackoutPanel(cell);
+            return;
+        }
         closeIncidentPanel();
         const panel = document.createElement('div');
         panel.className = 'tg-stream-panel tg-incident-panel';
@@ -4187,7 +4598,7 @@ window.tacticalGlobe = (function () {
     // setSelectModeEnabled/toggleCameraSelection); openWatchWallWithCameras is the lower-level
     // entry point, also reused by shareable view links to reopen a shared multi-camera view.
     function openWatchWall(containerId) {
-        const entry = viewers.get(containerId || 'tg-viewport');
+        const entry = entryFor(containerId);
         if (!entry) return;
         openWatchWallWithCameras(containerId, Array.from(entry.selectedCameras.values()));
     }
@@ -4426,7 +4837,15 @@ window.tacticalGlobe = (function () {
         clearStreetViewMarker: clearStreetViewMarker,
         enableStreetViewDrop: enableStreetViewDrop,
         flyToBounds: flyToBounds,
+        setNightLights: setNightLights,
+        setSatelliteScene: setSatelliteScene,
+        clearSatelliteScene: clearSatelliteScene,
+        splitSatelliteScene: splitSatelliteScene,
+        setMeasure: setMeasure,
+        clearMeasure: clearMeasure,
         setCameraPins: setCameraPins,
+        updateCameraPins: updateCameraPins,
+        resetCameraPins: resetCameraPins,
         setSelectModeEnabled: setSelectModeEnabled,
         openWatchWall: openWatchWall,
         openWatchWallWithCameras: openWatchWallWithCameras,
@@ -4467,6 +4886,8 @@ window.tacticalGlobe = (function () {
         clearConvergence: clearConvergence,
         setAirportStatus: setAirportStatus,
         clearAirportStatus: clearAirportStatus,
+        setChokepoints: setChokepoints,
+        clearChokepoints: clearChokepoints,
         setAurora: setAurora,
         clearAurora: clearAurora,
         readPhotoExif: readPhotoExif,
@@ -4494,52 +4915,157 @@ window.tacticalGlobe = (function () {
     // app therefore supplies an MKMapView behind this transparent viewport. Keep the Blazor page
     // as the authenticated controller and forward its existing renderer vocabulary unchanged;
     // browser and PWA sessions never enter this branch and continue to use Cesium above.
-    if (window.__gwsMacCatalystWebView === true
-        && window.webkit && window.webkit.messageHandlers
-        && window.webkit.messageHandlers.gwsNativeOverwatch) {
+    if (window.__gwsMacCatalystWebView === true) {
         let nativeDotNetRef = null;
         let nativeContainerId = 'tg-viewport';
         let nativeDriveWatch = null;
         let nativePickMode = false;
+        let nativePointer = null;
+        let nativeMoved = false;
+        // Movement under this many pixels is still a click (a trackpad press jitters a pixel or two).
+        const NATIVE_DRAG_THRESHOLD_PX = 5;
+        // Pan and wheel input is summed and sent once per frame, not once per event.
+        let nativePendingPan = null;
+        let nativePendingZoom = null;
+        let nativeFrame = 0;
+        // The page reloads layers for a new view; while a drag is under way that waits for release.
+        let nativeDeferredRegion = null;
 
+        const nativeHandler = function () {
+            return window.webkit && window.webkit.messageHandlers
+                ? window.webkit.messageHandlers.gwsNativeOverwatch
+                : null;
+        };
         const postNative = function (operation, args) {
-            window.webkit.messageHandlers.gwsNativeOverwatch.postMessage({
+            const handler = nativeHandler();
+            if (!handler) throw new Error('The native Overwatch renderer is not ready.');
+            handler.postMessage({
                 operation: operation,
                 arguments: Array.from(args || [])
             });
         };
 
+        const waitForNativeHandler = function () {
+            if (nativeHandler()) return Promise.resolve();
+            return new Promise(function (resolve, reject) {
+                let attempts = 0;
+                const timer = setInterval(function () {
+                    if (nativeHandler()) {
+                        clearInterval(timer);
+                        resolve();
+                        return;
+                    }
+                    attempts += 1;
+                    if (attempts >= 40) {
+                        clearInterval(timer);
+                        reject(new Error('The native Overwatch renderer did not become ready.'));
+                    }
+                }, 50);
+            });
+        };
+
+        // What a click on each layer's pin opens, matching the Cesium click handler. Layers not
+        // listed (ships, air quality, coverage, alert highlights, routes...) aren't clickable there
+        // either, so a click on one does nothing rather than opening the wrong window.
+        // NativeOverwatchOperations.Selectable lists the same keys for the Mac's hit test.
+        const nativeSelectionHandlers = {
+            setCameraPins: function (camera) {
+                if (nativeEntry && nativeEntry.selectMode) toggleCameraSelection(nativeEntry, camera);
+                else openStreamPanel(camera, nativeDotNetRef);
+            },
+            setWorldNews: function (signal) { openWorldNewsPanel(signal); },
+            setNewsShading: function (total) { openNewsCountryPanel(total); },
+            setAircraft: function (plane) { openAircraftPanel(nativeContainerId, plane); },
+            setRoadWeather: function (station) { openRoadWeatherPanel(station); },
+            setMessageSigns: function (sign) { openSignPanel(sign); },
+            setTrafficIncidents: function (incident) { openIncidentPanel(incident); },
+            setConvergence: function (cell) { openConvergencePanel(cell); },
+            setSatellites: function (sat) { openSatellitePanel(sat); },
+            setHazards: function (hazard) { openHazardPanel(hazard); },
+            setInternetOutages: function (outage) { openHazardPanel(outage); },
+            setAirportStatus: function (airport) { openHazardPanel(airport); },
+            setChokepoints: function (point) { openHazardPanel(point); },
+            setTravelAdvice: function (pin) { openHazardPanel(pin); },
+            setFireHotspots: function (cell) { openHazardPanel(cell); },
+            setConflict: function (event) { openHazardPanel(event); },
+            setHumanitarian: function (item) { openHazardPanel(item); },
+            setMapNotes: function (note) {
+                if (nativeDotNetRef) nativeDotNetRef.invokeMethodAsync('OnMapNoteClicked', note);
+            }
+        };
+
+        const reportRegion = function (region) {
+            if (nativeDotNetRef) nativeDotNetRef.invokeMethodAsync('OnGlobeViewChanged', region[0], region[1], region[2], region[3]).catch(function () { });
+        };
+
+        // Pins the native map can't split by zooming (news stories placed at one country or city
+        // share a coordinate) arrive together; list them and open the one chosen.
+        const nativeLayerNames = {
+            setCameraPins: 'CAMERA', setWorldNews: 'NEWS', setNewsShading: 'NEWS', setAircraft: 'AIRCRAFT',
+            setRoadWeather: 'ROAD WEATHER', setMessageSigns: 'SIGN', setTrafficIncidents: 'INCIDENT',
+            setConvergence: 'SIGNALS', setSatellites: 'SATELLITE', setHazards: 'HAZARD', setInternetOutages: 'INTERNET',
+            setAirportStatus: 'AIRPORT', setChokepoints: 'CHOKEPOINT', setTravelAdvice: 'TRAVEL', setFireHotspots: 'FIRE', setConflict: 'CONFLICT',
+            setHumanitarian: 'HUMANITARIAN', setMapNotes: 'NOTE'
+        };
+        const openNativeChoices = function (group) {
+            const items = (group && group.items) || [];
+            if (items.length === 0) return;
+            if (items.length === 1) { window.gwsNativeOverwatch.selected(items[0]); return; }
+            closeIncidentPanel();
+            const panel = document.createElement('div');
+            panel.className = 'tg-stream-panel tg-incident-panel tg-native-choices';
+            const total = group.total || items.length;
+            panel.innerHTML =
+                '<div class="tg-stream-panel-header"><span>' + escapeHtml(String(total)) + ' HERE</span>' +
+                '<button type="button" class="tg-stream-panel-close" aria-label="Close">X</button></div>' +
+                '<div class="tg-stream-panel-body"><ul class="tg-convergence-items">' +
+                items.map(function (item, index) {
+                    const p = item.payload || {};
+                    const title = p.title || p.name || p.label || p.callsign || p.code || p.id || 'Untitled';
+                    const where = p.place || p.country || '';
+                    return '<li><button type="button" class="tg-native-choice" data-index="' + index + '">' +
+                        '<strong>' + escapeHtml(nativeLayerNames[item.operation] || 'PIN') + '</strong> ' + escapeHtml(String(title)) +
+                        (where ? ' <span class="tg-native-choice-place">' + escapeHtml(String(where)) + '</span>' : '') +
+                        '</button></li>';
+                }).join('') +
+                '</ul>' + (total > items.length ? '<div class="tg-stream-panel-meta">SHOWING ' + items.length + ' OF ' + total + '. ZOOM IN FOR THE REST.</div>' : '') +
+                '</div>';
+            panel.querySelector('.tg-stream-panel-close').addEventListener('click', closeIncidentPanel);
+            panel.querySelectorAll('.tg-native-choice').forEach(function (button) {
+                button.addEventListener('click', function () {
+                    const chosen = items[Number(button.dataset.index)];
+                    closeIncidentPanel();
+                    window.gwsNativeOverwatch.selected(chosen);
+                });
+            });
+            if (!openAsModal(panel, closeIncidentPanel)) return;
+            incidentPanel = panel;
+        };
+
         window.gwsNativeOverwatch = {
+            selectedMany: function (group) { openNativeChoices(group); },
             regionChanged: function (north, south, east, west) {
-                if (nativeDotNetRef) nativeDotNetRef.invokeMethodAsync('OnGlobeViewChanged', north, south, east, west);
+                const region = [north, south, east, west];
+                if (nativePointer && nativeMoved) { nativeDeferredRegion = region; return; }
+                reportRegion(region);
             },
             selected: function (selection) {
                 if (!selection) return;
                 const payload = selection.payload || {};
+                if (selection.operation === 'mapPoint' && !nativePickMode) return;
                 if (nativePickMode && nativeDotNetRef && Number.isFinite(payload.lat) && Number.isFinite(payload.lon)) {
                     nativePickMode = false;
                     nativeDotNetRef.invokeMethodAsync('OnMapPointPicked', payload.lat, payload.lon);
                     return;
                 }
-                switch (selection.operation) {
-                    case 'setCameraPins': openStreamPanel(payload, nativeDotNetRef); break;
-                    case 'setWorldNews': openWorldNewsPanel(payload); break;
-                    case 'setAircraft': openAircraftPanel(nativeContainerId, payload); break;
-                    case 'setRoadWeather': openRoadWeatherPanel(payload); break;
-                    case 'setMessageSigns': openSignPanel(payload); break;
-                    case 'setTrafficIncidents': openIncidentPanel(payload); break;
-                    case 'setConvergence': openConvergencePanel(payload); break;
-                    case 'setMapNotes':
-                        if (nativeDotNetRef) nativeDotNetRef.invokeMethodAsync('OnMapNoteClicked', payload);
-                        break;
-                    default: openHazardPanel(payload); break;
-                }
+                const open = nativeSelectionHandlers[selection.operation];
+                if (open) open(payload);
             }
         };
 
         const nativeOperations = new Set([
             'flyTo', 'flyToBounds', 'flyToStreetLevel', 'zoom', 'home', 'dispose',
-            'setTimeMachine', 'clearTimeMachine', 'setMapNotes', 'setAircraft', 'setShips',
+            'setTimeMachine', 'clearTimeMachine', 'setMapNotes', 'setThreeD', 'setNightLights', 'setSatelliteScene', 'clearSatelliteScene', 'setMeasure', 'clearMeasure', 'setAircraft', 'setShips',
             'setAirQuality', 'setPowerOutages', 'setRoadTraffic', 'setTrafficFlow', 'setDriveFollow',
             'setStreetViewMarker', 'clearStreetViewMarker', 'setCameraPins', 'setSelectModeEnabled',
             'setRadarVisible', 'setRadarTimeline', 'setHourlyForecast', 'setWeatherAlerts',
@@ -4549,21 +5075,152 @@ window.tacticalGlobe = (function () {
             'clearHazards', 'setMessageSigns', 'clearMessageSigns', 'setRoadWeather',
             'clearRoadWeather', 'setRoute', 'clearRoute', 'setRouteHighlights',
             'setRouteConditions', 'setInternetOutages', 'clearInternetOutages', 'setConvergence',
-            'clearConvergence', 'setAirportStatus', 'clearAirportStatus', 'setAurora', 'clearAurora',
+            'clearConvergence', 'setAirportStatus', 'clearAirportStatus', 'setChokepoints', 'clearChokepoints', 'setAurora', 'clearAurora',
             'setSatellites', 'clearSatellites', 'setTravelAdvice', 'clearTravelAdvice',
             'setFireHotspots', 'clearFireHotspots', 'setConflict', 'clearConflict',
             'setHumanitarian', 'clearHumanitarian', 'setWeatherSnapshot'
         ]);
 
+        // Ops that also draw page HTML (not the map) keep running on the page: the weather panel
+        // never showed in the Mac app while setWeatherSnapshot only went to the native map (13-11-26).
+        const pageAlso = new Set(['setWeatherSnapshot']);
         nativeOperations.forEach(function (name) {
-            api[name] = function () { postNative(name, arguments); };
+            const original = api[name];
+            api[name] = pageAlso.has(name) && typeof original === 'function'
+                ? function () { postNative(name, arguments); return original.apply(this, arguments); }
+                : function () { postNative(name, arguments); };
         });
-        api.init = function (containerId, dotNetRef) {
+
+        // The native map sits under the page at the container's rectangle. It was sent once, at
+        // init (before 12-11-26), so when the container later moved or resized (sidebar, window,
+        // the page settling) the map kept its old frame and clicks, measured against the new
+        // rectangle, landed ~30 pt from the pin drawn there: pins "did nothing". Now any change
+        // is sent as 'layout', and checked again right before each click.
+        let nativeLayoutKey = '';
+        let nativeLayoutStop = null;
+        const syncNativeLayout = function () {
+            const container = document.getElementById(nativeContainerId);
+            if (!container) return;
+            const rect = container.getBoundingClientRect();
+            const values = [rect.x, rect.y, rect.width, rect.height, window.innerWidth, window.innerHeight];
+            const key = values.map(function (value) { return Math.round(value * 2) / 2; }).join(',');
+            if (key === nativeLayoutKey) return;
+            nativeLayoutKey = key;
+            postNative('layout', values);
+        };
+        const watchNativeLayout = function (container) {
+            if (nativeLayoutStop) nativeLayoutStop();
+            let pending = 0;
+            const soon = function () { if (!pending) pending = requestAnimationFrame(function () { pending = 0; syncNativeLayout(); }); };
+            const resize = typeof ResizeObserver === 'function' ? new ResizeObserver(soon) : null;
+            if (resize) { resize.observe(container); resize.observe(document.documentElement); }
+            window.addEventListener('resize', soon);
+            document.addEventListener('transitionend', soon, true);
+            // A move without a resize (the sidebar sliding) fires none of the above reliably.
+            const timer = setInterval(syncNativeLayout, 1000);
+            nativeLayoutStop = function () {
+                if (resize) resize.disconnect();
+                window.removeEventListener('resize', soon);
+                document.removeEventListener('transitionend', soon, true);
+                clearInterval(timer);
+                if (pending) cancelAnimationFrame(pending);
+                nativeLayoutStop = null;
+            };
+        };
+        api.dispose = function () {
+            if (nativeLayoutStop) nativeLayoutStop();
+            nativeLayoutKey = '';
+            postNative('dispose', arguments);
+        };
+
+        api.init = async function (containerId, dotNetRef) {
             nativeContainerId = containerId || 'tg-viewport';
             nativeDotNetRef = dotNetRef;
+            nativeEntry = {
+                containerId: nativeContainerId, viewer: null, dotNetRef: dotNetRef, selectMode: false,
+                selectedCameras: new Map(), cameraEntities: new Map(), aircraftPath: null,
+                post: function (operation, args) { postNative(operation, args); }
+            };
             const container = document.getElementById(nativeContainerId);
             if (container) {
                 container.replaceChildren();
+                if (container.dataset.gwsNativeTap !== 'true') {
+                    container.dataset.gwsNativeTap = 'true';
+                    container.style.touchAction = 'none';
+                    // An app build from before 12-11-26 injects its own navigation; leave it be.
+                    if (container.dataset.gwsNativeAppNavigation !== 'true') {
+                        const flush = function () {
+                            nativeFrame = 0;
+                            if (nativePendingPan) {
+                                postNative('pan', [nativePendingPan.x, nativePendingPan.y]);
+                                nativePendingPan = null;
+                            }
+                            if (nativePendingZoom) {
+                                const factor = Math.min(4, Math.max(0.25, Math.exp(nativePendingZoom.amount)));
+                                postNative('zoomBy', [factor, nativePendingZoom.x, nativePendingZoom.y]);
+                                nativePendingZoom = null;
+                            }
+                        };
+                        const schedule = function () {
+                            if (!nativeFrame) nativeFrame = requestAnimationFrame(flush);
+                        };
+                        container.addEventListener('pointerdown', function (event) {
+                            if (event.button !== 0) return;
+                            nativePointer = { id: event.pointerId, startX: event.clientX, startY: event.clientY, x: event.clientX, y: event.clientY };
+                            nativeMoved = false;
+                            container.setPointerCapture(event.pointerId);
+                        });
+                        container.addEventListener('pointermove', function (event) {
+                            if (!nativePointer || nativePointer.id !== event.pointerId) return;
+                            if (!nativeMoved && Math.hypot(event.clientX - nativePointer.startX, event.clientY - nativePointer.startY) < NATIVE_DRAG_THRESHOLD_PX) return;
+                            const bounds = container.getBoundingClientRect();
+                            if (bounds.width <= 0 || bounds.height <= 0) return;
+                            nativeMoved = true;
+                            const pan = nativePendingPan || (nativePendingPan = { x: 0, y: 0 });
+                            pan.x += (event.clientX - nativePointer.x) / bounds.width;
+                            pan.y += (event.clientY - nativePointer.y) / bounds.height;
+                            nativePointer.x = event.clientX;
+                            nativePointer.y = event.clientY;
+                            schedule();
+                        });
+                        const finishPan = function (event) {
+                            if (!nativePointer || nativePointer.id !== event.pointerId) return;
+                            nativePointer = null;
+                            if (nativeFrame) { cancelAnimationFrame(nativeFrame); flush(); }
+                            if (nativeDeferredRegion) {
+                                const region = nativeDeferredRegion;
+                                nativeDeferredRegion = null;
+                                reportRegion(region);
+                            }
+                        };
+                        container.addEventListener('pointerup', finishPan);
+                        container.addEventListener('pointercancel', finishPan);
+                        // Wheel and trackpad pinch (ctrlKey) zoom smoothly around the pointer. Each
+                        // event used to be a separate animated 2x zoom, which queued up and lagged.
+                        container.addEventListener('wheel', function (event) {
+                            event.preventDefault();
+                            const bounds = container.getBoundingClientRect();
+                            if (bounds.width <= 0 || bounds.height <= 0) return;
+                            const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? bounds.height : 1;
+                            const zoom = nativePendingZoom || (nativePendingZoom = { amount: 0, x: 0.5, y: 0.5 });
+                            zoom.amount += event.deltaY * unit * (event.ctrlKey ? 0.01 : 0.0025);
+                            zoom.x = (event.clientX - bounds.left) / bounds.width;
+                            zoom.y = (event.clientY - bounds.top) / bounds.height;
+                            schedule();
+                        }, { passive: false });
+                    }
+                    container.addEventListener('click', function (event) {
+                        if (nativeMoved) { nativeMoved = false; return; }
+                        const bounds = container.getBoundingClientRect();
+                        if (bounds.width <= 0 || bounds.height <= 0) return;
+                        // The map's frame first, so the click is measured against the same rectangle.
+                        syncNativeLayout();
+                        postNative('mapTap', [
+                            (event.clientX - bounds.left) / bounds.width,
+                            (event.clientY - bounds.top) / bounds.height
+                        ]);
+                    });
+                }
                 let transparentAncestor = container;
                 while (transparentAncestor && transparentAncestor !== document.body) {
                     transparentAncestor.style.backgroundColor = 'transparent';
@@ -4572,13 +5229,27 @@ window.tacticalGlobe = (function () {
             }
             document.documentElement.classList.add('gws-native-overwatch');
             document.body.classList.add('gws-native-overwatch');
+            document.documentElement.style.setProperty('background-color', 'transparent', 'important');
+            document.body.style.setProperty('background-color', 'transparent', 'important');
             const rect = container ? container.getBoundingClientRect() : { x: 0, y: 0, width: innerWidth, height: innerHeight };
-            postNative('init', [rect.x, rect.y, rect.width, rect.height]);
+            await waitForNativeHandler();
+            postNative('init', [rect.x, rect.y, rect.width, rect.height, window.innerWidth, window.innerHeight]);
+            nativeLayoutKey = '';
+            if (container) watchNativeLayout(container);
         };
         api.whenDrawn = function () { return Promise.resolve(true); };
         api.setThreeD = function (containerId, on) {
             postNative('setThreeD', arguments);
             return Promise.resolve(on ? 'on' : 'off');
+        };
+        api.setSelectModeEnabled = function (containerIdOrEnabled, maybeEnabled) {
+            const enabled = typeof containerIdOrEnabled === 'string' ? maybeEnabled : containerIdOrEnabled;
+            if (!nativeEntry) return;
+            nativeEntry.selectMode = !!enabled;
+            if (!nativeEntry.selectMode) {
+                nativeEntry.selectedCameras.clear();
+                updateSelectionIndicator(nativeEntry);
+            }
         };
         api.startPickPoint = function () { nativePickMode = true; postNative('startPickPoint', arguments); };
         api.cancelPickPoint = function () { nativePickMode = false; postNative('cancelPickPoint', arguments); };

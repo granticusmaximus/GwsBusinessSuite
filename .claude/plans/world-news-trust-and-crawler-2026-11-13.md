@@ -188,3 +188,15 @@ and the write-up both draw on the evidence; then B3-B9 and N5-N15; B10 (reading)
     (event vector); Watch this search (keyword watches); Cyber in action (72 h) with CyberStatus,
     CVEs and CISA KEV; FullTextQuery keeps hyphenated words (CVE ids) as phrases.
   - Not done this round: N5-N15, B10, Logging part 6.
+- 14-11-26 HANDOFF RECOVERY:
+  - Commit 04d4f0f started the N5-N15 domain/storage/service layer (`Desk.cs`,
+    `WorldNewsStore.Desk.cs`, `WorldNewsDeskService`, dossier PDF and focused tests), but did not add
+    the corresponding UI/endpoints or update this plan. It initially did not compile because the new
+    PDF missed the date-format namespace; fixed. Its beat test used the non-canonical region label
+    "Africa" instead of `WorldRegions.Africa`; fixed. The focused newsroom/trust/crawler/Overwatch
+    set passes (140 tests).
+  - Commit a483947 was an incomplete stale overwrite: it removed current `OutletFeeds` members still
+    called by the pipeline and removed completed Overwatch globe behavior while rewriting its browser
+    tests. Its changes to those three files were reversed in the working tree without rewriting history.
+  - Remaining product work is still the N5-N15 UI/endpoints and B10 reading features. The N5-N15
+    backend from 04d4f0f should be extended, not rebuilt in parallel.
