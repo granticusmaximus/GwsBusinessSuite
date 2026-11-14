@@ -12,6 +12,8 @@ namespace GwsBusinessSuite.Application.Overwatch;
 public static class NativeShapes
 {
     public sealed record Cell(double South, double West, double North, double East, bool Strong);
+    public sealed record MarkerStyle(string Symbol, MarkerTone Tone, bool Prominent = false);
+    public enum MarkerTone { Red, Orange, Yellow, Green, Teal, Cyan, Blue, Purple, Pink, Gray }
 
     // Ops with their own handler in the bridge (tiles, settings, grids), not points and paths.
     public static readonly IReadOnlySet<string> Handled = new HashSet<string>(StringComparer.Ordinal)
@@ -122,6 +124,97 @@ public static class NativeShapes
 
     public static bool IsArea(string operation) =>
         operation is "setPowerOutages" or "setNewsShading" or "setAurora" or "setMapNotes" or "setWeatherAlerts" or "setConvergence";
+
+    // SF Symbols for the native Mac map. Prefer the item's actual subtype over a layer-wide generic
+    // pin: hazards carry kind, incidents category, ships type, and aircraft their emergency state.
+    // The bridge supplies a safe mappin fallback if a future runtime lacks one of these symbols.
+    public static MarkerStyle Marker(string operation, IReadOnlyDictionary<string, object?> item)
+    {
+        var kind = Text(item, "kind");
+        var category = Text(item, "category");
+        var type = Text(item, "type");
+        var major = string.Equals(Text(item, "severity"), "major", StringComparison.OrdinalIgnoreCase);
+        var moderate = string.Equals(Text(item, "severity"), "moderate", StringComparison.OrdinalIgnoreCase);
+        var severityTone = major ? MarkerTone.Red : moderate ? MarkerTone.Orange : MarkerTone.Yellow;
+
+        if (operation == "setTimeMachine")
+            return category switch
+            {
+                "aircraft" => new("airplane", MarkerTone.Cyan),
+                "ship" => new("ferry.fill", MarkerTone.Orange),
+                "outage" => new("bolt.fill", MarkerTone.Pink),
+                "earthquake" => new("waveform.path.ecg", MarkerTone.Red),
+                "crash" => new("car.side.fill", MarkerTone.Red),
+                "closure" => new("exclamationmark.octagon.fill", MarkerTone.Red),
+                _ => new("clock.arrow.circlepath", MarkerTone.Gray),
+            };
+
+        return operation switch
+        {
+            "setCameraPins" => new("camera.fill", MarkerTone.Green),
+            "setCameraAlertHighlights" => new("camera.badge.ellipsis", MarkerTone.Red, true),
+            "setAircraft" when !string.IsNullOrWhiteSpace(Text(item, "emergency")) => new("airplane.circle.fill", MarkerTone.Red, true),
+            "setAircraft" => new("airplane", MarkerTone.Cyan),
+            "setShips" => ShipMarker(type),
+            "setWorldNews" => new("newspaper.fill", MarkerTone.Purple),
+            "setTrafficIncidents" => IncidentMarker(category, severityTone, major),
+            "setRoadWeather" => new("thermometer.medium", MarkerTone.Blue),
+            "setMessageSigns" => new("signpost.right.fill", MarkerTone.Orange),
+            "setAirQuality" => new("aqi.medium", MarkerTone.Green),
+            "setPowerOutages" => new("bolt.trianglebadge.exclamationmark.fill", MarkerTone.Pink, major),
+            "setInternetOutages" => new("wifi.slash", MarkerTone.Red, major),
+            "setAirportStatus" => new("airplane.departure", severityTone, major),
+            "setChokepoints" => new("arrow.left.arrow.right", severityTone, major),
+            "setTravelAdvice" => new("globe.americas.fill", severityTone, major),
+            "setFireHotspots" => new("flame.fill", MarkerTone.Red, major),
+            "setConflict" => new(kind == "conflict-confirmed" ? "target" : "scope", MarkerTone.Red, major),
+            "setHumanitarian" => new("cross.fill", MarkerTone.Red, major),
+            "setSatellites" => new("antenna.radiowaves.left.and.right.circle.fill", MarkerTone.Cyan),
+            "setConvergence" => new("sparkles", MarkerTone.Orange, true),
+            "setCoverageMarkers" => new("binoculars.fill", MarkerTone.Teal),
+            "setMapNotes" => new("mappin.and.ellipse", MarkerTone.Yellow),
+            "setStreetViewMarker" => new("location.fill", MarkerTone.Blue, true),
+            "setWeatherAlerts" => new("cloud.bolt.rain.fill", MarkerTone.Red, major),
+            "setHazards" => HazardMarker(kind, severityTone, major),
+            _ => new("mappin", MarkerTone.Yellow),
+        };
+    }
+
+    private static MarkerStyle ShipMarker(string? type) => type?.ToLowerInvariant() switch
+    {
+        "sailing" or "pleasure craft" => new("sailboat.fill", MarkerTone.Orange),
+        "cargo" or "tanker" => new("shippingbox.fill", MarkerTone.Orange),
+        "search and rescue" => new("lifepreserver.fill", MarkerTone.Red, true),
+        "medical" => new("cross.case.fill", MarkerTone.Red, true),
+        "military" or "law enforcement" => new("shield.lefthalf.filled", MarkerTone.Gray, true),
+        _ => new("ferry.fill", MarkerTone.Orange),
+    };
+
+    private static MarkerStyle IncidentMarker(string? category, MarkerTone tone, bool prominent) => category switch
+    {
+        "crash" => new("car.side.fill", tone, prominent),
+        "closure" => new("exclamationmark.octagon.fill", MarkerTone.Red, true),
+        "roadwork" => new("figure.wave", tone, prominent),
+        "event" => new("person.3.fill", tone, prominent),
+        _ => new("exclamationmark.triangle.fill", tone, prominent),
+    };
+
+    private static MarkerStyle HazardMarker(string? kind, MarkerTone tone, bool prominent) => kind switch
+    {
+        "earthquake" => new("waveform.path.ecg", tone, prominent),
+        "wildfire" or "hotspot" => new("flame.fill", tone, prominent),
+        "river" or "flood" => new("water.waves", tone, prominent),
+        "cyclone" => new("hurricane", tone, prominent),
+        "volcano" => new("mountain.2.fill", tone, prominent),
+        "drought" => new("sun.dust.fill", tone, prominent),
+        "landslide" => new("figure.fall", tone, prominent),
+        "dust" => new("smoke.fill", tone, prominent),
+        "ice" => new("snowflake", tone, prominent),
+        _ => new("exclamationmark.triangle.fill", tone, prominent),
+    };
+
+    private static string? Text(IReadOnlyDictionary<string, object?> item, string key) =>
+        item.TryGetValue(key, out var value) ? value?.ToString()?.Trim().ToLowerInvariant() : null;
 
     // The aurora grid as areas: each band (north and south of the edge latitude) is rows x columns of
     // percent chances, row 0 at the band's top; runs of cells along a row become one rectangle, and

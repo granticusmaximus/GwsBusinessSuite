@@ -109,6 +109,40 @@ public sealed class NativeShapesTests
         Assert.False(NativeShapes.AsDouble(true, out _));
     }
 
+    [Theory]
+    [InlineData("setCameraPins", null, null, null, "camera.fill")]
+    [InlineData("setAircraft", null, null, null, "airplane")]
+    [InlineData("setShips", null, null, "Sailing", "sailboat.fill")]
+    [InlineData("setShips", null, null, "Cargo", "shippingbox.fill")]
+    [InlineData("setTrafficIncidents", null, "crash", null, "car.side.fill")]
+    [InlineData("setTrafficIncidents", null, "closure", null, "exclamationmark.octagon.fill")]
+    [InlineData("setHazards", "earthquake", null, null, "waveform.path.ecg")]
+    [InlineData("setHazards", "wildfire", null, null, "flame.fill")]
+    [InlineData("setHazards", "cyclone", null, null, "hurricane")]
+    [InlineData("setHazards", "flood", null, null, "water.waves")]
+    [InlineData("setConflict", "conflict-confirmed", null, null, "target")]
+    [InlineData("setSatellites", null, null, null, "antenna.radiowaves.left.and.right.circle.fill")]
+    [InlineData("setWorldNews", null, null, null, "newspaper.fill")]
+    public void Markers_ShouldUseTheObjectType_NotLetters(string operation, string? kind, string? category, string? type, string symbol)
+    {
+        var item = O(("kind", kind), ("category", category), ("type", type));
+
+        Assert.Equal(symbol, NativeShapes.Marker(operation, item).Symbol);
+    }
+
+    [Fact]
+    public void EmergencyAircraftAndMajorItems_ShouldStandOut()
+    {
+        var aircraft = NativeShapes.Marker("setAircraft", O(("emergency", "General emergency (7700)")));
+        var airport = NativeShapes.Marker("setAirportStatus", O(("severity", "major")));
+
+        Assert.Equal("airplane.circle.fill", aircraft.Symbol);
+        Assert.Equal(NativeShapes.MarkerTone.Red, aircraft.Tone);
+        Assert.True(aircraft.Prominent);
+        Assert.Equal(NativeShapes.MarkerTone.Red, airport.Tone);
+        Assert.True(airport.Prominent);
+    }
+
     [Fact]
     public void EveryLayerOperation_ShouldBeDrawnByAHandlerOrAsPointsAndPaths()
     {

@@ -104,7 +104,9 @@ public sealed class NativeOverwatchMacMapBridgeTests
         bridge.Should().Contain("_map.AddOverlays(overlays.ToArray())");
         bridge.Should().NotContain("_map.AddAnnotation(annotation)");
         bridge.Should().NotContain("_map.AddOverlay(overlay)");
-        bridge.Should().Contain("view.DisplayPriority = MKFeatureDisplayPriority.DefaultLow");
+        bridge.Should().Contain("style.Prominent ? MKFeatureDisplayPriority.DefaultHigh : MKFeatureDisplayPriority.DefaultLow");
+        bridge.Should().Contain("view.GlyphImage = Symbol(style.Symbol)");
+        bridge.Should().Contain("view.GlyphText = null");
     }
 
     [Fact]

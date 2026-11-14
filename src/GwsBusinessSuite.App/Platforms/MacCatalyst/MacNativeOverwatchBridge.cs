@@ -850,6 +850,8 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
 
     private sealed class MapDelegate(MacNativeOverwatchBridge owner) : MKMapViewDelegate
     {
+        private static readonly Dictionary<string, UIImage> Symbols = new(StringComparer.Ordinal);
+
         public override MKAnnotationView GetViewForAnnotation(MKMapView mapView, IMKAnnotation annotation)
         {
             if (IsCluster(annotation))
@@ -859,22 +861,45 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
                 clusterView.Annotation = annotation;
                 clusterView.CanShowCallout = false;
                 clusterView.MarkerTintColor = UIColor.SystemGreen;
+                clusterView.GlyphImage = null;
+                clusterView.GlyphTintColor = UIColor.White;
                 clusterView.GlyphText = ClusterCount(annotation).ToString(CultureInfo.InvariantCulture);
                 return clusterView;
             }
             if (annotation is not NativeAnnotation native) return new MKMarkerAnnotationView(annotation, null);
             var view = mapView.DequeueReusableAnnotation("gws-native") as MKMarkerAnnotationView ?? new MKMarkerAnnotationView(annotation, "gws-native");
             view.Annotation = native; view.CanShowCallout = false; view.ClusteringIdentifier = native.Operation;
-            view.DisplayPriority = MKFeatureDisplayPriority.DefaultLow;
-            view.MarkerTintColor = native.Operation switch
-            {
-                "setCameraPins" => UIColor.SystemGreen, "setAircraft" => UIColor.SystemCyan,
-                "setShips" => UIColor.SystemOrange, "setWorldNews" => UIColor.SystemPurple,
-                "setWeatherAlerts" or "setHazards" => UIColor.SystemRed, _ => UIColor.SystemYellow
-            };
-            view.GlyphText = native.Operation switch { "setCameraPins" => "C", "setAircraft" => "A", "setShips" => "S", "setWorldNews" => "N", _ => "•" };
+            var style = NativeShapes.Marker(native.Operation, native.Payload);
+            view.DisplayPriority = style.Prominent ? MKFeatureDisplayPriority.DefaultHigh : MKFeatureDisplayPriority.DefaultLow;
+            view.MarkerTintColor = MarkerColor(style.Tone);
+            view.GlyphTintColor = style.Tone == NativeShapes.MarkerTone.Yellow ? UIColor.Black : UIColor.White;
+            view.GlyphText = null;
+            view.GlyphImage = Symbol(style.Symbol);
             return view;
         }
+
+        private static UIImage Symbol(string name)
+        {
+            if (Symbols.TryGetValue(name, out var cached)) return cached;
+            var image = UIImage.GetSystemImage(name) ?? UIImage.GetSystemImage("mappin")
+                ?? throw new InvalidOperationException("The system map-pin symbol is unavailable.");
+            Symbols[name] = image;
+            return image;
+        }
+
+        private static UIColor MarkerColor(NativeShapes.MarkerTone tone) => tone switch
+        {
+            NativeShapes.MarkerTone.Red => UIColor.SystemRed,
+            NativeShapes.MarkerTone.Orange => UIColor.SystemOrange,
+            NativeShapes.MarkerTone.Yellow => UIColor.SystemYellow,
+            NativeShapes.MarkerTone.Green => UIColor.SystemGreen,
+            NativeShapes.MarkerTone.Teal => UIColor.SystemTeal,
+            NativeShapes.MarkerTone.Cyan => UIColor.SystemCyan,
+            NativeShapes.MarkerTone.Blue => UIColor.SystemBlue,
+            NativeShapes.MarkerTone.Purple => UIColor.SystemPurple,
+            NativeShapes.MarkerTone.Pink => UIColor.SystemPink,
+            _ => UIColor.SystemGray,
+        };
 
         public override MKOverlayRenderer OverlayRenderer(MKMapView mapView, IMKOverlay overlay) => overlay switch
         {
