@@ -57,6 +57,20 @@ public sealed partial class ConflictEventService(HttpClient httpClient, IMemoryC
     {
         public List<GdeltEvent> Events { get; } = [];
         public HashSet<DateTimeOffset> Files { get; } = [];
+        // B8: articles per country (where the event happened) in each quarter-hour file, every kind
+        // of event, for World News' "surging worldwide" line. Same download as the conflict pins.
+        public Dictionary<DateTimeOffset, IReadOnlyDictionary<string, int>> CountryArticles { get; } = [];
+    }
+
+    // B8 (13-11-26): countries the world's press suddenly writes much more about, from GDELT's
+    // quarter-hour event files (the last hour against the rest of the day).
+    public async Task<IReadOnlyList<CoverageSurge>> SurgesAsync(CancellationToken ct = default)
+    {
+        var window = await RefreshGdeltAsync(ct);
+        lock (window)
+        {
+            return CoverageSurgeRules.Find(window.CountryArticles.ToList(), time.GetUtcNow());
+        }
     }
 
     private async Task<GdeltWindow> RefreshGdeltAsync(CancellationToken ct)
@@ -79,7 +93,7 @@ public sealed partial class ConflictEventService(HttpClient httpClient, IMemoryC
                     .Take(FilesPerRefresh)
                     .ToList();
             }
-            var results = new (DateTimeOffset Stamp, IReadOnlyList<GdeltEvent>? Events)[wanted.Count];
+            var results = new (DateTimeOffset Stamp, IReadOnlyList<GdeltEvent>? Events, IReadOnlyDictionary<string, int>? Countries)[wanted.Count];
             await Parallel.ForEachAsync(Enumerable.Range(0, wanted.Count), new ParallelOptions { MaxDegreeOfParallelism = 4, CancellationToken = ct },
                 async (i, token) =>
                 {
@@ -92,25 +106,28 @@ public sealed partial class ConflictEventService(HttpClient httpClient, IMemoryC
                         buffer.Position = 0;
                         using var archive = new ZipArchive(buffer, ZipArchiveMode.Read);
                         using var reader = new StreamReader(archive.Entries[0].Open(), Encoding.UTF8);
-                        results[i] = (wanted[i], ParseGdeltExport(await reader.ReadToEndAsync(token)));
+                        var tsv = await reader.ReadToEndAsync(token);
+                        results[i] = (wanted[i], ParseGdeltExport(tsv), CoverageSurgeRules.CountryArticles(tsv));
                     }
                     catch (Exception ex) when (ex is HttpRequestException or InvalidDataException or IOException
                                                    || (ex is TaskCanceledException && !token.IsCancellationRequested))
                     {
                         // A missing quarter-hour (GDELT skips some) is tried again on a later refresh.
                         logger.LogDebug(ex, "GDELT file {Stamp} failed", wanted[i]);
-                        results[i] = (wanted[i], null);
+                        results[i] = (wanted[i], null, null);
                     }
                 });
             lock (window)
             {
-                foreach (var (stamp, events) in results.Where(r => r.Events is not null))
+                foreach (var (stamp, events, countries) in results.Where(r => r.Events is not null))
                 {
                     if (!window.Files.Add(stamp)) continue;
                     window.Events.AddRange(events!);
+                    window.CountryArticles[stamp] = countries!;
                 }
                 window.Events.RemoveAll(e => e.Seen < now - Window);
                 window.Files.RemoveWhere(stamp => stamp < now - Window);
+                foreach (var old in window.CountryArticles.Keys.Where(stamp => stamp < now - Window).ToList()) window.CountryArticles.Remove(old);
             }
             cache.Set(CheckedKey, true, TimeSpan.FromMinutes(5));
         }

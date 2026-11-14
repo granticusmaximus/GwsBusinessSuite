@@ -31,7 +31,14 @@ else
     var analysis = _story.Analysis;
     var numbers = StoryCoverage.GridNumbers(_story);
     var coverage = StoryCoverage.ByOutlet(_story);
-    var shown = (_sort == CoverageSort.FirstToReport ? coverage.OrderBy(c => c.Outlet.FirstSeen).ToList() : coverage)
+    var storyCountry = _storyCountry;
+    var localCount = storyCountry is null ? 0 : coverage.Count(c => LocalFirst.IsLocal(c.Outlet.Country, storyCountry));
+    var shown = (_sort switch
+        {
+            CoverageSort.FirstToReport => coverage.OrderBy(c => c.Outlet.FirstSeen).ToList(),
+            CoverageSort.LocalFirst => LocalFirst.Order(coverage, c => c.Outlet.Country, c => c.Outlet.FirstSeen, storyCountry),
+            _ => coverage
+        })
         .Where(c => _filter.Matches(c.Outlet)).ToList();
     var regions = StoryFilter.Regions(_story);
     var languages = StoryFilter.Languages(_story);
@@ -62,6 +69,10 @@ else
         <button type="button" data-story-jump="story-part-story">@EventDocument.StoryHeading</button>
         <button type="button" data-story-jump="story-part-agreement">@EventDocument.AgreementHeading</button>
         <button type="button" data-story-jump="story-part-coverage">@EventDocument.CoverageHeading <span class="story-jump-count">@_story.Outlets.Count</span></button>
+        <button type="button" data-story-jump="story-part-timeline">Timeline <span class="story-jump-count">@_timeline.Count</span></button>
+        <a class="story-jump-link" href="@($"admin/world-news/search?similar={Uri.EscapeDataString(_story.Event.Id)}")" title="Stories in the last week whose reports read like this one">
+            <i class="bi bi-intersect me-1" aria-hidden="true"></i>Find similar
+        </a>
     </nav>
 
     <article class="story-document">
@@ -117,6 +128,44 @@ else
                             }
                         </ul>
                     </details>
+                }
+                @if (_sites.Networks.Count > 0 || _sites.NewSites.Count > 0)
+                {
+                    @* B5 (13-11-26): outlets that share a tracking or ad account, and sites registered only recently. *@
+                    <details class="story-trust-checks" open>
+                        <summary>Possible site network or new sites</summary>
+                        <ul>
+                            @foreach (var network in _sites.Networks)
+                            {
+                                <li><strong>@string.Join(", ", network.Outlets)</strong> share the account @network.Id (@string.Join(", ", network.Domains)), so they count as one source.</li>
+                            }
+                            @foreach (var site in _sites.NewSites)
+                            {
+                                <li><strong>@site.Outlet</strong> (@site.Domain) was registered @site.Registered!.Value.ToLocalGwsDateTime(): a new site.</li>
+                            }
+                        </ul>
+                    </details>
+                }
+                @if (_photos.Recycled.Count > 0)
+                {
+                    @* B3 (13-11-26): a picture first used days earlier in another story. *@
+                    <details class="story-trust-checks" open>
+                        <summary>@_photos.Recycled.Count @(_photos.Recycled.Count == 1 ? "picture was" : "pictures were") used before, in an earlier story</summary>
+                        <ul>
+                            @foreach (var photo in _photos.Recycled)
+                            {
+                                <li>
+                                    <a href="@photo.Now.ImageUrl" target="_blank" rel="noopener noreferrer">@RecycledPhotos.Describe(photo)</a>.
+                                    <a href="@($"admin/world-news/events/{Uri.EscapeDataString(photo.Earlier.EventId)}")">Open the earlier story</a>
+                                </li>
+                            }
+                        </ul>
+                        <p class="small text-secondary mb-0">Matched by picture fingerprint, so a resized or recompressed copy still counts. An old picture can be fair use as a file photo; check the caption.</p>
+                    </details>
+                }
+                else if (_photos.Pictures > 0)
+                {
+                    <p class="small text-secondary">@Count(_photos.Pictures, "picture") checked against earlier stories: none used before.@(_photos.WithCredentials > 0 ? $" {_photos.WithCredentials} carr{(_photos.WithCredentials == 1 ? "ies" : "y")} Content Credentials (not verified here)." : string.Empty)</p>
                 }
                 @if (trust.OfficialStatements is { Count: > 0 } statements)
                 {
@@ -400,6 +449,28 @@ else
         </section>
 
         @* 3. Who's saying what: each outlet once, with what it leaves out or adds and its reports. *@
+        @* #7 (13-11-26): the story's chronology, from the first report to the latest change. *@
+        <section id="story-part-timeline" class="story-part" aria-labelledby="story-h-timeline">
+            <h2 id="story-h-timeline">Timeline</h2>
+            @if (_timeline.Count == 0)
+            {
+                <p class="story-quiet">Nothing to show yet.</p>
+            }
+            else
+            {
+                <ol class="story-desk-timeline">
+                    @foreach (var entry in _timeline)
+                    {
+                        <li class="story-timeline-@entry.Kind">
+                            <span class="story-desk-time">@entry.At.ToLocalGwsDateTime()</span>
+                            <span class="story-desk-source">@TimelineKind(entry.Kind)</span>
+                            @if (entry.Url is { } url) { <a href="@url" target="_blank" rel="noopener noreferrer">@entry.Text</a> } else { <span>@entry.Text</span> }
+                        </li>
+                    }
+                </ol>
+            }
+        </section>
+
         <section id="story-part-coverage" class="story-part" aria-labelledby="story-h-coverage">
             <h2 id="story-h-coverage">@EventDocument.CoverageHeading</h2>
             <div class="story-coverage-head">
@@ -460,6 +531,12 @@ else
                             @onclick="() => _sort = CoverageSort.MostReports">Most reports</button>
                     <button type="button" class="story-chip @On(_sort == CoverageSort.FirstToReport)" aria-pressed="@Pressed(_sort == CoverageSort.FirstToReport)"
                             @onclick="() => _sort = CoverageSort.FirstToReport">First to report</button>
+                    @if (localCount > 0)
+                    {
+                        <button type="button" class="story-chip @On(_sort == CoverageSort.LocalFirst)" aria-pressed="@Pressed(_sort == CoverageSort.LocalFirst)"
+                                title="@($"Outlets based in {storyCountry}, where it happened, first")"
+                                @onclick="() => _sort = CoverageSort.LocalFirst">Local first <span class="story-chip-count">@localCount</span></button>
+                    }
                 </div>
                 @if (numbers.Count > 0)
                 {
@@ -648,6 +725,28 @@ else
 
     // B4 (13-11-26): reports whose article text changed after World News first read it.
     private IReadOnlyList<(WorldArticle Report, string First, string Latest, DateTimeOffset At)> _bodyEdits = [];
+    private (IReadOnlyList<RecycledPhoto> Recycled, int Pictures, int WithCredentials) _photos = ([], 0, 0);
+    private (IReadOnlyList<SiteNetwork> Networks, IReadOnlyList<SiteSignal> NewSites) _sites = ([], []);
+    private IReadOnlyList<TimelineEntry> _timeline = [];
+
+    private static string TimelineKind(string kind) => kind switch
+    {
+        StoryTimeline.Report => "First",
+        StoryTimeline.Outlets => "Coverage",
+        StoryTimeline.Official => "Official",
+        StoryTimeline.FactCheck => "Fact-check",
+        StoryTimeline.Label => "Label",
+        StoryTimeline.Edit => "Change",
+        _ => "Record",
+    };
+
+    private void BuildTimeline(StoryDocument story) =>
+        _timeline = StoryTimeline.Build(
+            story.Sources.Select(source => source.Report).ToList(),
+            News.Store.LabelSnapshots(story.Event.Id),
+            story.Trust?.Edits,
+            _bodyEdits.Select(edit => (edit.Report, edit.At)).ToList(),
+            _board?.Signals.Where(signal => signal.At is not null).Select(signal => (signal.At!.Value, signal.Source, signal.Title, signal.Url)).ToList());
 
     private async Task LoadDeskAsync(StoryDocument story)
     {
@@ -656,11 +755,15 @@ else
             .Select(source => (source.Report, edits[source.Report.Id].FirstText, edits[source.Report.Id].LatestText, edits[source.Report.Id].DetectedAt))
             .ToList();
         var eventId = story.Event.Id;
+        _photos = await Task.Run(() => News.PhotoCheck(eventId, story.Event.FirstSeen));
+        BuildTimeline(story);
+        _sites = News.SiteCheck(story.Outlets.Select(outlet => outlet.Name).ToList(), story.Sources.Select(source => source.Report.Url));
         _checks = await Task.Run(() => News.Store.DeskChecks(eventId));
         _onBudget = await Task.Run(() => News.Store.Budget().Any(item => item.EventId == eventId));
         _situationId = await Task.Run(() => News.Store.SituationOf(eventId));
         _board = await News.EvidenceBoardAsync(story);
         _boardLoaded = true;
+        BuildTimeline(story);
     }
 
     private async Task SetCheckAsync(string item, bool done)
@@ -710,9 +813,10 @@ else
     // The event whose story this shows.
     [Parameter, EditorRequired] public string EventId { get; set; } = string.Empty;
 
-    private enum CoverageSort { MostReports, FirstToReport }
+    private enum CoverageSort { MostReports, FirstToReport, LocalFirst }
 
     private StoryDocument? _story;
+    private string? _storyCountry;
     // Wikipedia's most-read articles that this story's headlines name.
     private IReadOnlyList<MostReadArticle> _mostRead = [];
     private bool _gone;
@@ -764,9 +868,10 @@ else
         var story = await Task.Run(() => News.Story(id, _username));
         if (id != EventId || _disposed) return;
         _story = story;
+        _storyCountry = story is null ? null : WorldNewsService.StoryCountry(story);
         _gone = story is null;
         _challenges = story is null ? [] : await Task.Run(() => News.Store.Challenges(story.Event.Id));
-        _board = null; _boardLoaded = false; _draftId = null; _evidence.Clear();
+        _board = null; _boardLoaded = false; _draftId = null; _evidence.Clear(); _photos = ([], 0, 0); _sites = ([], []); _timeline = [];
         // A primary source can confirm it (World News trust plan 1.13); checked after it shows.
         if (story is not null)
         {

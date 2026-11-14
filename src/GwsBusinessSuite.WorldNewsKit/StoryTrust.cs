@@ -137,8 +137,13 @@ public static partial class SourceIndependence
     // hand list wins where both name an outlet.
     public static volatile IReadOnlyDictionary<string, string> ImportedOwners = new Dictionary<string, string>();
 
+    // B5: outlets that share a tracking or ad account ID (SiteNetworks), set by the host.
+    public static volatile IReadOnlyDictionary<string, string> NetworkOwners = new Dictionary<string, string>();
+
     private static string? OwnerOf(string outlet) =>
-        Owners.TryGetValue(outlet.Trim(), out var owner) ? owner : ImportedOwners.TryGetValue(outlet.Trim(), out var imported) ? imported : null;
+        Owners.TryGetValue(outlet.Trim(), out var owner) ? owner
+        : ImportedOwners.TryGetValue(outlet.Trim(), out var imported) ? imported
+        : NetworkOwners.TryGetValue(outlet.Trim(), out var network) ? network : null;
 
     private static (string Name, string Kind) OwnOrigin(string outlet) =>
         OwnerOf(outlet) is { } owner ? (owner, "owner") : (outlet, "outlet");
@@ -205,7 +210,7 @@ public static class StoryConfidenceRules
 {
     // The version of every rule behind a label (independence, confidence, the gate). Each label is
     // stamped with it (A7), so a later change of rules can be traced and old labels re-scored.
-    public const string RulesVersion = "2026-11-13.2";
+    public const string RulesVersion = "2026-11-13.3";
     public const int ConfirmedIndependent = 3;
     // A4: a story still on one source this long after its first report is called unconfirmed.
     public static readonly TimeSpan RumourClock = TimeSpan.FromHours(12);
@@ -333,8 +338,11 @@ public static partial class FullTextQuery
             else
             {
                 var prefix = token.EndsWith('*');
-                var word = new string(token.Where(char.IsLetterOrDigit).ToArray());
-                if (word.Length > 0) parts.Add($"\"{word}\"{(prefix ? "*" : string.Empty)}");
+                // "CVE-2025-0282" or "e-mail": the index splits at the hyphens, so search the pieces as a phrase.
+                var pieces = token.TrimEnd('*').Split('-', StringSplitOptions.RemoveEmptyEntries)
+                    .Select(piece => new string(piece.Where(char.IsLetterOrDigit).ToArray())).Where(piece => piece.Length > 0).ToList();
+                if (pieces.Count > 1) parts.Add($"\"{string.Join(' ', pieces)}\"");
+                else if (pieces.Count == 1) parts.Add($"\"{pieces[0]}\"{(prefix ? "*" : string.Empty)}");
             }
         }
         while (parts.Count > 0 && parts[^1] is "AND" or "OR" or "NOT") parts.RemoveAt(parts.Count - 1);
@@ -772,6 +780,7 @@ public static class TrustMethodology
 {
     public static readonly IReadOnlyList<(string Version, string Change)> Changelog =
     [
+        ("2026-11-13.3", "Figures written as \"kills 31\", \"killed 31\", \"injured 80\" or \"arrested 12\" are now read, so conflicting tolls in that form mark a story Disputed (the test set found them missed). The test set of known stories now runs before every rules change. Outlets whose pages share a Google Analytics, Tag Manager, AdSense or Meta pixel account count as one origin (a site network), unless a known owner already groups them."),
         ("2026-11-13.2", "Official newsrooms (UN, ReliefWeb, OCHA, the European Commission, the White House, the US Defense Department, GOV.UK) are shown as official statements and no longer count as independent sources: they say what a body states, which isn't independent corroboration."),
         ("2026-11-13.1", "First published rules: independence by wire credit, attribution, identical text and owner; one origin per outlet; Confirmed at 3 independent sources or an official record; Disputed on conflicting figures or a false-type fact-check; unconfirmed after 12 hours on one source; alerts need 2 independent sources or an official record."),
     ];
@@ -780,6 +789,7 @@ public static class TrustMethodology
     [
         "Official newsrooms (UN, ReliefWeb, OCHA, the European Commission, the White House, the US Defense Department, GOV.UK) are shown as official statements: what that body says. They are not counted as independent sources.",
         "A report's origin is the wire it credits or rests on (\"(Reuters)\", \"told AP\", \"citing AFP\"), else the group that owns its outlet, else the outlet. Reports with identical text share an origin.",
+        "Outlets whose pages share a tracking or ad account ID (Google Analytics, Tag Manager, AdSense, Meta pixel) are treated as one operator, a site network; an ID on 25 or more sites is ignored as a vendor's.",
         "Each outlet counts once: as itself (or its owner) if any of its reports is its own work, otherwise as the wire it repeated. Independent sources can never outnumber outlets.",
         "Fact-checkers and Wikipedia's Current events are shown but never counted as sources; press releases, listicles and service pages are kept out entirely.",
         "Confirmed: an official record of the event (USGS, GDACS, NOAA, NASA, WHO) or three or more independent sources. Reported: two. Single source: one, however many outlets repeated it.",
@@ -787,6 +797,7 @@ public static class TrustMethodology
         "A story still on one independent source 12 hours after its first report is labelled unconfirmed.",
         "No alert (surge, watch, watchlist) goes out for a story on one independent source.",
         "Labels come from counted evidence and these rules, never from AI. AI writes summaries only, and they are marked as such.",
+        "Before any change to these rules ships, a test set of stories with known right answers (wire chorus, state-media chorus, rumour, hoax, conflicting tolls, and attempts to game the rules) must all still get their right label.",
     ];
 }
 

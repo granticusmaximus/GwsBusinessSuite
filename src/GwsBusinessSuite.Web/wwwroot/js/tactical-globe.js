@@ -1305,7 +1305,8 @@ window.tacticalGlobe = (function () {
     // Time machine: the past view drawn on its own layers - an archived radar mosaic, plus the
     // incidents and earthquakes that were active then - so the live layers (which the page
     // switches off meanwhile) never mix with history.
-    const TIME_MACHINE_COLOURS = { crash: '#ff4d4d', closure: '#ff9f1c', hazard: '#ffd166', earthquake: '#c77dff' };
+    const TIME_MACHINE_COLOURS = { crash: '#ff4d4d', closure: '#ff9f1c', hazard: '#ffd166', earthquake: '#c77dff',
+        aircraft: '#e6f1ff', ship: '#4cc9f0', outage: '#f72585' };
 
     function setTimeMachine(containerId, snapshot) {
         const entry = viewers.get(containerId || 'tg-viewport');
@@ -1331,6 +1332,8 @@ window.tacticalGlobe = (function () {
         }));
         (snapshot.incidents || []).forEach(item => add(item, TIME_MACHINE_COLOURS[item.category] || '#ffffff', 10));
         (snapshot.earthquakes || []).forEach(item => add(item, TIME_MACHINE_COLOURS.earthquake, 12));
+        // #6: aircraft, ships and outage areas recorded near that moment (live-layer history).
+        (snapshot.tracks || []).forEach(item => add(item, TIME_MACHINE_COLOURS[item.category] || '#ffffff', item.category === 'outage' ? 11 : 7));
     }
 
     function clearTimeMachine(containerId) {

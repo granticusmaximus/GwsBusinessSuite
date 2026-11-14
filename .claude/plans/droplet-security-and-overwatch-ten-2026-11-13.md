@@ -98,3 +98,12 @@ Decisions (Grant, 13-11-26, as recommended):
 - Left for Grant: Tailscale access rule (only gws-web -> dagda:11434), Mac power settings (pmset).
 - 13-11-26: Tailscale access rule saved by Grant (gws-web -> dagda:11434 only; other Mac ports checked blocked). Mac pmset set. Overwatch 4, 6, 7 built.
 - 13-11-26: ALL TEN OVERWATCH FEATURES DONE (each pushed after the release gate).
+- 13-11-26 follow-ups: #10 layer health shows each layer's last load time, slowest, failures and data
+  time (OverwatchLayerCatalog.LayerLoads); #6 live-layer history (live-history.db, LiveTrackHistoryStore,
+  aircraft/ships every 5 min, outages every 15, 72 h) replayed by the time machine; the Mac app's native
+  map now draws the time machine (it drew nothing: one object holding lists); #4 convergence computed
+  worldwide every 5 min while in use (ConvergenceRefreshService), wide views filter it.
+  - Layer check of every toggle (web + Mac native path) started with a Playwright script and was stopped
+    when Grant moved the priority to World News search: NOT DONE. Known Mac gap from reading the bridge:
+    power outage polygons ("rings") aren't drawn natively (points are).
+  - Not done: #3 file split, #5 Mac batching, #9 situation room.

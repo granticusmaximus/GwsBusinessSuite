@@ -72,6 +72,7 @@ public sealed partial class WorldNewsService : IDisposable
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         Store = new WorldNewsStore(path);
         LoadOwners();
+        LoadSiteNetworks();
         var baseUrl = string.IsNullOrWhiteSpace(ollamaOptions.Value.BaseUrl) ? ContentStudioOptions.DefaultBaseUrl : ollamaOptions.Value.BaseUrl;
         _ollama = new OllamaClient(new Uri(baseUrl.TrimEnd('/') + "/"), new HttpClient { Timeout = TimeSpan.FromMinutes(5) });
         var http = httpClientFactory.CreateClient(HttpClientName);
@@ -238,6 +239,8 @@ public sealed partial class WorldNewsService : IDisposable
             foreach (var alert in alerts) AlertCreated?.Invoke(alert.Username, alert);
             // Outlets' owners from Wikidata, weekly (A3); quietly skipped when Wikidata can't be read.
             await RefreshOwnershipAsync(cancellationToken: ct);
+            // Site networks from shared tracking IDs, and a few new domains' registration dates (B5).
+            await RefreshSiteNetworksAsync(ct);
             // Labels into the tamper-evident ledger, at most hourly (World News trust plan A7/A8).
             try { SnapshotLabels(DateTimeOffset.UtcNow); }
             catch (Exception ex) when (ex is Microsoft.Data.Sqlite.SqliteException or InvalidOperationException) { _logger.LogWarning(ex, "World News: label snapshot failed"); }
@@ -498,6 +501,94 @@ public sealed partial class WorldNewsService : IDisposable
         return new WorldNewsSearchResult(question, matchedBy, items);
     }
 
+    // World News search (13-11-26): stories with similar reports, by meaning and by words, merged.
+    // kind narrows to one kind of story (e.g. cyber). Meaning needs the embedding model; without it
+    // the words alone answer, and the note says so.
+    public async Task<FindResult> FindAsync(string query, int days, string? kind = null, CancellationToken ct = default)
+    {
+        var text = query.Trim();
+        if (text.Length == 0) return new FindResult(text, [], null);
+        var now = DateTimeOffset.UtcNow;
+        var since = now.AddDays(-Math.Clamp(days, 1, 30));
+        var meaningSince = since > now - WorldNewsFinder.MeaningWindow ? since : now - WorldNewsFinder.MeaningWindow;
+        IReadOnlyList<(string, double)> meaning = [];
+        string? note = null;
+        try
+        {
+            var candidates = await Task.Run(() => Store.SearchCandidates(meaningSince, 1).Where(c => c.Centroid.Length > 0).ToList(), ct);
+            var vector = (await _ollama.EmbedAsync(_options.EmbeddingModel, [text], ct))[0];
+            meaning = WorldNewsSearch.Rank(vector, candidates, limit: WorldNewsFinder.Limit, minScore: WorldNewsFinder.MinSimilarity, perSituation: 4)
+                .Select(hit => (hit.EventId, hit.Score)).ToList();
+        }
+        catch (Exception ex) when (ex is HttpRequestException or InvalidOperationException or TaskCanceledException && !ct.IsCancellationRequested)
+        {
+            _logger.LogInformation(ex, "World News search: meaning unavailable, words only");
+            note = "Matched by words only just now: the model that compares meaning didn't answer.";
+        }
+        var words = await Task.Run(() => Store.EventsMatchingText(WorldNewsFinder.WordQuery(text), since, WorldNewsFinder.Limit * 2), ct);
+        var stories = await Task.Run(() => Found(WorldNewsFinder.Merge(meaning, words, WorldNewsFinder.Limit * 2), kind), ct);
+        if (days > 7 && note is null) note = "Older than a week, stories are found by their words.";
+        return new FindResult(text, stories.Take(WorldNewsFinder.Limit).ToList(), note);
+    }
+
+    // Stories like this one (its own vector against the last week's), most similar first.
+    public async Task<FindResult> SimilarToAsync(string eventId, CancellationToken ct = default)
+    {
+        var story = await Task.Run(() => Store.Event(eventId), ct);
+        if (story is null) return new FindResult(string.Empty, [], "That story is no longer kept.");
+        var title = story.Headline ?? story.Title;
+        var vector = await Task.Run(() => Store.EventVector(eventId), ct);
+        if (vector is null) return await FindAsync(title, 30);
+        var candidates = await Task.Run(() => Store.SearchCandidates(DateTimeOffset.UtcNow - WorldNewsFinder.MeaningWindow, 1)
+            .Where(c => c.EventId != eventId && c.Centroid.Length == vector.Length).ToList(), ct);
+        var hits = WorldNewsSearch.Rank(vector, candidates, limit: WorldNewsFinder.Limit, minScore: WorldNewsFinder.SimilarToStory, perSituation: 4)
+            .Select(hit => (hit.EventId, hit.Score)).ToList();
+        var stories = await Task.Run(() => Found(WorldNewsFinder.Merge(hits, [], WorldNewsFinder.Limit), null), ct);
+        return new FindResult(title, stories, stories.Count == 0 ? "Nothing else in the last week reads like this story." : null);
+    }
+
+    // Cyber attacks and breaches in the news now, each with its status and the CVEs it names.
+    // Classified cyber stories, and any recent story whose headline is plainly about an attack.
+    private (DateTimeOffset At, int Hours, IReadOnlyList<FoundStory> Stories)? _cyberCache;
+
+    public async Task<IReadOnlyList<FoundStory>> CyberInActionAsync(int hours = 72, CancellationToken ct = default)
+    {
+        // Read at most every five minutes: it scans the period's headlines.
+        if (_cyberCache is { } cached && cached.Hours == hours && DateTimeOffset.UtcNow - cached.At < TimeSpan.FromMinutes(5)) return cached.Stories;
+        var since = DateTimeOffset.UtcNow.AddHours(-Math.Clamp(hours, 1, 720));
+        var stories = await Task.Run(() =>
+        {
+            var classified = Store.EventsOfKind(SituationKinds.Cyber, since, 60);
+            var byHeadline = Store.TopEvents(since, 3000).Where(e => WorldNewsFinder.IsCyberHeadline(e.Headline) || WorldNewsFinder.IsCyberHeadline(e.Title));
+            var events = classified.Concat(byHeadline).DistinctBy(e => e.Id)
+                .OrderByDescending(e => e.OutletCount).ThenByDescending(e => e.LastSeen).Take(60).ToList();
+            return Found(events.Select(e => (e.Id, (double?)null, 0)).ToList(), null);
+        }, ct);
+        var cyber = stories.Where(story => story.IsCyber).ToList();
+        _cyberCache = (DateTimeOffset.UtcNow, hours, cyber);
+        return cyber;
+    }
+
+    private List<FoundStory> Found(IReadOnlyList<(string EventId, double? Similarity, int Reports)> hits, string? kind)
+    {
+        var kinds = Store.EventKinds(hits.Select(hit => hit.EventId));
+        var found = new List<FoundStory>();
+        foreach (var (id, similarity, reports) in hits)
+        {
+            var storyKind = kinds.GetValueOrDefault(id);
+            if (Store.Event(id) is not { } e) continue;
+            var articles = Store.ArticlesForEvent(id);
+            var texts = articles.SelectMany(a => new[] { a.Title, a.Snippet }).Append(e.Headline).ToList();
+            var story = new FoundStory(e, similarity, reports, storyKind,
+                WorldNewsFinder.CyberStatusOf(storyKind, articles.Select(a => a.Title).Append(e.Headline)),
+                WorldNewsFinder.Cves(texts));
+            // "Cyber only" keeps cyber stories, classified or plainly so from their headlines.
+            if (kind == SituationKinds.Cyber ? !story.IsCyber : kind is { Length: > 0 } && storyKind != kind) continue;
+            found.Add(story);
+        }
+        return found;
+    }
+
     private WorldNewsSearchItem? Describe(string eventId, string? situationId)
     {
         if (Store.Event(eventId) is not { } e) return null;
@@ -751,6 +842,55 @@ public sealed partial class WorldNewsService : IDisposable
     public static readonly TimeSpan OwnershipRefreshEvery = TimeSpan.FromDays(7);
     public const string WikidataSparql = "https://query.wikidata.org/sparql";
 
+    // B5: registration dates for a few domains a read (RDAP via rdap.org, key-less), then the networks.
+    public const int RdapLookupsPerRead = 10;
+    private IReadOnlyList<SiteSignal> _siteSignals = [];
+    private IReadOnlyList<SiteNetwork> _siteNetworks = [];
+
+    public async Task RefreshSiteNetworksAsync(CancellationToken cancellationToken = default)
+    {
+        var http = _httpClientFactory.CreateClient(HttpClientName);
+        foreach (var domain in Store.SitesWithoutRegistration(RdapLookupsPerRead))
+        {
+            DateTimeOffset? registered = null;
+            try
+            {
+                using var response = await http.GetAsync("https://rdap.org/domain/" + Uri.EscapeDataString(domain), cancellationToken);
+                if (response.IsSuccessStatusCode) registered = SiteNetworks.Registered(await response.Content.ReadAsStringAsync(cancellationToken));
+                else if ((int)response.StatusCode == 429) break;
+            }
+            catch (Exception ex) when (ex is HttpRequestException or System.Text.Json.JsonException
+                                           || (ex is TaskCanceledException && !cancellationToken.IsCancellationRequested))
+            {
+                _logger.LogDebug(ex, "World News: RDAP lookup for {Domain} failed", domain);
+                continue;
+            }
+            Store.SaveSiteRegistration(domain, registered, DateTimeOffset.UtcNow);
+        }
+        LoadSiteNetworks();
+    }
+
+    private void LoadSiteNetworks()
+    {
+        try
+        {
+            _siteSignals = Store.SiteSignals();
+            _siteNetworks = SiteNetworks.Find(_siteSignals);
+            SourceIndependence.NetworkOwners = SiteNetworks.Owners(_siteNetworks);
+        }
+        catch (Microsoft.Data.Sqlite.SqliteException ex) { _logger.LogWarning(ex, "World News: couldn't load site networks"); }
+    }
+
+    // B5 for the story page: networks joining two or more of its outlets, and its new sites.
+    public (IReadOnlyList<SiteNetwork> Networks, IReadOnlyList<SiteSignal> NewSites) SiteCheck(IReadOnlyCollection<string> outlets, IEnumerable<string> urls)
+    {
+        var domains = urls.Select(OwnershipGraph.RootDomain).OfType<string>().ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var now = DateTimeOffset.UtcNow;
+        var networks = _siteNetworks.Where(n => n.Outlets.Count(o => outlets.Contains(o, StringComparer.OrdinalIgnoreCase)) >= 2).ToList();
+        var newSites = _siteSignals.Where(s => domains.Contains(s.Domain) && SiteNetworks.IsNew(s, now)).ToList();
+        return (networks, newSites);
+    }
+
     private void LoadOwners()
     {
         try { SourceIndependence.ImportedOwners = OwnershipGraph.Build(Store.OutletOwners(out _)); }
@@ -802,6 +942,24 @@ public sealed partial class WorldNewsService : IDisposable
 
     // B1/B2: what records and sensors saw near a story's place since two days before its first
     // report, and its physical claims checked against them. Asked after the story shows.
+    // B3: a story's pictures that were used earlier in other stories, and how many carry Content
+    // Credentials. The archive of prints is read at most every ten minutes.
+    private (DateTimeOffset At, IReadOnlyList<PhotoPrint> Prints)? _photoArchive;
+
+    public (IReadOnlyList<RecycledPhoto> Recycled, int Pictures, int WithCredentials) PhotoCheck(string eventId, DateTimeOffset firstSeen)
+    {
+        var story = Store.Photos(eventId);
+        if (story.Count == 0) return ([], 0, 0);
+        var now = DateTimeOffset.UtcNow;
+        if (_photoArchive is not { } archive || now - archive.At > TimeSpan.FromMinutes(10))
+            _photoArchive = archive = (now, Store.Photos());
+        return (RecycledPhotos.Find(story, archive.Prints, firstSeen), story.DistinctBy(p => p.Hash).Count(), story.Count(p => p.Credentials));
+    }
+
+    // B8: the country a story happened in (from its headline), for local-first ordering; null when unknown.
+    public static string? StoryCountry(StoryDocument story) =>
+        WorldNewsPlaces.Instance.Locate(story.Event.Headline ?? story.Event.Title)?.Country;
+
     public async Task<EvidenceBoard?> EvidenceBoardAsync(StoryDocument story, CancellationToken cancellationToken = default)
     {
         var headline = story.Event.Headline ?? story.Event.Title;

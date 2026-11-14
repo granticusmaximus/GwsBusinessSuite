@@ -41,4 +41,20 @@ public static class OverwatchLayerCatalog
     };
 
     public static string Canonical(string layer) => Variants.GetValueOrDefault(layer) ?? layer;
+
+    // #10 (13-11-26): a layer's loads since the page opened (each pan or refresh is one).
+    public sealed record LayerLoads(int Count, int Failed, DateTimeOffset LastAt, TimeSpan LastTook, TimeSpan Slowest, DateTimeOffset? LastGoodAt);
+
+    public static LayerLoads Record(LayerLoads? before, DateTimeOffset at, TimeSpan took, bool failed) => new(
+        (before?.Count ?? 0) + 1,
+        (before?.Failed ?? 0) + (failed ? 1 : 0),
+        at,
+        took,
+        before is null || took > before.Slowest ? took : before.Slowest,
+        failed ? before?.LastGoodAt : at);
+
+    public static string Describe(LayerLoads loads) =>
+        $"LAST LOAD {loads.LastTook.TotalSeconds:0.0} S (SLOWEST {loads.Slowest.TotalSeconds:0.0} S), {loads.Count} LOAD{(loads.Count == 1 ? "" : "S")}"
+        + (loads.Failed > 0 ? $", {loads.Failed} FAILED" : string.Empty)
+        + (loads.LastGoodAt is { } good ? $", DATA FROM {good.ToLocalTime():HH:mm}" : ", NO GOOD LOAD YET");
 }

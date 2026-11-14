@@ -183,7 +183,6 @@ public sealed class WorldNewsNewsroomTests
 
         SourceIndependence.Assess(articles).Independent.Should().Be(1, "only the BBC is independent journalism here");
         OfficialStatements.In(articles).Select(s => s.Outlet).Should().BeEquivalentTo("The White House", "UN News");
-        StoryConfidenceRules.RulesVersion.Should().Be("2026-11-13.2");
         TrustMethodology.Changelog[0].Version.Should().Be(StoryConfidenceRules.RulesVersion, "every rules change is in the changelog");
     }
 

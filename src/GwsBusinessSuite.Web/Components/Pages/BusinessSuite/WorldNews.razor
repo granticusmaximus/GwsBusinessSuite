@@ -10,6 +10,7 @@
 @inject WorldNewsMapService WorldNewsMap
 @inject ICurrentUserAccessor CurrentUserAccessor
 @inject IJSRuntime JS
+@inject GwsBusinessSuite.Application.Hazards.ConflictEventService Gdelt
 
 <PageTitle>World News</PageTitle>
 
@@ -23,6 +24,9 @@
         <p class="world-news-updated small mb-0" title="@News.Status">@UpdatedLine</p>
     </Meta>
     <Actions>
+        <a class="btn btn-outline-secondary" href="admin/world-news/search" title="Find every story with similar reports, and the cyber attacks in the news now">
+            <i class="bi bi-search me-1" aria-hidden="true"></i>Search
+        </a>
         <a class="btn btn-outline-secondary" href="admin/world-news/desk" title="The story budget and the tips readers have sent">
             <i class="bi bi-journal-text me-1" aria-hidden="true"></i>Desk
         </a>
@@ -77,6 +81,22 @@
         <strong>Unusually quiet:</strong>
         @string.Join(", ", _silences.Take(5).Select(silence => $"{silence.Country} ({silence.PercentOfUsual}% of usual coverage)")).
         <a href="admin/osint">Check internet outages on Overwatch</a>
+    </p>
+}
+
+@if (_surges.Count > 0)
+{
+    @* B8 (13-11-26): GDELT's quarter-hour feed, every outlet it reads: the last hour against the rest of the day. *@
+    <p class="world-news-silence" role="status">
+        <i class="bi bi-graph-up-arrow me-1" aria-hidden="true"></i>
+        <strong>Surging worldwide:</strong>
+        @for (var i = 0; i < _surges.Count; i++)
+        {
+            var surge = _surges[i];
+            <a href="@($"admin/world-news?q={Uri.EscapeDataString(surge.Country)}")" title="@($"{surge.Recent} articles in the last hour; usually about {surge.Usual:0} an hour")">@surge.Country</a>
+            <span> (@surge.Times.ToString("0.#")× usual)@(i < _surges.Count - 1 ? ", " : ".")</span>
+        }
+        <small class="text-secondary">GDELT, every outlet it reads, last hour.</small>
     </p>
 }
 
@@ -160,6 +180,13 @@
     <button type="button" class="world-news-search-all" @onclick="SearchReportsAsync">
         <i class="bi bi-archive me-2" aria-hidden="true"></i>Search every report for “@_filter.Trim()”<i class="bi bi-arrow-right ms-auto" aria-hidden="true"></i>
     </button>
+}
+@if (!string.IsNullOrWhiteSpace(_filter))
+{
+    @* World News search (13-11-26): the same words, by meaning too, across every kind of story. *@
+    <a class="world-news-search-all" href="@($"admin/world-news/search?q={Uri.EscapeDataString(_filter.Trim())}")">
+        <i class="bi bi-intersect me-2" aria-hidden="true"></i>Find stories with similar reports to “@_filter.Trim()”<i class="bi bi-arrow-right ms-auto" aria-hidden="true"></i>
+    </a>
 }
 
 @if (_view == WorldNewsTab.Reports)
@@ -878,6 +905,7 @@ else
         _username = await CurrentUserAccessor.GetCurrentUsernameAsync();
         _surgeAlerts = !string.IsNullOrWhiteSpace(_username) && await Task.Run(() => News.Store.IsWatchingSurges(_username));
         _silences = await Task.Run(() => News.Store.Silences(DateTimeOffset.UtcNow));
+        _ = LoadSurgesAsync();
         ApplyQuery();
         await LoadAsync();
         if (!string.IsNullOrWhiteSpace(EventQuery)
@@ -1098,6 +1126,21 @@ else
     }
 
     private IReadOnlyList<CoverageSilence> _silences = [];
+    private IReadOnlyList<GwsBusinessSuite.Application.Hazards.CoverageSurge> _surges = [];
+
+    // Off the first render: the first visit of the day fetches GDELT's recent quarter-hour files.
+    private async Task LoadSurgesAsync()
+    {
+        try
+        {
+            _surges = await Gdelt.SurgesAsync(_surgeCts.Token);
+            if (_surges.Count > 0) await InvokeAsync(StateHasChanged);
+        }
+        catch (OperationCanceledException) { }
+        catch (ObjectDisposedException) { }
+    }
+
+    private readonly CancellationTokenSource _surgeCts = new();
     private bool _watchlistOpen;
     private IReadOnlyList<KeywordWatch> _watchlist = [];
     private string _newWatch = string.Empty;
@@ -1308,6 +1351,8 @@ else
 
     public async ValueTask DisposeAsync()
     {
+        await _surgeCts.CancelAsync();
+        _surgeCts.Dispose();
         News.Changed -= OnNewsChanged;
         try
         {

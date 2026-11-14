@@ -122,6 +122,8 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
             case "cancelPickPoint": _pickPointMode = false; return;
             case "mapTap": MapTap(arguments); return;
             case "setRadarTimeline": SetRadarTimeline(arguments); return;
+            case "setTimeMachine": SetTimeMachine(arguments); return;
+            case "clearTimeMachine": SetTimeMachine([]); return;
             case "setRadarVisible": _radarVisible = arguments.LastOrDefault() is true; RefreshRadar(); return;
             case "home":
                 _map.SetRegion(new MKCoordinateRegion(new CLLocationCoordinate2D(20, 0), new MKCoordinateSpan(140, 340)), true);
@@ -576,6 +578,31 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
         RefreshRadar();
     }
 
+    // The time machine (13-11-26): its archived radar as a tile layer, and its incidents, hazards,
+    // aircraft, ships and outages as pins. The payload is one object holding several lists, which
+    // the generic Render couldn't draw, so the Mac's map showed nothing for a past moment.
+    private MKTileOverlay? _timeMachineRadar;
+
+    private void SetTimeMachine(object?[] arguments)
+    {
+        var payload = arguments.FirstOrDefault() is string ? arguments.ElementAtOrDefault(1) : arguments.FirstOrDefault();
+        if (_timeMachineRadar is not null) { _map.RemoveOverlay(_timeMachineRadar); _timeMachineRadar = null; }
+        if (payload is not Dictionary<string, object?> snapshot)
+        {
+            Clear("setTimeMachine");
+            return;
+        }
+        if (TileTemplate(snapshot.GetValueOrDefault("radarTileUrl")) is { } radar)
+        {
+            _timeMachineRadar = new StretchedTileOverlay(radar, 10);
+            _map.AddOverlay(_timeMachineRadar, MKOverlayLevel.AboveRoads);
+        }
+        var pins = new[] { "incidents", "earthquakes", "tracks" }
+            .SelectMany(key => snapshot.GetValueOrDefault(key) as object?[] ?? [])
+            .ToArray();
+        Render("setTimeMachine", [pins]);
+    }
+
     // Only https XYZ templates from the server's timeline.
     private static string? TileTemplate(object? value) =>
         value is string text && text.StartsWith("https://", StringComparison.Ordinal) && text.Contains("{z}", StringComparison.Ordinal) ? text : null;
@@ -704,6 +731,7 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
     private void ClearAll()
     {
         foreach (var operation in _annotations.Keys.Concat(_overlays.Keys).Distinct().ToList()) Clear(operation);
+        if (_timeMachineRadar is not null) { _map.RemoveOverlay(_timeMachineRadar); _timeMachineRadar = null; }
     }
 
 

@@ -4,6 +4,7 @@ using GwsBusinessSuite.Application.Hazards;
 using GwsBusinessSuite.Application.LiveLayers;
 using GwsBusinessSuite.Application.Weather;
 using GwsBusinessSuite.WorldNewsKit;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace GwsBusinessSuite.Infrastructure.Services;
@@ -27,8 +28,22 @@ public sealed class SignalConvergenceService(
     public async Task<IReadOnlyList<ConvergenceCell>> GetAsync(BoundingBox bounds, CancellationToken ct = default) =>
         (await GetViewAsync(bounds, ct)).Cells;
 
-    // The convergence squares plus the reporting blackouts, from one load of the same sources.
+    // #4 (13-11-26): the whole world's view, computed once in the background (ConvergenceRefreshService)
+    // while anyone has used convergence recently; each viewer's pan then just filters it, instead of
+    // every viewer recomputing it on every move.
     public async Task<ConvergenceView> GetViewAsync(BoundingBox bounds, CancellationToken ct = default)
+    {
+        ConvergenceWorld.Wanted(time.GetUtcNow());
+        // Zoomed in, the sources give more (county outages, river gauges), so a close view is its own.
+        if (ConvergenceWorld.IsWide(bounds) && ConvergenceWorld.Fresh(time.GetUtcNow()) is { } world) return ConvergenceWorld.Within(world, bounds);
+        return await ComputeAsync(bounds, ct);
+    }
+
+    public async Task RefreshWorldAsync(CancellationToken ct = default) =>
+        ConvergenceWorld.Store(await ComputeAsync(World, ct), time.GetUtcNow());
+
+    // The convergence squares plus the reporting blackouts, from one load of the same sources.
+    public async Task<ConvergenceView> ComputeAsync(BoundingBox bounds, CancellationToken ct = default)
     {
         var since = time.GetUtcNow() - InternetOutageService.Window;
         var hazardTask = Safely(async () => (await hazards.GetHazardsAsync(bounds, ct)).Features, "hazards");
@@ -159,3 +174,58 @@ public sealed class SignalConvergenceService(
 public sealed record ReportingBlackout(double Latitude, double Longitude, string Kind, string Title, string Reason, string? Url);
 
 public sealed record ConvergenceView(IReadOnlyList<ConvergenceCell> Cells, IReadOnlyList<ReportingBlackout> Blackouts);
+
+// #4: the shared worldwide convergence view and when someone last asked for convergence.
+public static class ConvergenceWorld
+{
+    public static readonly TimeSpan RefreshEvery = TimeSpan.FromMinutes(5);
+    public static readonly TimeSpan StaleAfter = TimeSpan.FromMinutes(12);
+    public static readonly TimeSpan WantedFor = TimeSpan.FromMinutes(30);
+    private static readonly object Gate = new();
+    private static ConvergenceView? _view;
+    private static DateTimeOffset _at = DateTimeOffset.MinValue;
+    private static DateTimeOffset _wanted = DateTimeOffset.MinValue;
+
+    public static void Wanted(DateTimeOffset now) { lock (Gate) _wanted = now; }
+
+    public static bool IsWide(BoundingBox bounds) =>
+        Math.Max(bounds.North - bounds.South, bounds.East - bounds.West) > PowerOutageService.CountyScaleDegrees;
+
+    public static bool IsWanted(DateTimeOffset now) { lock (Gate) return now - _wanted < WantedFor; }
+
+    public static bool IsDue(DateTimeOffset now) { lock (Gate) return _view is null || now - _at >= RefreshEvery; }
+
+    public static ConvergenceView? Fresh(DateTimeOffset now) { lock (Gate) return _view is not null && now - _at < StaleAfter ? _view : null; }
+
+    public static void Store(ConvergenceView view, DateTimeOffset at) { lock (Gate) { _view = view; _at = at; } }
+
+    public static void Reset() { lock (Gate) { _view = null; _at = _wanted = DateTimeOffset.MinValue; } }
+
+    public static ConvergenceView Within(ConvergenceView world, BoundingBox bounds) => new(
+        world.Cells.Where(cell => cell.North >= bounds.South && cell.South <= bounds.North && cell.East >= bounds.West && cell.West <= bounds.East).ToList(),
+        world.Blackouts.Where(blackout => bounds.Contains(blackout.Latitude, blackout.Longitude)).ToList());
+}
+
+// #4: refreshes the worldwide view every five minutes, only while convergence is in use.
+public sealed class ConvergenceRefreshService(IServiceScopeFactory scopes, TimeProvider time, ILogger<ConvergenceRefreshService> logger)
+    : Microsoft.Extensions.Hosting.BackgroundService
+{
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        using var timer = new PeriodicTimer(TimeSpan.FromMinutes(1), time);
+        while (await timer.WaitForNextTickAsync(stoppingToken))
+        {
+            var now = time.GetUtcNow();
+            if (!ConvergenceWorld.IsWanted(now) || !ConvergenceWorld.IsDue(now)) continue;
+            try
+            {
+                using var scope = scopes.CreateScope();
+                await scope.ServiceProvider.GetRequiredService<SignalConvergenceService>().RefreshWorldAsync(stoppingToken);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                logger.LogWarning(ex, "Convergence: the worldwide refresh failed");
+            }
+        }
+    }
+}

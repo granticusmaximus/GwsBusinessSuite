@@ -125,7 +125,9 @@ public sealed record TimeMachineSnapshot(
     DateTimeOffset? IncidentHistoryStartsAt,
     // What changed between then and now in the view: incidents that started, and that cleared.
     int StartedSince = 0,
-    int ClearedSince = 0);
+    int ClearedSince = 0,
+    // #6: aircraft, ships and outage areas Overwatch recorded near that moment.
+    IReadOnlyList<GwsBusinessSuite.Application.LiveLayers.LiveTrack>? Tracks = null);
 
 // Overwatch's time machine: what the current view looked like at a moment in the past 72 hours
 // (24 until 13-11-26).
@@ -139,7 +141,8 @@ public sealed class TimeMachineService(
     HazardLayerService hazards,
     ICameraFavoritesService favorites,
     CameraTimelapseStore frames,
-    TimeProvider timeProvider)
+    TimeProvider timeProvider,
+    GwsBusinessSuite.Application.LiveLayers.ILiveTrackHistory? tracks = null)
 {
     public static readonly TimeSpan Window = TimeSpan.FromHours(72);
     // A sighting counts as still active this long after it was last seen (lookups are ~10 min apart).
@@ -190,7 +193,8 @@ public sealed class TimeMachineService(
         }
 
         return new TimeMachineSnapshot(at, RadarTileUrl(at, now), inView, begun, cameras,
-            earliest is { } first ? DateTimeOffset.FromUnixTimeSeconds(first) : null, started, cleared);
+            earliest is { } first ? DateTimeOffset.FromUnixTimeSeconds(first) : null, started, cleared,
+            tracks?.At(bounds, at) ?? []);
     }
 
     // Incidents in the view that started after the chosen moment, and those active then that have

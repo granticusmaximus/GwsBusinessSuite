@@ -9,6 +9,7 @@
 @inject CameraDirectoryService CameraDirectoryService
 @inject CameraHealthService CameraHealthService
 @inject CameraTimelapseStore CameraTimelapseStore
+@inject GwsBusinessSuite.Application.LiveLayers.ILiveTrackHistory TrackHistory
 @inject SourceStatusTracker SourceStatusTracker
 @inject GwsBusinessSuite.Application.Hazards.HazardLayerService HazardLayerService
 @inject GwsBusinessSuite.Application.RouteWatch.RouteWatchService RouteWatchService
@@ -441,8 +442,10 @@
                     @foreach (var (name, source) in GwsBusinessSuite.Web.OverwatchLayerCatalog.Layers)
                     {
                         var problem = _layerProblems.GetValueOrDefault(name);
+                        var loads = _layerLoads.GetValueOrDefault(name);
                         <div class="tg-hazard-summary" role="row">
                             <strong>@name.ToUpperInvariant()</strong> · @source ·
+                            @(loads is { } l ? GwsBusinessSuite.Web.OverwatchLayerCatalog.Describe(l) + " · " : string.Empty)
                             @(problem is { } p ? $"LAST PROBLEM {p.At.ToGwsTime()}: {p.Message}" : "no problems since this page opened")
                         </div>
                     }
@@ -633,6 +636,10 @@
                 @if (_timeMachine is { } tm)
                 {
                     <span>· RADAR · @tm.Incidents.Count INCIDENTS · @tm.Hazards.Count HAZARDS · @tm.Cameras.Count CAMERAS</span>
+                    @if (tm.Tracks is { Count: > 0 } tracks)
+                    {
+                        <span>· @tracks.Count(t => t.Kind == "aircraft") AIRCRAFT · @tracks.Count(t => t.Kind == "ship") SHIPS · @tracks.Count(t => t.Kind == "outage") OUTAGES</span>
+                    }
                     <span>· SINCE THEN: @tm.StartedSince STARTED, @tm.ClearedSince CLEARED</span>
                     @if (tm.IncidentHistoryStartsAt is { } since && since > TimeMachineAt)
                     {
@@ -2031,6 +2038,7 @@
     private async Task TimedAsync(string layer, Func<Task> load)
     {
         var started = System.Diagnostics.Stopwatch.GetTimestamp();
+        var startedAt = DateTimeOffset.Now;
         try
         {
             await load();
@@ -2040,6 +2048,9 @@
             Logger.LogWarning(ex, "Overwatch layer {Layer} failed", layer); NoteLayerProblem(layer, ex);
         }
         var elapsed = System.Diagnostics.Stopwatch.GetElapsedTime(started);
+        var name = GwsBusinessSuite.Web.OverwatchLayerCatalog.Canonical(layer);
+        var failed = _layerProblems.TryGetValue(name, out var problem) && problem.At >= startedAt;
+        _layerLoads[name] = GwsBusinessSuite.Web.OverwatchLayerCatalog.Record(_layerLoads.GetValueOrDefault(name), DateTimeOffset.Now, elapsed, failed);
         if (elapsed > SlowLayer) Logger.LogInformation("Overwatch layer {Layer} took {Seconds:0.0} s", layer, elapsed.TotalSeconds);
     }
 
@@ -2918,7 +2929,8 @@
                     lat = i.Latitude, lon = i.Longitude, category = i.Category,
                     title = $"{GwsBusinessSuite.Application.TrafficIncidents.IncidentCategories.Label(i.Category)}: {i.RoadwayName}"
                 }),
-                earthquakes = snapshot.Hazards.Select(q => new { lat = q.Latitude, lon = q.Longitude, title = q.Title })
+                earthquakes = snapshot.Hazards.Select(q => new { lat = q.Latitude, lon = q.Longitude, title = q.Title }),
+                tracks = (snapshot.Tracks ?? []).Select(t => new { lat = t.Latitude, lon = t.Longitude, category = t.Kind, title = t.Title, heading = t.Heading })
             });
             if (_worldNewsOn) await PushWorldNewsAsync();
             if (_worldNewsShading) await PushWorldNewsShadingAsync();
@@ -3948,6 +3960,8 @@
         try
         {
             var result = await AircraftService.GetAsync(_lastBbox);
+            RecordTracks(GwsBusinessSuite.Application.LiveLayers.LiveTrackKinds.Aircraft, result.Aircraft.Select(a => new GwsBusinessSuite.Application.LiveLayers.LiveTrack(GwsBusinessSuite.Application.LiveLayers.LiveTrackKinds.Aircraft, a.Icao24,
+                string.IsNullOrWhiteSpace(a.Callsign) ? a.Icao24.ToUpperInvariant() : a.Callsign.Trim(), a.Latitude, a.Longitude, a.HeadingDegrees, DateTimeOffset.UtcNow)));
             await JS.InvokeVoidAsync("tacticalGlobe.setAircraft", "tg-viewport", result.Aircraft.Select(a => new
             {
                 id = a.Icao24, callsign = a.Callsign, lat = a.Latitude, lon = a.Longitude,
@@ -4013,6 +4027,8 @@
         try
         {
             var result = await PowerOutageService.GetAsync(_lastBbox);
+            RecordTracks(GwsBusinessSuite.Application.LiveLayers.LiveTrackKinds.Outage, result.Areas.Select(a => new GwsBusinessSuite.Application.LiveLayers.LiveTrack(GwsBusinessSuite.Application.LiveLayers.LiveTrackKinds.Outage, a.Name,
+                $"{a.Name}: {a.CustomersOut:N0} out", a.Latitude, a.Longitude, null, DateTimeOffset.UtcNow)));
             var inView = result.Areas.Where(a => _lastBbox.Contains(a.Latitude, a.Longitude)).ToList();
             await JS.InvokeVoidAsync("tacticalGlobe.setPowerOutages", "tg-viewport", result.Areas.Select(a => new
             {
@@ -4250,6 +4266,15 @@
     // ---- Layer health (13-11-26): the last problem each layer hit since the page opened. ----
     private bool _layerHealthOn;
     private readonly Dictionary<string, (DateTimeOffset At, string Message)> _layerProblems = new(StringComparer.OrdinalIgnoreCase);
+    // #10 (13-11-26): each layer's loads since the page opened: how long the last took, how often it failed.
+    private readonly Dictionary<string, GwsBusinessSuite.Web.OverwatchLayerCatalog.LayerLoads> _layerLoads = new(StringComparer.OrdinalIgnoreCase);
+
+    // #6: what a live layer just loaded, into the time machine's history, off the circuit's thread.
+    private void RecordTracks(string kind, IEnumerable<GwsBusinessSuite.Application.LiveLayers.LiveTrack> tracks)
+    {
+        var list = tracks.ToList();
+        if (list.Count > 0) _ = Task.Run(() => TrackHistory.Record(kind, list));
+    }
 
     private void NoteLayerProblem(string layer, Exception ex) =>
         _layerProblems[GwsBusinessSuite.Web.OverwatchLayerCatalog.Canonical(layer)] = (DateTimeOffset.Now, ex is HttpRequestException or TaskCanceledException ? "its source didn't answer" : ex.Message.Length > 120 ? ex.Message[..120] : ex.Message);
@@ -4757,6 +4782,8 @@
         try
         {
             var result = await ShipService.GetAsync(_lastBbox);
+            RecordTracks(GwsBusinessSuite.Application.LiveLayers.LiveTrackKinds.Ship, result.Ships.Select(v => new GwsBusinessSuite.Application.LiveLayers.LiveTrack(GwsBusinessSuite.Application.LiveLayers.LiveTrackKinds.Ship, v.Mmsi.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                string.IsNullOrWhiteSpace(v.Name) ? $"MMSI {v.Mmsi}" : v.Name, v.Latitude, v.Longitude, v.HeadingDegrees ?? v.CourseDegrees, v.SeenAt)));
             await JS.InvokeVoidAsync("tacticalGlobe.setShips", "tg-viewport", result.Ships.Select(s => new
             {
                 id = s.Mmsi, name = s.Name, lat = s.Latitude, lon = s.Longitude, speedKnots = s.SpeedKnots,

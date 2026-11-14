@@ -95,6 +95,10 @@ public sealed class WorldNewsStore
             CREATE TABLE IF NOT EXISTS tips (
                 id TEXT PRIMARY KEY, name TEXT, contact TEXT, message TEXT NOT NULL, url TEXT, created_at INTEGER NOT NULL, status TEXT NOT NULL,
                 event_id TEXT, handled_by TEXT);
+            CREATE TABLE IF NOT EXISTS site_signals (
+                domain TEXT PRIMARY KEY, outlet TEXT NOT NULL, ids TEXT NOT NULL, registered INTEGER, rdap_checked INTEGER, seen_at INTEGER NOT NULL);
+            CREATE TABLE IF NOT EXISTS article_photos (
+                article_id TEXT PRIMARY KEY, image_url TEXT NOT NULL, hash INTEGER NOT NULL, credentials INTEGER NOT NULL, first_seen INTEGER NOT NULL);
             CREATE TABLE IF NOT EXISTS article_body_edits (
                 article_id TEXT PRIMARY KEY, first_text TEXT NOT NULL, latest_text TEXT NOT NULL, detected_at INTEGER NOT NULL);
             CREATE TABLE IF NOT EXISTS outlet_owners (outlet TEXT NOT NULL, owner TEXT NOT NULL, fetched_at INTEGER NOT NULL, PRIMARY KEY (outlet, owner));
@@ -1271,6 +1275,70 @@ public sealed class WorldNewsStore
         return candidates;
     }
 
+    // World News search: stories whose reports match the words (full text when built), with how
+    // many reports match, the most first.
+    public IReadOnlyList<(string EventId, int Reports)> EventsMatchingText(string text, DateTimeOffset since, int limit)
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        string match;
+        if (FullTextReady() && FullTextQuery.From(text) is { } fullText)
+        {
+            match = "rowid IN (SELECT rowid FROM articles_fts WHERE articles_fts MATCH $q)";
+            command.Parameters.AddWithValue("$q", fullText);
+        }
+        else
+        {
+            match = "instr(lower(title || ' ' || COALESCE(snippet, '')), lower($q)) > 0";
+            command.Parameters.AddWithValue("$q", text.Trim());
+        }
+        command.CommandText = $"""
+            SELECT event_id, COUNT(*) FROM articles
+            WHERE event_id IS NOT NULL AND seen_at >= $since AND {match}
+            GROUP BY event_id ORDER BY COUNT(*) DESC, MAX(seen_at) DESC LIMIT $limit
+            """;
+        command.Parameters.AddWithValue("$since", since.ToUnixTimeSeconds());
+        command.Parameters.AddWithValue("$limit", limit);
+        var hits = new List<(string, int)>();
+        try
+        {
+            using var reader = command.ExecuteReader();
+            while (reader.Read()) hits.Add((reader.GetString(0), reader.GetInt32(1)));
+        }
+        catch (SqliteException) { }   // a query FTS can't read finds nothing rather than failing the page
+        return hits;
+    }
+
+    // A story's own vector (for "find similar"), or null once released.
+    public float[]? EventVector(string eventId)
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT vector_sum FROM events WHERE id = $id";
+        command.Parameters.AddWithValue("$id", eventId);
+        return command.ExecuteScalar() is byte[] { Length: > 0 } bytes ? ToFloats(bytes) : null;
+    }
+
+    // Each story's kind (from its situation), for the ids given.
+    public IReadOnlyDictionary<string, string> EventKinds(IEnumerable<string> eventIds)
+    {
+        var ids = eventIds.Distinct(StringComparer.Ordinal).Take(500).ToList();
+        var kinds = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (ids.Count == 0) return kinds;
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = $"SELECT e.id, s.kind FROM events e JOIN situations s ON s.id = e.situation_id WHERE s.kind IS NOT NULL AND e.id IN ({string.Join(",", ids.Select((_, i) => "$p" + i))})";
+        for (var i = 0; i < ids.Count; i++) command.Parameters.AddWithValue("$p" + i, ids[i]);
+        using var reader = command.ExecuteReader();
+        while (reader.Read()) kinds[reader.GetString(0)] = reader.GetString(1);
+        return kinds;
+    }
+
+    // Stories of one kind seen since a time, the most widely covered first.
+    public IReadOnlyList<EventOverview> EventsOfKind(string kind, DateTimeOffset since, int limit) =>
+        Overviews("WHERE e.last_seen >= $since AND e.situation_id IN (SELECT id FROM situations WHERE kind = $kind)", "",
+            ("$since", since.ToUnixTimeSeconds()), ("$kind", kind), ("$limit", limit));
+
     // A situation's events in the order they broke.
     public IReadOnlyList<EventOverview> EventsForSituation(string situationId) =>
         Overviews("WHERE e.situation_id = $situation", "", ("$situation", situationId), ("$limit", 500))
@@ -1907,6 +1975,102 @@ public sealed class WorldNewsStore
         }
     }
 
+    // B5: a site's tracking IDs (replaced when read again) and, once looked up, its registration date.
+    public void SaveSiteIds(string domain, string outlet, IReadOnlyList<string> ids, DateTimeOffset seenAt)
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            INSERT INTO site_signals (domain, outlet, ids, seen_at) VALUES ($domain, $outlet, $ids, $at)
+            ON CONFLICT(domain) DO UPDATE SET outlet = excluded.outlet, ids = excluded.ids, seen_at = excluded.seen_at
+            """;
+        command.Parameters.AddWithValue("$domain", domain);
+        command.Parameters.AddWithValue("$outlet", outlet);
+        command.Parameters.AddWithValue("$ids", string.Join(' ', ids));
+        command.Parameters.AddWithValue("$at", seenAt.ToUnixTimeSeconds());
+        command.ExecuteNonQuery();
+    }
+
+    public void SaveSiteRegistration(string domain, DateTimeOffset? registered, DateTimeOffset checkedAt)
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "UPDATE site_signals SET registered = $registered, rdap_checked = $checked WHERE domain = $domain";
+        command.Parameters.AddWithValue("$domain", domain);
+        command.Parameters.AddWithValue("$registered", registered is { } at ? at.ToUnixTimeSeconds() : DBNull.Value);
+        command.Parameters.AddWithValue("$checked", checkedAt.ToUnixTimeSeconds());
+        command.ExecuteNonQuery();
+    }
+
+    public IReadOnlyList<SiteSignal> SiteSignals()
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT domain, outlet, ids, registered FROM site_signals ORDER BY domain";
+        var signals = new List<SiteSignal>();
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+            signals.Add(new SiteSignal(reader.GetString(0), reader.GetString(1),
+                reader.GetString(2).Split(' ', StringSplitOptions.RemoveEmptyEntries),
+                reader.IsDBNull(3) ? null : DateTimeOffset.FromUnixTimeSeconds(reader.GetInt64(3))));
+        return signals;
+    }
+
+    // Domains never looked up on RDAP, most recently seen first.
+    public IReadOnlyList<string> SitesWithoutRegistration(int limit)
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT domain FROM site_signals WHERE rdap_checked IS NULL ORDER BY seen_at DESC LIMIT $limit";
+        command.Parameters.AddWithValue("$limit", limit);
+        var domains = new List<string>();
+        using var reader = command.ExecuteReader();
+        while (reader.Read()) domains.Add(reader.GetString(0));
+        return domains;
+    }
+
+    // B3: an article's share picture, fingerprinted. Kept as long as its article.
+    public void SavePhoto(string articleId, string imageUrl, ulong hash, bool credentials, DateTimeOffset firstSeen)
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "INSERT OR IGNORE INTO article_photos (article_id, image_url, hash, credentials, first_seen) VALUES ($id, $url, $hash, $cred, $at)";
+        command.Parameters.AddWithValue("$id", articleId);
+        command.Parameters.AddWithValue("$url", imageUrl);
+        command.Parameters.AddWithValue("$hash", unchecked((long)hash));
+        command.Parameters.AddWithValue("$cred", credentials ? 1 : 0);
+        command.Parameters.AddWithValue("$at", firstSeen.ToUnixTimeSeconds());
+        command.ExecuteNonQuery();
+    }
+
+    public bool HasPhoto(string articleId)
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT 1 FROM article_photos WHERE article_id = $id";
+        command.Parameters.AddWithValue("$id", articleId);
+        return command.ExecuteScalar() is not null;
+    }
+
+    // Every kept print with its article's story, outlet and headline (eventId null: all of them).
+    public IReadOnlyList<PhotoPrint> Photos(string? eventId = null)
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT p.article_id, a.event_id, a.outlet, a.title, p.image_url, p.hash, p.credentials, p.first_seen
+            FROM article_photos p JOIN articles a ON a.id = p.article_id
+            WHERE a.event_id IS NOT NULL
+            """ + (eventId is null ? string.Empty : " AND a.event_id = $event");
+        if (eventId is not null) command.Parameters.AddWithValue("$event", eventId);
+        var prints = new List<PhotoPrint>();
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+            prints.Add(new PhotoPrint(reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3), reader.GetString(4),
+                unchecked((ulong)reader.GetInt64(5)), reader.GetInt64(6) == 1, DateTimeOffset.FromUnixTimeSeconds(reader.GetInt64(7))));
+        return prints;
+    }
+
     public IReadOnlyList<WorldArticle> ArticlesForEvent(string eventId) =>
         QueryArticles("WHERE event_id = $event ORDER BY seen_at", ("$event", eventId));
 
@@ -2044,6 +2208,7 @@ public sealed class WorldNewsStore
             DELETE FROM analysis_history WHERE event_id NOT IN (SELECT id FROM events);
             DELETE FROM story_reads WHERE event_id NOT IN (SELECT id FROM events);
             DELETE FROM article_texts WHERE article_id NOT IN (SELECT id FROM articles);
+            DELETE FROM article_photos WHERE article_id NOT IN (SELECT id FROM articles);
             DELETE FROM article_translations WHERE article_id NOT IN (SELECT id FROM articles);
             DELETE FROM situations WHERE id NOT IN (SELECT situation_id FROM events WHERE situation_id IS NOT NULL);
             DELETE FROM situation_placements WHERE situation_id NOT IN (SELECT id FROM situations);

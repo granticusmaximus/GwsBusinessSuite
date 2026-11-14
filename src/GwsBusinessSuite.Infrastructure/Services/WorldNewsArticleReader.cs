@@ -67,7 +67,9 @@ public sealed class WorldNewsArticleReader(IHttpClientFactory httpClientFactory,
         await Parallel.ForEachAsync(toRead.Concat(recheck), new ParallelOptions { MaxDegreeOfParallelism = MaxParallel, CancellationToken = cancellationToken },
             async (article, ct) =>
             {
-                var (excerpt, reason) = await FetchAsync(article.Url, ct);
+                var (excerpt, reason, image, ids) = await FetchAsync(article.Url, ct);
+                if (ids is not null && OwnershipGraph.RootDomain(article.Url) is { } domain) store.SaveSiteIds(domain, article.Outlet, ids, time.GetUtcNow());
+                if (image is not null) await FingerprintAsync(store, article, image, ct);
                 if (known.TryGetValue(article.Id, out var before) && before.Excerpt is { } earlier)
                 {
                     // A re-read: keep the earlier text if this one failed; record a material change.
@@ -80,26 +82,51 @@ public sealed class WorldNewsArticleReader(IHttpClientFactory httpClientFactory,
         return excerpts;
     }
 
-    private async Task<(string? Excerpt, string? Reason)> FetchAsync(string url, CancellationToken cancellationToken)
+    // B3: the article's share picture, fingerprinted once, through the same guarded client.
+    private async Task FingerprintAsync(WorldNewsStore store, WorldArticle article, string imageUrl, CancellationToken cancellationToken)
     {
-        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri)) return (null, "not a web link");
+        if (store.HasPhoto(article.Id) || !Uri.TryCreate(imageUrl, UriKind.Absolute, out var uri)) return;
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(FetchTimeout);
+        try
+        {
+            using var response = await httpClientFactory.CreateClient(HttpClientName).GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, timeout.Token);
+            if (!response.IsSuccessStatusCode || response.Content.Headers.ContentType?.MediaType?.StartsWith("image/", StringComparison.OrdinalIgnoreCase) != true
+                || response.Content.Headers.ContentLength > PhotoFingerprint.MaxBytes) return;
+            var bytes = await response.Content.ReadAsByteArrayAsync(timeout.Token);
+            if (PhotoFingerprint.DHash(bytes) is { } hash)
+                store.SavePhoto(article.Id, imageUrl, hash, RecycledPhotos.HasContentCredentials(bytes), article.SeenAt);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or HostPausedException or InvalidOperationException
+                                       || (ex is TaskCanceledException && !cancellationToken.IsCancellationRequested))
+        {
+            logger.LogDebug("World News: couldn't fingerprint a picture from {Host} ({Reason})", uri.Host, ex.Message);
+        }
+    }
+
+    private async Task<(string? Excerpt, string? Reason, string? Image, IReadOnlyList<string>? Ids)> FetchAsync(string url, CancellationToken cancellationToken)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri)) return (null, "not a web link", null, null);
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(FetchTimeout);
         try
         {
             using var response = await httpClientFactory.CreateClient(HttpClientName).GetAsync(uri, timeout.Token);
-            if (!response.IsSuccessStatusCode) return (null, $"answered {(int)response.StatusCode}");
+            if (!response.IsSuccessStatusCode) return (null, $"answered {(int)response.StatusCode}", null, null);
             if (response.Content.Headers.ContentType?.MediaType is { } type && !type.Contains("html", StringComparison.OrdinalIgnoreCase))
-                return (null, "not a web page");
+                return (null, "not a web page", null, null);
             var html = await response.Content.ReadAsStringAsync(timeout.Token);
-            var excerpt = Excerpt(WebPageReader.ReadHtml(html, response.RequestMessage?.RequestUri ?? uri));
-            return excerpt is null ? (null, "no article text") : (excerpt, null);
+            var page = response.RequestMessage?.RequestUri ?? uri;
+            var excerpt = Excerpt(WebPageReader.ReadHtml(html, page));
+            var image = RecycledPhotos.ShareImage(html, page);
+            var ids = SiteNetworks.Ids(html);
+            return excerpt is null ? (null, "no article text", image, ids) : (excerpt, null, image, ids);
         }
         catch (Exception ex) when (ex is HttpRequestException or HostPausedException or InvalidOperationException
                                        || (ex is TaskCanceledException && !cancellationToken.IsCancellationRequested))
         {
             logger.LogInformation("World News: couldn't read {Host} for an analysis ({Reason})", uri.Host, ex.Message);
-            return (null, ex is HostPausedException ? "the site refused this server" : ex is TaskCanceledException ? "too slow" : "couldn't connect");
+            return (null, ex is HostPausedException ? "the site refused this server" : ex is TaskCanceledException ? "too slow" : "couldn't connect", null, null);
         }
     }
 

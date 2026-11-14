@@ -18,4 +18,20 @@ public sealed class OverwatchLayerCatalogTests
         reported.Should().NotBeEmpty();
         reported.Should().OnlyContain(name => catalogue.Contains(name), "a problem must show against a listed layer");
     }
+
+    [Fact]
+    public void Record_ShouldKeepCountsSlowestAndTheLastGoodLoad()
+    {
+        var at = new DateTimeOffset(2026, 11, 13, 9, 0, 0, TimeSpan.Zero);
+        var first = OverwatchLayerCatalog.Record(null, at, TimeSpan.FromSeconds(2), failed: false);
+        var second = OverwatchLayerCatalog.Record(first, at.AddMinutes(1), TimeSpan.FromSeconds(1), failed: true);
+
+        Assert.Equal(2, second.Count);
+        Assert.Equal(1, second.Failed);
+        Assert.Equal(TimeSpan.FromSeconds(2), second.Slowest);
+        Assert.Equal(TimeSpan.FromSeconds(1), second.LastTook);
+        Assert.Equal(at, second.LastGoodAt);
+        Assert.Contains("1 FAILED", OverwatchLayerCatalog.Describe(second));
+        Assert.Contains("NO GOOD LOAD YET", OverwatchLayerCatalog.Describe(OverwatchLayerCatalog.Record(null, at, TimeSpan.Zero, failed: true)));
+    }
 }

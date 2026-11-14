@@ -966,6 +966,12 @@ public static class DependencyInjection
         services.AddScoped<CameraWatchService>();
         // Overwatch time machine: incident history (buffered, flushed every minute) + the snapshot service.
         services.AddSingleton<IncidentHistoryRecorder>();
+        // #6: live-layer history beside World News' database (live-history.db), so local runs and
+        // tests that move that database move this one too.
+        services.AddSingleton<GwsBusinessSuite.Application.LiveLayers.ILiveTrackHistory>(sp => new LiveTrackHistoryStore(
+            configuration["Overwatch:LiveHistoryPath"] is { Length: > 0 } livePath ? livePath
+                : Path.Combine(Path.GetDirectoryName(Path.GetFullPath(configuration["WorldNews:DatabasePath"] ?? "/app/data/worldnews.db"))!, "live-history.db"),
+            sp.GetRequiredService<TimeProvider>(), sp.GetRequiredService<ILogger<LiveTrackHistoryStore>>()));
         services.AddSingleton<GwsBusinessSuite.Application.TrafficIncidents.IIncidentHistoryRecorder>(sp => sp.GetRequiredService<IncidentHistoryRecorder>());
         services.AddHostedService<IncidentHistoryFlushService>();
         services.AddScoped<TimeMachineService>();
@@ -1104,6 +1110,7 @@ public static class DependencyInjection
             client.DefaultRequestHeaders.UserAgent.ParseAdd("GwsBusinessSuite-Overwatch/1.0 (+https://www.gwsapp.net)");
         }).AddHttpMessageHandler<RefusedHostPauseHandler>();
         services.AddScoped<SignalConvergenceService>();
+        services.AddHostedService<ConvergenceRefreshService>();
         // FAA airport status and NOAA SWPC aurora/Kp for the AIR and SPACE groups (05-11-26), key-less.
         // Overwatch briefing PDF (13-11-26): Esri map export of the view.
         services.AddHttpClient<OverwatchViewBriefingPdf>(client => client.Timeout = TimeSpan.FromSeconds(30));

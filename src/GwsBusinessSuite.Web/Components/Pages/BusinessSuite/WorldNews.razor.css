@@ -222,6 +222,8 @@
     text-align: left;
 }
 
+a.world-news-search-all { text-decoration: none; color: var(--gws-text-soft); }
+
 .world-news-search-all:hover {
     color: var(--gws-sidebar-accent, #f59e0b);
 }

@@ -214,9 +214,10 @@ public static partial class CoverageClaims
     private static Regex WordThenNumber(string measure, string words)
     {
         var lead = measure == Deaths ? $"{words}|death toll|toll" : words;
-        var verb = measure switch { Deaths => "killing", Injured => "injuring|wounding", Arrested => "arresting", _ => "(?!)" };
+        // "kills 31", "killed 31" too (B6's test set found headlines in this form never compared, 13-11-26).
+        var verb = measure switch { Deaths => "killing|kills|killed", Injured => "injuring|injures|injured|wounding|wounds|wounded", Arrested => "arresting|arrests|arrested", _ => "(?!)" };
         return new Regex(
-            $@"\b(?:{lead})\s+(?:(?:has\s+)?(?:rises?|rose|risen|climbs?|climbed|reach(?:es|ed)?|stands?|stood|hits?|is|was|of|to|at|now)\s+){{0,3}}{Qual}\s*{Num}(?![\w]|[.,]\d)|\b(?:{verb})\s+{Qual}\s*{Num}(?![\w]|[.,]\d)",
+            $@"\b(?:{lead})\s+(?:(?:has\s+)?(?:rises?|rose|risen|climbs?|climbed|reach(?:es|ed)?|stands?|stood|hits?|is|was|of|to|at|now)\s+){{0,3}}{Qual}\s*{Num}(?![\w]|[.,]\d)|\b(?:{verb})\s+{Qual}\s*{Num}(?![\w-]|[.,]\d)",
             RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
     }
 

@@ -1,0 +1,337 @@
+@page "/admin/world-news/search"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = "AdminOnly")]
+@implements IDisposable
+@using Microsoft.AspNetCore.Authorization
+@using GwsBusinessSuite.Application.Abstractions
+@using GwsBusinessSuite.Application.ThreatIntel
+@using GwsBusinessSuite.Infrastructure.Services
+@using GwsBusinessSuite.WorldNewsKit
+@inject WorldNewsService News
+@inject IVulnerabilityIntelService Vulnerabilities
+@inject ICurrentUserAccessor CurrentUserAccessor
+@inject NavigationManager Navigation
+@inject ILogger<WorldNewsFind> Logger
+
+@* World News search (13-11-26, Grant's priority): any term or question, and every story with
+   similar reports, by meaning and by words. Cyber in action: attacks and breaches in the news now,
+   their status, the CVEs they name, and what CISA says is being exploited right now. *@
+
+<PageTitle>Search World News</PageTitle>
+
+<PageHeader Title="Search World News" Icon="bi-search" Description="Find every story with similar reports, by meaning and by words, and the cyber attacks in the news right now.">
+    <Actions>
+        <a class="btn btn-outline-secondary" href="admin/world-news"><i class="bi bi-arrow-left me-1" aria-hidden="true"></i>World News</a>
+    </Actions>
+</PageHeader>
+
+<form class="find-bar" role="search" @onsubmit="SearchAsync" @onsubmit:preventDefault>
+    <i class="bi bi-search" aria-hidden="true"></i>
+    <input type="search" class="form-control find-input" placeholder="A term, a name or a question: ransomware hospital, CVE-2026-1234, port strike..."
+           aria-label="Search World News" @bind="_query" @bind:event="oninput" />
+    <button type="submit" class="btn btn-primary" disabled="@(string.IsNullOrWhiteSpace(_query) || _busy)">Search</button>
+</form>
+
+<div class="find-options">
+    <div class="find-chips" role="group" aria-label="How far back">
+        @foreach (var days in WorldNewsFinder.RangeDays)
+        {
+            var d = days;
+            <button type="button" class="find-chip @(_days == d ? "is-active" : "")" aria-pressed="@(_days == d ? "true" : "false")"
+                    @onclick="() => SetDaysAsync(d)">@RangeLabel(d)</button>
+        }
+    </div>
+    <div class="find-chips" role="group" aria-label="Which stories">
+        <button type="button" class="find-chip @(!_cyberOnly ? "is-active" : "")" aria-pressed="@(!_cyberOnly ? "true" : "false")" @onclick="() => SetCyberAsync(false)">All stories</button>
+        <button type="button" class="find-chip @(_cyberOnly ? "is-active" : "")" aria-pressed="@(_cyberOnly ? "true" : "false")" @onclick="() => SetCyberAsync(true)">
+            <i class="bi bi-shield-exclamation me-1" aria-hidden="true"></i>Cyber only
+        </button>
+    </div>
+</div>
+
+@if (_busy)
+{
+    <LoadingIndicator Message="Looking through the reports…" />
+}
+else if (_result is { } result)
+{
+    <section class="card border-0 shadow-sm mb-3" aria-labelledby="find-results">
+        <div class="card-header find-head">
+            <strong id="find-results">@ResultHeading(result)</strong>
+            @if (_similarTo is null && result.Query.Length > 0 && !string.IsNullOrWhiteSpace(_username))
+            {
+                <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@_watched" @onclick="WatchAsync"
+                        title="Get an alert when a new story matches these words (once it has two independent sources)">
+                    <i class="bi bi-bell me-1" aria-hidden="true"></i>@(_watched ? "Watching" : "Watch this search")
+                </button>
+            }
+        </div>
+        <div class="card-body">
+            @if (result.Note is { } note) { <p class="small text-secondary">@note</p> }
+            @if (_watchError is { } watchError) { <p class="small text-warning" role="alert">@watchError</p> }
+            @if (result.Stories.Count == 0)
+            {
+                <EmptyState Icon="bi-search" Title="No similar reports" Message="Nothing in that period reads like this. Try other words, or a longer period." />
+            }
+            else
+            {
+                var strong = result.Stories.Where(story => story.IsStrong).ToList();
+                var loose = result.Stories.Where(story => !story.IsStrong).ToList();
+                @if (strong.Count == 0)
+                {
+                    <p class="text-secondary">No close matches. The stories below are only loosely related; try other words or a longer period.</p>
+                }
+                <ol class="find-list">
+                    @foreach (var story in strong)
+                    {
+                        <li @key="story.Event.Id">@StoryRow(story)</li>
+                    }
+                </ol>
+                @if (loose.Count > 0)
+                {
+                    <details class="find-loose" open="@(strong.Count == 0)">
+                        <summary>Loosely related (@loose.Count)</summary>
+                        <ol class="find-list">
+                            @foreach (var story in loose)
+                            {
+                                <li @key="story.Event.Id">@StoryRow(story)</li>
+                            }
+                        </ol>
+                    </details>
+                }
+            }
+        </div>
+    </section>
+}
+
+@if (_cyber is not null && (_result is null || _cyberOnly))
+{
+    <section class="card border-0 shadow-sm mb-3" aria-labelledby="find-cyber">
+        <div class="card-header find-head">
+            <strong id="find-cyber"><i class="bi bi-shield-exclamation me-1" aria-hidden="true"></i>Cyber in action</strong>
+            <small class="text-secondary">attacks and breaches in the news in the last 3 days, most covered first</small>
+        </div>
+        <div class="card-body">
+            @if (_cyber.Count == 0)
+            {
+                <p class="text-secondary mb-0">No cyber attacks or breaches in the news in the last 3 days.</p>
+            }
+            else
+            {
+                <ol class="find-list">
+                    @foreach (var story in _cyber)
+                    {
+                        <li @key="story.Event.Id">@StoryRow(story)</li>
+                    }
+                </ol>
+            }
+            <p class="small text-secondary mt-2 mb-0">Status is read from the headlines: confirmed (by the organisation, a regulator or a filing), reported, claimed (by the attackers), precautionary or disputed.</p>
+        </div>
+    </section>
+}
+
+@if (_kevLatest.Count > 0 && (_result is null || _cyberOnly))
+{
+    <section class="card border-0 shadow-sm mb-3" aria-labelledby="find-kev">
+        <div class="card-header find-head">
+            <strong id="find-kev">Exploited right now</strong>
+            <small class="text-secondary">the newest additions to CISA's Known Exploited Vulnerabilities catalog</small>
+        </div>
+        <div class="card-body">
+            <ul class="find-kev">
+                @foreach (var kev in _kevLatest)
+                {
+                    var inNews = NewsMentioning(kev);
+                    <li @key="kev.CveId">
+                        <a href="@($"https://nvd.nist.gov/vuln/detail/{kev.CveId}")" target="_blank" rel="noopener noreferrer"><strong>@kev.CveId</strong></a>
+                        @kev.Vendor @kev.Product: @kev.Name.
+                        <span class="text-secondary">Added @kev.DateAdded.ToString("dd-MM-yy")@(kev.KnownRansomwareUse ? ", used by ransomware" : string.Empty).</span>
+                        @if (inNews is { } story)
+                        {
+                            <a class="find-kev-news" href="@StoryHref(story.Event.Id)">In the news: @(story.Event.Headline ?? story.Event.Title)</a>
+                        }
+                        <button type="button" class="btn btn-sm btn-link p-0 ms-1" @onclick="() => SearchForAsync(KevQuery(kev))">Search reports</button>
+                    </li>
+                }
+            </ul>
+        </div>
+    </section>
+}
+
+@code {
+    [SupplyParameterFromQuery(Name = "q")] public string? QueryParameter { get; set; }
+    [SupplyParameterFromQuery(Name = "days")] public int? DaysParameter { get; set; }
+    [SupplyParameterFromQuery(Name = "kind")] public string? KindParameter { get; set; }
+    [SupplyParameterFromQuery(Name = "similar")] public string? SimilarParameter { get; set; }
+
+    private const int CyberHours = 72;
+    private const int KevShown = 10;
+    private readonly CancellationTokenSource _cts = new();
+    private string _query = string.Empty;
+    private int _days = 7;
+    private bool _cyberOnly;
+    private string? _similarTo;
+    private bool _busy;
+    private FindResult? _result;
+    private IReadOnlyList<FoundStory>? _cyber;
+    private IReadOnlyList<KnownExploitedVulnerability> _kevLatest = [];
+    private HashSet<string> _kevIds = new(StringComparer.Ordinal);
+    private string? _username;
+    private bool _watched;
+    private string? _watchError;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _username = await CurrentUserAccessor.GetCurrentUsernameAsync();
+        _query = QueryParameter?.Trim() ?? string.Empty;
+        _days = WorldNewsFinder.RangeDays.Contains(DaysParameter ?? 0) ? DaysParameter!.Value : 7;
+        _cyberOnly = string.Equals(KindParameter, SituationKinds.Cyber, StringComparison.OrdinalIgnoreCase);
+        _similarTo = string.IsNullOrWhiteSpace(SimilarParameter) ? null : SimilarParameter;
+        var cyber = LoadCyberAsync();
+        if (_similarTo is not null) await RunAsync(() => News.SimilarToAsync(_similarTo, _cts.Token));
+        else if (_query.Length > 0) await RunAsync(() => News.FindAsync(_query, _days, _cyberOnly ? SituationKinds.Cyber : null, _cts.Token));
+        await cyber;
+    }
+
+    private async Task LoadCyberAsync()
+    {
+        try
+        {
+            _cyber = await News.CyberInActionAsync(CyberHours, _cts.Token);
+            var catalog = await Vulnerabilities.GetKnownExploitedAsync(5000, _cts.Token);
+            _kevIds = catalog.Select(k => k.CveId).ToHashSet(StringComparer.Ordinal);
+            _kevLatest = catalog.OrderByDescending(k => k.DateAdded).Take(KevShown).ToList();
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException && !_cts.IsCancellationRequested)
+        {
+            Logger.LogInformation(ex, "World News search: CISA's catalog couldn't be read");
+        }
+    }
+
+    private async Task RunAsync(Func<Task<FindResult>> search)
+    {
+        _busy = true;
+        _watched = false;
+        _watchError = null;
+        StateHasChanged();
+        try { _result = await search(); }
+        catch (OperationCanceledException) { }
+        finally { _busy = false; }
+    }
+
+    private async Task SearchAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_query)) return;
+        _similarTo = null;
+        _query = _query.Trim();
+        // A CVE or a cyber word with "All stories" still searches everything; the chip narrows.
+        UpdateAddress();
+        await RunAsync(() => News.FindAsync(_query, _days, _cyberOnly ? SituationKinds.Cyber : null, _cts.Token));
+    }
+
+    private Task SearchForAsync(string query)
+    {
+        _query = query;
+        return SearchAsync();
+    }
+
+    private Task SetDaysAsync(int days)
+    {
+        _days = days;
+        return _query.Length > 0 && _similarTo is null ? SearchAsync() : Task.CompletedTask;
+    }
+
+    private async Task SetCyberAsync(bool on)
+    {
+        _cyberOnly = on;
+        if (_query.Length > 0 && _similarTo is null) await SearchAsync();
+        else UpdateAddress();
+    }
+
+    private void UpdateAddress()
+    {
+        var url = Navigation.GetUriWithQueryParameters(new Dictionary<string, object?>
+        {
+            ["q"] = _query.Length > 0 ? _query : null,
+            ["days"] = _days == 7 ? null : _days,
+            ["kind"] = _cyberOnly ? SituationKinds.Cyber : null,
+            ["similar"] = null,
+        });
+        Navigation.NavigateTo(url, replace: true);
+    }
+
+    private async Task WatchAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_username) || _result is null) return;
+        var added = await Task.Run(() => News.Store.AddKeywordWatch(_username, _result.Query, DateTimeOffset.UtcNow));
+        _watched = added is not null;
+        _watchError = added is null ? $"That can't be watched (nothing to search for, or you already watch {WorldNewsStore.MaxKeywordWatches})." : null;
+    }
+
+    private RenderFragment StoryRow(FoundStory story) => @<text>
+        <div class="find-story">
+            <a class="find-title" href="@StoryHref(story.Event.Id)">@(story.Event.Headline ?? story.Event.Title)</a>
+            <div class="find-meta">
+                @if (story.CyberStatus is { } status)
+                {
+                    <span class="find-badge find-status-@status" title="@CyberStatus.Meaning(status)">@CyberStatus.Label(status)</span>
+                }
+                else if (story.Kind is { } kind)
+                {
+                    <span class="find-badge">@SituationKinds.Label(kind)</span>
+                }
+                @if (story.Similarity is { } similarity)
+                {
+                    <span title="How closely the story's reports match, by meaning">@($"{similarity * 100:0}% similar")</span>
+                }
+                @if (story.MatchingReports > 0)
+                {
+                    <span>@story.MatchingReports matching @(story.MatchingReports == 1 ? "report" : "reports")</span>
+                }
+                <span>@story.Event.OutletCount @(story.Event.OutletCount == 1 ? "outlet" : "outlets"), @story.Event.Languages.Count @(story.Event.Languages.Count == 1 ? "language" : "languages")</span>
+                <span>@story.Event.FirstSeen.ToLocalGwsDateTime() to @story.Event.LastSeen.ToLocalGwsDateTime()</span>
+                <a href="@($"admin/world-news/search?similar={Uri.EscapeDataString(story.Event.Id)}")" @onclick="() => FindSimilarAsync(story.Event.Id)" @onclick:preventDefault>Find similar</a>
+            </div>
+            @if (story.Cves.Count > 0)
+            {
+                <div class="find-cves">
+                    @foreach (var cve in story.Cves)
+                    {
+                        <a href="@($"https://nvd.nist.gov/vuln/detail/{cve}")" target="_blank" rel="noopener noreferrer"
+                           class="find-badge @(_kevIds.Contains(cve) ? "find-kev-hit" : "")"
+                           title="@(_kevIds.Contains(cve) ? "In CISA's Known Exploited Vulnerabilities catalog: being exploited" : "Named in the reports")">
+                            @cve@(_kevIds.Contains(cve) ? " · exploited" : string.Empty)
+                        </a>
+                    }
+                </div>
+            }
+        </div>
+    </text>;
+
+    private async Task FindSimilarAsync(string eventId)
+    {
+        _similarTo = eventId;
+        Navigation.NavigateTo(Navigation.GetUriWithQueryParameters(new Dictionary<string, object?> { ["similar"] = eventId, ["q"] = null }), replace: true);
+        await RunAsync(() => News.SimilarToAsync(eventId, _cts.Token));
+    }
+
+    // The cyber story in the news whose headlines name the vulnerable product (or the CVE itself).
+    private FoundStory? NewsMentioning(KnownExploitedVulnerability kev) =>
+        _cyber?.FirstOrDefault(story => story.Cves.Contains(kev.CveId)
+            || (kev.Product.Length >= 4 && (story.Event.Headline ?? story.Event.Title).Contains(kev.Product, StringComparison.OrdinalIgnoreCase)));
+
+    private string ResultHeading(FindResult result) =>
+        (_similarTo is not null ? $"Stories like “{result.Query}”" : $"Stories with reports like “{result.Query}”")
+        + $": {result.Stories.Count(story => story.IsStrong)}" + (_cyberOnly && _similarTo is null ? " (cyber only)" : string.Empty);
+
+    private static string RangeLabel(int days) => days == 1 ? "24 hours" : $"{days} days";
+    private static string StoryHref(string eventId) => $"admin/world-news/events/{Uri.EscapeDataString(eventId)}";
+    // The CVE, or the product by name as a phrase.
+    private static string KevQuery(KnownExploitedVulnerability kev) => $"{kev.CveId} OR \"{kev.Product.Replace("\"", string.Empty)}\"";
+
+    public void Dispose()
+    {
+        _cts.Cancel();
+        _cts.Dispose();
+    }
+}

@@ -35,6 +35,25 @@
     </div>
 </section>
 
+<section class="card border-0 shadow-sm mb-3" aria-labelledby="method-goldset">
+    <div class="card-header">
+        <strong id="method-goldset">Test set</strong>
+        <small class="text-secondary">@_gold.Count(g => g.Passed) of @_gold.Count known stories get their right label under version @StoryConfidenceRules.RulesVersion</small>
+    </div>
+    <div class="card-body">
+        <p class="small text-secondary mb-2">Stories with a known right answer, run through the same code that labels a live story. Red-team cases try to game the rules. A rules change can't ship unless every case passes.</p>
+        <ul class="method-changelog">
+            @foreach (var result in _gold)
+            {
+                <li>
+                    <strong>@(result.Passed ? "Pass" : "FAIL")</strong>@(result.Case.RedTeam ? " (red team)" : string.Empty): @result.Case.Name.
+                    <span class="text-secondary">@result.Case.Why Label: @result.Got.Label.</span>
+                </li>
+            }
+        </ul>
+    </div>
+</section>
+
 @if (_report is null)
 {
     <LoadingIndicator Message="Measuring how the labels hold up…" />
@@ -152,6 +171,7 @@ else
 @code {
     private TrustReport? _report;
     private readonly Dictionary<string, string> _resolutions = new();
+    private readonly IReadOnlyList<GoldResult> _gold = GoldSet.Run();
 
     protected override async Task OnInitializedAsync() => await LoadAsync();
 

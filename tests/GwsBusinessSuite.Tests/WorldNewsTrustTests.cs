@@ -139,6 +139,7 @@ public sealed class WorldNewsTrustTests
     [InlineData("\"rescue under way\" OR evacuat*", "\"rescue under way\" OR \"evacuat\"*")]
     [InlineData("quake NOT tsunami", "\"quake\" NOT \"tsunami\"")]
     [InlineData("title:hack ^boom \"unclosed", "\"titlehack\" \"boom\" \"unclosed\"")]
+    [InlineData("Ivanti CVE-2025-0282", "\"Ivanti\" \"CVE 2025 0282\"")]
     [InlineData("AND OR", null)]
     [InlineData("   ", null)]
     public void FullTextQuery_ShouldReadWhatPeopleType_AndNeverError(string text, string? expected) =>

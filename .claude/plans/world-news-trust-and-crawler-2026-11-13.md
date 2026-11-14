@@ -173,3 +173,18 @@ and the write-up both draw on the evidence; then B3-B9 and N5-N15; B10 (reading)
   at startup with the existing Compact (VACUUM) when 10k+ rows were released. Dot() returns 0 for
   empty/mismatched vectors. Expected ~0.6-0.7 GB smaller after the first compact.
 
+- 13-11-26 (Grant: "do everything in one go"; then search became the main priority). Built and tested in one unit:
+  - B6 test set (GoldSet: 16 cases incl. 7 red team; WorldNewsGoldSetTests; methodology page). It found
+    "kills 31"/"killed 31" tolls never compared: fixed (CoverageClaims verbs). Rules 2026-11-13.3.
+  - B8 GDELT quarter-hour feed: CoverageSurgeRules on the conflict layer's same download
+    ("Surging worldwide" on World News); LocalFirst ordering on the story page.
+  - B3 recycled photos (og:image dHash via SkiaSharp, article_photos, RecycledPhotos.Find; C2PA presence).
+  - B5 site networks (shared GA/GTM/AdSense/pixel IDs from read articles, site_signals, RDAP dates;
+    SourceIndependence.NetworkOwners; rules 2026-11-13.3).
+  - #7 story timeline (StoryTimeline, story page section).
+  - WORLD NEWS SEARCH (priority): /admin/world-news/search (WorldNewsFind.razor). WorldNewsFinder merges
+    meaning (event vectors, 7 days) and words (FTS, up to 30 days; WordQuery: stems + whole CVEs);
+    strong vs "loosely related" (0.55); Cyber only (classified or IsCyberHeadline); Find similar
+    (event vector); Watch this search (keyword watches); Cyber in action (72 h) with CyberStatus,
+    CVEs and CISA KEV; FullTextQuery keeps hyphenated words (CVE ids) as phrases.
+  - Not done this round: N5-N15, B10, Logging part 6.
