@@ -11,10 +11,13 @@ public sealed class TrafficIncidentDirectoryService(
     SourceStatusTracker? statusTracker = null,
     IIncidentHistoryRecorder? history = null)
 {
+    public TimeSpan Deadline { get; init; } = SourceDeadline.Default;
+
     public async Task<IReadOnlyList<TrafficIncident>> GetIncidentsInBoundingBoxAsync(BoundingBox bbox, CancellationToken cancellationToken = default)
     {
-        var tasks = providers.Select(provider => FetchSafelyAsync(provider, bbox, cancellationToken));
-        var results = await Task.WhenAll(tasks);
+        var loads = providers.Select(provider => (provider.SourceName, FetchSafelyAsync(provider, bbox, cancellationToken))).ToList();
+        // What has arrived by the deadline; a slow source no longer holds every other one (SourceDeadline).
+        var results = await SourceDeadline.GatherAsync(loads, Deadline, logger, "incidents", cancellationToken);
         var incidents = results.SelectMany(incidents => incidents).Select(IncidentNormalizer.Normalize).ToList();
         // Overwatch's time machine remembers what was seen (in memory; written out in the background).
         history?.Record(incidents);

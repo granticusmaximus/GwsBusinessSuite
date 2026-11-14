@@ -217,6 +217,98 @@ window.tacticalGlobe = (function () {
         return true;
     }
 
+    // Any other render error stops Cesium's render loop for good: the globe froze or went black
+    // until a reload, every layer with it, and nothing was logged (13-11-26: one pin with a size
+    // that wasn't a number did it). Now the error is reported, items with a position or size that
+    // isn't a number are removed, and drawing starts again (at most 3 times a minute).
+    function healRender(containerId, error) {
+        const entry = viewers.get(containerId);
+        if (!entry || entry.viewer.isDestroyed()) return;
+        const reason = error && error.message ? error.message : String(error || '');
+        const now = Date.now();
+        entry.renderHeals = (entry.renderHeals || []).filter(function (t) { return now - t < 60000; });
+        if (entry.renderHeals.length >= 3) {
+            reportGlobeProblem('Overwatch globe stopped drawing and could not recover: ' + reason, error);
+            return;
+        }
+        entry.renderHeals.push(now);
+        queueMicrotask(function () {
+            const viewer = entry.viewer;
+            if (viewer.isDestroyed()) return;
+            const removed = removeUndrawable(viewer);
+            reportGlobeProblem('Overwatch globe stopped drawing (' + reason + '); removed ' + removed + ' item(s) that could not be drawn and started again.', error);
+            viewer.useDefaultRenderLoop = true;
+            viewer.scene.requestRender();
+        });
+    }
+
+    // To the console and to /admin/logs (client-errors.js), so a stopped globe leaves a trace.
+    function reportGlobeProblem(message, error) {
+        console.error(message);
+        if (window.gwsClientLog && typeof window.gwsClientLog.report === 'function') {
+            window.gwsClientLog.report({ origin: 'browser', kind: 'error', message: message, stack: error && error.stack });
+        }
+    }
+
+    function isNumber(value) { return value === undefined || value === null || Number.isFinite(value); }
+
+    function removeUndrawable(viewer) {
+        const time = viewer.clock.currentTime;
+        const read = function (property) {
+            return property && typeof property.getValue === 'function' ? property.getValue(time) : property;
+        };
+        const undrawable = function (entity) {
+            try {
+                const position = read(entity.position);
+                if (position && !(Number.isFinite(position.x) && Number.isFinite(position.y) && Number.isFinite(position.z))) return true;
+                const graphic = entity.billboard || entity.point;
+                if (graphic && ![graphic.width, graphic.height, graphic.scale, graphic.pixelSize].map(read).every(isNumber)) return true;
+                return false;
+            } catch (e) {
+                return true;
+            }
+        };
+        let removed = 0;
+        removed += viewer.entities.values.filter(undrawable).map(function (entity) { return viewer.entities.remove(entity); }).length;
+        // A layer's drawing state can be left broken by the bad item, so each data source is also
+        // taken off the globe and put back, which rebuilds it from its (now good) entities.
+        const sources = [];
+        for (let i = 0; i < viewer.dataSources.length; i++) sources.push(viewer.dataSources.get(i));
+        sources.forEach(function (source) {
+            removed += source.entities.values.filter(undrawable).map(function (entity) { return source.entities.remove(entity); }).length;
+            viewer.dataSources.remove(source, false);
+            viewer.dataSources.add(source);
+        });
+        return removed;
+    }
+
+    // Prevention (13-11-26): every layer adds its items through EntityCollection.add, so an item
+    // whose position or pin size isn't a number is turned away there (and reported once), before
+    // it can stop the globe. The caller gets a detached Entity so its own bookkeeping still works.
+    function guardEntityAdds() {
+        if (!window.Cesium || Cesium.EntityCollection.prototype.__gwsGuarded) return;
+        const add = Cesium.EntityCollection.prototype.add;
+        let reported = false;
+        const finite = function (value) { return value === undefined || value === null || typeof value === 'object' || Number.isFinite(value); };
+        Cesium.EntityCollection.prototype.add = function (entity) {
+            const options = entity || {};
+            const position = options.position instanceof Cesium.Cartesian3 ? options.position : null;
+            const graphic = options.billboard || options.point;
+            const bad = (position && !(Number.isFinite(position.x) && Number.isFinite(position.y) && Number.isFinite(position.z)))
+                || (graphic && !(finite(graphic.width) && finite(graphic.height) && finite(graphic.scale) && finite(graphic.pixelSize)));
+            if (bad) {
+                if (!reported) {
+                    reported = true;
+                    reportGlobeProblem('Overwatch: an item with no usable position or size was left off the map (' + (options.name || options.id || 'unnamed') + ').');
+                }
+                return options instanceof Cesium.Entity ? options : new Cesium.Entity();
+            }
+            return add.apply(this, arguments);
+        };
+        Cesium.EntityCollection.prototype.__gwsGuarded = true;
+    }
+    guardEntityAdds();
+
     function installShaderFallbackListener() {
         if (window.__tacticalGlobeShaderFallbackInstalled) return;
         window.__tacticalGlobeShaderFallbackInstalled = true;
@@ -233,6 +325,7 @@ window.tacticalGlobe = (function () {
     async function init(containerId, dotNetRef, options) {
         const container = document.getElementById(containerId);
         if (!container || viewers.has(containerId)) return;
+        guardEntityAdds();
 
         // Real incident history for this one basemap: it first hit tile.openstreetmap.org
         // directly, which looked fine in every automated check (200 OK, valid PNG, CORS-open)
@@ -329,6 +422,11 @@ window.tacticalGlobe = (function () {
         viewer.scene.logarithmicDepthBuffer = false;
         viewer.scene.fxaa = false;
         viewer.scene.useDepthPicking = false;
+        // Faster imagery (13-11-26, Grant: "laggy rendering images on the globe"): keep 1,000 tiles
+        // in memory rather than Cesium's 100, so panning back doesn't fetch them again, and load the
+        // tiles beside the view so its edges are ready as it moves.
+        viewer.scene.globe.tileCacheSize = 1000;
+        viewer.scene.globe.preloadSiblings = true;
         if (window.__gwsMacCatalystWebView === true) {
             // WebKit's Metal backend rejects Cesium's cosmetic SunTextureFS burst shader. The
             // sun and moon have no tactical value here; hiding them preserves the interactive
@@ -347,7 +445,9 @@ window.tacticalGlobe = (function () {
         const onRenderError = function (scene, error) {
             if (handleShaderFailure(containerId, error)) {
                 console.warn('Overwatch 3D globe unavailable on this GPU/browser; falling back to a non-3D placeholder.', error);
+                return;
             }
+            healRender(containerId, error);
         };
         viewer.scene.renderError.addEventListener(onRenderError);
 
@@ -2359,8 +2459,10 @@ window.tacticalGlobe = (function () {
         });
         current.alpha = 0.75;
         current.show = true;
-        // Start the next frame's tiles loading invisibly so playback doesn't flash empty frames.
-        const nextIndex = index + 1 < radar.frames.length ? index + 1 : null;
+        // Start the next frame's tiles loading invisibly so playback doesn't flash empty frames;
+        // only while playing (13-11-26): a hidden layer still costs a full draw of its tiles,
+        // and a paused radar was paying for two layers on every frame.
+        const nextIndex = radar.timer && index + 1 < radar.frames.length ? index + 1 : null;
         if (nextIndex !== null) {
             const next = ensureRadarLayer(entry, nextIndex);
             next.alpha = 0;
@@ -2381,8 +2483,9 @@ window.tacticalGlobe = (function () {
         const radar = entry.radar;
         if (radar.timer) {
             stopRadarPlayback(radar);
+            // Paused: drop the hidden next-frame layer.
+            if (radar.frames.length > 0) showRadarFrame(entry, radar.index);
         } else {
-            if (radar.index >= radar.frames.length - 1) showRadarFrame(entry, 0);
             let holdAtEnd = 0;
             radar.timer = setInterval(function () {
                 if (radar.index >= radar.frames.length - 1) {
@@ -2394,6 +2497,8 @@ window.tacticalGlobe = (function () {
                     showRadarFrame(entry, radar.index + 1);
                 }
             }, 700);
+            // Now playing: show the start frame and begin loading the next one.
+            showRadarFrame(entry, radar.index >= radar.frames.length - 1 ? 0 : radar.index);
         }
         updateRadarBarState(entry);
     }
@@ -2666,7 +2771,7 @@ window.tacticalGlobe = (function () {
         const reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
         (signals || []).forEach(function (signal) {
             // Bigger for wider coverage (3 outlets ~12px, 50+ ~30px); faded once a story goes quiet.
-            const size = Math.min(30, 8 + Math.log2(Math.max(2, signal.outletCount)) * 4);
+            const size = Math.min(30, 8 + Math.log2(Math.max(2, Number(signal.outletCount) || 2)) * 4);
             const color = Cesium.Color.fromCssColorString('#c77dff').withAlpha(signal.active === false ? 0.45 : 1);
             const billboard = {
                 image: pinBillboardImage,

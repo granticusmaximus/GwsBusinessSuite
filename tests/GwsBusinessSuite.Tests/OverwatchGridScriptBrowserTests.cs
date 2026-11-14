@@ -355,6 +355,26 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
         consoleErrors.Should().BeEmpty();
     }
 
+    // One item whose position wasn't a number stopped Cesium's render loop: the globe went black,
+    // every layer with it, until a reload (13-11-26). Such an item is now left off and reported.
+    [Fact]
+    public async Task ItemWithoutAUsablePosition_ShouldBeLeftOff_AndTheGlobeKeepsDrawing()
+    {
+        var (page, consoleErrors) = await OpenHarnessAsync(fixture.Browser);
+        await using var pageScope = page;
+        (await InitAsync(page)).Should().BeNull();
+
+        await page.EvaluateAsync("""
+            () => window.tacticalGlobe.setRoadWeather([
+                { id: 'bad', name: 'BROKEN', lat: 'not a number', lon: null, surfaceTempF: 30 },
+                { id: 'good', name: 'I-90 PASS', lat: 47.4, lon: -121.4, surfaceTempF: 28 }])
+            """);
+        await page.WaitForTimeoutAsync(1500);
+
+        consoleErrors.Should().Contain(e => e.Contains("left off the map"));
+        consoleErrors.Should().NotContain(e => e.Contains("stopped drawing"));
+    }
+
     // Mac app (13-11-26): the weather panel is page HTML, so it shows in the Mac app too (it was only
     // sent to the native map, which has nothing to draw for it).
     [Fact]

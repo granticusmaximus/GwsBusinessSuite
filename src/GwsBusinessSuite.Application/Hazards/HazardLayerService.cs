@@ -132,17 +132,57 @@ public sealed partial class HazardLayerService(
         CachedAsync($"hazards:gdacs:{eventTypes}", TimeSpan.FromMinutes(15), async () =>
             ParseGdacs(await httpClient.GetStringAsync(GdacsUrl + eventTypes, ct)));
 
-    private Task<IReadOnlyList<HazardFeature>> GetFloodingGaugesAsync(BoundingBox bbox, CancellationToken ct)
+    // Flood gauges (fixed 13-11-26): the view is covered by fixed 6-degree tiles, so every pan and every
+    // viewer reuses the same cached answers. Before, each new view was its own query and a failure
+    // wasn't remembered, so panning re-asked NOAA until it answered 429 (production, 14-11-26) and the
+    // gauges stopped drawing. A failed tile waits 5 minutes; a 429 pauses gauges for 15 (we respect a
+    // refusal). One national query is 12 MB and takes about 40 s, so tiles it is.
+    public const double GaugeTileDegrees = 6;
+    private static readonly TimeSpan GaugeRetryAfter = TimeSpan.FromMinutes(5);
+    private static readonly TimeSpan GaugePause = TimeSpan.FromMinutes(15);
+    private const string GaugePauseKey = "hazards:gauges:paused";
+
+    public static IReadOnlyList<BoundingBox> GaugeTiles(BoundingBox bbox)
     {
-        // Rounded outward to whole degrees so small pans reuse the cached answer.
-        var box = new BoundingBox(Math.Ceiling(bbox.North), Math.Floor(bbox.South), Math.Ceiling(bbox.East), Math.Floor(bbox.West));
-        var key = string.Create(CultureInfo.InvariantCulture, $"hazards:gauges:{box.North}:{box.South}:{box.East}:{box.West}");
-        return CachedAsync(key, TimeSpan.FromMinutes(15), async () =>
+        var tiles = new List<BoundingBox>();
+        for (var south = Math.Floor(bbox.South / GaugeTileDegrees) * GaugeTileDegrees; south < bbox.North; south += GaugeTileDegrees)
+            for (var west = Math.Floor(bbox.West / GaugeTileDegrees) * GaugeTileDegrees; west < bbox.East; west += GaugeTileDegrees)
+                tiles.Add(new BoundingBox(south + GaugeTileDegrees, south, west + GaugeTileDegrees, west));
+        return tiles;
+    }
+
+    private async Task<IReadOnlyList<HazardFeature>> GetFloodingGaugesAsync(BoundingBox bbox, CancellationToken ct)
+    {
+        var tiles = await Task.WhenAll(GaugeTiles(bbox).Select(tile => GaugeTileAsync(tile, ct)));
+        return tiles.SelectMany(tile => tile).DistinctBy(gauge => gauge.Id).ToList();
+    }
+
+    private async Task<IReadOnlyList<HazardFeature>> GaugeTileAsync(BoundingBox tile, CancellationToken ct)
+    {
+        var key = string.Create(CultureInfo.InvariantCulture, $"hazards:gauges:{tile.South}:{tile.West}");
+        if (cache.TryGetValue(key, out IReadOnlyList<HazardFeature>? cached) && cached is not null) return cached;
+        if (cache.TryGetValue(GaugePauseKey, out _)) return [];
+        try
         {
             var url = string.Create(CultureInfo.InvariantCulture,
-                $"{GaugesUrl}?bbox.xmin={box.West}&bbox.ymin={box.South}&bbox.xmax={box.East}&bbox.ymax={box.North}&srid=EPSG_4326");
-            return ParseFloodingGauges(await httpClient.GetStringAsync(url, ct));
-        });
+                $"{GaugesUrl}?bbox.xmin={tile.West}&bbox.ymin={tile.South}&bbox.xmax={tile.East}&bbox.ymax={tile.North}&srid=EPSG_4326");
+            var gauges = ParseFloodingGauges(await httpClient.GetStringAsync(url, ct));
+            cache.Set(key, gauges, TimeSpan.FromMinutes(15));
+            return gauges;
+        }
+        catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.TooManyRequests)
+        {
+            cache.Set(GaugePauseKey, true, GaugePause);
+            logger.LogWarning("Flood gauges: NOAA asked for fewer requests; paused for {Minutes} minutes", GaugePause.TotalMinutes);
+            return [];
+        }
+        catch (Exception ex) when (ex is HttpRequestException or JsonException or TaskCanceledException or KeyNotFoundException or InvalidOperationException
+                                       && !ct.IsCancellationRequested)
+        {
+            cache.Set(key, (IReadOnlyList<HazardFeature>)[], GaugeRetryAfter);
+            logger.LogWarning(ex, "Flood gauges: tile {Key} failed; trying again in {Minutes} minutes", key, GaugeRetryAfter.TotalMinutes);
+            return [];
+        }
     }
 
     private async Task<IReadOnlyList<HazardFeature>> CachedAsync(string key, TimeSpan duration, Func<Task<IReadOnlyList<HazardFeature>>> load)

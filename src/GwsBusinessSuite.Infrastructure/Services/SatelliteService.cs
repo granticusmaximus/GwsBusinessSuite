@@ -116,13 +116,19 @@ public sealed class SatelliteService(HttpClient httpClient, IMemoryCache cache, 
 
     public async Task<SatelliteResult> GetAsync(CancellationToken ct = default)
     {
-        var stations = await ElementsAsync(Stations, ct);
-        var weather = await ElementsAsync(Weather, ct);
-        var resource = await ElementsAsync(Resource, ct);
+        // The five downloads are independent, so they run side by side (13-11-26): a cold start
+        // waited for each in turn and the layer took 10-20 s to appear.
+        var stationsTask = ElementsAsync(Stations, ct);
+        var weatherTask = ElementsAsync(Weather, ct);
+        var resourceTask = ElementsAsync(Resource, ct);
+        var timesTask = ImageryTimesAsync(ct);
+        var crewTask = CrewAsync(ct);
+        await Task.WhenAll(stationsTask, weatherTask, resourceTask, timesTask, crewTask);
+        var (stations, weather, resource) = (stationsTask.Result, weatherTask.Result, resourceTask.Result);
         if (stations.Elements.Count == 0 && weather.Elements.Count == 0 && resource.Elements.Count == 0)
             return new SatelliteResult([], null, "CelesTrak's orbital elements couldn't be reached just now.");
-        var times = await ImageryTimesAsync(ct);
-        var crew = await CrewAsync(ct);
+        var times = timesTask.Result;
+        var crew = crewTask.Result;
         var now = time.GetUtcNow();
         // The stations group is propagated whole so the ISS keeps the modules docked to it.
         var satellites = Positions(stations.Elements, StationGroup, now.UtcDateTime, withPaths: true)

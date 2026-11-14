@@ -129,3 +129,19 @@ Decisions (Grant, 13-11-26, as recommended):
     adapter now runs it on the page too (MacApp_ShouldShowTheWeatherPanel browser test).
   - Not checked with live data: SHADE COUNTRIES (local copy has no placed stories) and LIVE FLOW (no
     TomTom key locally); both covered by NativeShapesTests and the Mac build.
+- 13/14-11-26 PIXEL CHECK (Grant: features not rendering, zoomed in or out; app laggy):
+  - Method: Playwright screenshots the map with each layer off and on (open map area only), counts
+    changed pixels, frame rate and data time, in 5 views (US wide, Atlanta close, world, Montana,
+    Finland); plus production's "Overwatch layer took" log.
+  - Production timing (before): incidents and city traffic 30.0 s (a hung source; layer drew nothing
+    until then), hazards 10-25 s (flood gauges: NOAA 429s and 25 s timeouts), cameras 5-12 s.
+  - Fixed: SourceDeadline (cameras and incidents draw what arrived in 6 s; late sources finish in the
+    background), flood gauges in fixed 6-degree tiles with remembered failures and a 15-min pause on
+    429, satellites' five downloads in parallel, globe tile cache 1,000 + sibling preload, radar
+    preloads its next frame only while playing.
+  - Found: one item with a position or size that isn't a number stopped Cesium's render loop for
+    good (black globe, every layer, nothing logged). Now EntityCollection.add turns such items away
+    (reported to /admin/logs), and a render error heals (bad items removed, data sources rebuilt,
+    drawing restarted, at most 3 a minute) and is reported.
+  - Verified rendering: every layer with data in view draws (aurora faint at low Kp: correct); World
+    News and country shading checked with direct payloads (local copy has no placed stories).
