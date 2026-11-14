@@ -107,6 +107,33 @@ public sealed class NwsAlertsServiceTests
         result.Select(a => a.Id).Should().NotContain("urn:oid:zone-only-alert");
     }
 
+    // Most alerts come by zone with no outline (13-11-26: all 301 active); their zones' outlines are
+    // fetched (thinned), kept, and only api.weather.gov zone links are followed.
+    [Fact]
+    public async Task GetActiveAlertsAsync_ShouldDrawZoneOnlyAlerts_FromTheirZonesOutlines()
+    {
+        const string alerts = """
+            {"features":[{"id":"z1","geometry":null,"properties":{"id":"z1","event":"Wind Advisory","severity":"Moderate","areaDesc":"Fulton",
+              "affectedZones":["https://api.weather.gov/zones/forecast/GAZ033","https://evil.example/zones/forecast/X","https://api.weather.gov/zones/county/GAC121"]}}]}
+            """;
+        var ring = string.Join(",", Enumerable.Range(0, 500).Select(i => $"[{-84.6 + i * 0.0008:0.0000},{33.6 + (i % 2) * 0.3:0.0000}]"));
+        var zone = "{\"geometry\":{\"type\":\"Polygon\",\"coordinates\":[[" + ring + "]]}}";
+        var requested = new System.Collections.Concurrent.ConcurrentBag<string>();
+        var service = CreateService(request =>
+        {
+            requested.Add(request.RequestUri!.AbsoluteUri);
+            return JsonResponse(request.RequestUri.AbsolutePath.StartsWith("/zones/", StringComparison.Ordinal) ? zone : alerts);
+        });
+
+        var result = await service.GetActiveAlertsAsync(new BoundingBox(34.5, 33, -83.5, -85.5));
+
+        var alert = result.Should().ContainSingle().Subject;
+        alert.Rings.Should().HaveCount(2, "one outline from each api.weather.gov zone");
+        alert.Rings.Should().OnlyContain(r => r.Count <= NwsAlertsService.MaxRingVertices + 1);
+        requested.Should().NotContain(u => u.Contains("evil.example"));
+        requested.Count(u => u.Contains("/zones/")).Should().Be(2);
+    }
+
     [Fact]
     public async Task GetActiveAlertsAsync_ShouldCacheTheNationwideList_AcrossCallsWithDifferentBoundingBoxes()
     {

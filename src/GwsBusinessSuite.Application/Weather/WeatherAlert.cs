@@ -1,8 +1,7 @@
 namespace GwsBusinessSuite.Application.Weather;
 
-// A single active NWS severe weather alert with a real polygon to draw - alerts issued against
-// UGC zone codes only (no precise polygon) are filtered out upstream (see NwsAlertsService)
-// since there's nothing to render for them without a separate zone-to-shape lookup.
+// A single active NWS alert and the areas to draw: its own polygon, or (since 13-11-26) for an
+// alert issued by zone, its zones' outlines from api.weather.gov/zones (see NwsAlertsService).
 public sealed record WeatherAlert(
     string Id,
     string Event,

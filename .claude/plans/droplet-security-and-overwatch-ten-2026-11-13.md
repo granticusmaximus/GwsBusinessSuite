@@ -117,3 +117,15 @@ Decisions (Grant, 13-11-26, as recommended):
     machine (one object of lists). Partly drawn, fixed: POWER OUTAGES areas (flat rings), SATELLITES
     orbits (lon,lat,height; split at the date line), CONVERGENCE squares.
   - Needs a Mac app update (installer / Check for Updates) as well as the server deploy.
+  - Verified with real payloads through NativeShapes: every toggle with data draws (cameras 1,500;
+    incidents; city traffic 4,000 roads; conflict 905; hazards 295; fires 1,500; power outages 29 + 54
+    areas; convergence 18 squares; aurora 103 areas; satellites + ISS orbit; road temps 36 and signs 41
+    in Montana; ships off Finland; alerts 12 / 483 zone areas). Shapes grouped into one multi-polygon
+    and one multi-line overlay per layer (MapKit speed).
+  - ALERTS drew nothing on the web or the Mac: NWS issues almost all alerts by zone with no outline
+    (301 active, 0 with geometry). NwsAlertsService now fetches affected zones' outlines (cached 7 days,
+    150 new zones a refresh, thinned to 120 corners).
+  - Weather panel never showed in the Mac app (setWeatherSnapshot only went to the native map): the
+    adapter now runs it on the page too (MacApp_ShouldShowTheWeatherPanel browser test).
+  - Not checked with live data: SHADE COUNTRIES (local copy has no placed stories) and LIVE FLOW (no
+    TomTom key locally); both covered by NativeShapesTests and the Mac build.
