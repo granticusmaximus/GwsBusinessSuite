@@ -107,3 +107,13 @@ Decisions (Grant, 13-11-26, as recommended):
     when Grant moved the priority to World News search: NOT DONE. Known Mac gap from reading the bridge:
     power outage polygons ("rings") aren't drawn natively (points are).
   - Not done: #3 file split, #5 Mac batching, #9 situation room.
+- 13-11-26 MAC MAP CHECK (Grant: every Layers toggle must render on the Mac's MapKit map):
+  - Method: Playwright drives every toggle with the Mac adapter on (macApp stand-in), saves each
+    page->Mac message, and runs it through NativeShapes (the bridge's reader, now shared in
+    Application/Overwatch so it's tested: NativeShapesTests, 26 with the contract tests).
+  - Found and fixed (drew nothing on the Mac): ALERTS (rings), CITY TRAFFIC (multi-part paths + live
+    speeds as a 2nd list), AURORA (grid), LIVE FLOW (signed-in tiles: SignedInTileOverlay with the web
+    view's cookies), SHADE COUNTRIES (no coordinates: server now sends the country centre), time
+    machine (one object of lists). Partly drawn, fixed: POWER OUTAGES areas (flat rings), SATELLITES
+    orbits (lon,lat,height; split at the date line), CONVERGENCE squares.
+  - Needs a Mac app update (installer / Check for Updates) as well as the server deploy.

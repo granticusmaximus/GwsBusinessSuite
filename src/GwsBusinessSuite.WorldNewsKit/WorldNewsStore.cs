@@ -1309,6 +1309,21 @@ public sealed class WorldNewsStore
         return hits;
     }
 
+    // Which of these report ids World News holds, and in which story.
+    public IReadOnlyDictionary<string, string> EventsForArticles(IEnumerable<string> articleIds)
+    {
+        var ids = articleIds.Distinct(StringComparer.Ordinal).Take(500).ToList();
+        var events = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (ids.Count == 0) return events;
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = $"SELECT id, event_id FROM articles WHERE event_id IS NOT NULL AND id IN ({string.Join(",", ids.Select((_, i) => "$p" + i))})";
+        for (var i = 0; i < ids.Count; i++) command.Parameters.AddWithValue("$p" + i, ids[i]);
+        using var reader = command.ExecuteReader();
+        while (reader.Read()) events[reader.GetString(0)] = reader.GetString(1);
+        return events;
+    }
+
     // A story's own vector (for "find similar"), or null once released.
     public float[]? EventVector(string eventId)
     {

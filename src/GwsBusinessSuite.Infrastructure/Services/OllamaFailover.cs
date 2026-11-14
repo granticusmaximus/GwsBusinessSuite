@@ -60,6 +60,9 @@ public sealed class OllamaFailoverMonitor : BackgroundService
     public bool SecondaryUp { get { lock (_gate) return _secondaryUp; } }
     public DateTimeOffset? PrimaryChangedAt { get { lock (_gate) return _primary.ChangedAt; } }
 
+    // Raised (true) when the Mac comes back and (false) when it's marked down.
+    public event Action<bool>? PrimaryChanged;
+
     // Cancelled the moment the Mac is marked down; replaced when it comes back.
     public CancellationToken PrimaryLostToken { get { lock (_gate) return _primaryLost.Token; } }
 
@@ -95,6 +98,13 @@ public sealed class OllamaFailoverMonitor : BackgroundService
         }
         _logger.LogWarning(error, "SentinelGPT's Mac stopped answering; the AI droplet takes over until it's back");
         lost.Cancel();
+        Raise(false);
+    }
+
+    private void Raise(bool up)
+    {
+        try { PrimaryChanged?.Invoke(up); }
+        catch (Exception ex) { _logger.LogDebug(ex, "A PrimaryChanged handler failed"); }
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -140,8 +150,13 @@ public sealed class OllamaFailoverMonitor : BackgroundService
         {
             _logger.LogWarning("SentinelGPT's Mac stopped answering; the AI droplet takes over until it's back");
             lost!.Cancel();
+            Raise(false);
         }
-        else if (cameBack == true) _logger.LogInformation("SentinelGPT's Mac is back; it answers first again");
+        else if (cameBack == true)
+        {
+            _logger.LogInformation("SentinelGPT's Mac is back; it answers first again");
+            Raise(true);
+        }
         if (!secondaryAnswered && changed) _logger.LogWarning("The AI droplet isn't answering");
 
         if (changed || _probes++ % TagsEveryProbes == 0)

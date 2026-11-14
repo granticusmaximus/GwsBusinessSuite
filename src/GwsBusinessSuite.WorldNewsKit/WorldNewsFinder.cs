@@ -29,6 +29,11 @@ public sealed record FoundStory(
 
 public sealed record FindResult(string Query, IReadOnlyList<FoundStory> Stories, string? Note);
 
+// The wider search's worldwide part: a GDELT report, and the World News story holding it, if any.
+public sealed record WorldwideReport(WorldArticle Report, string? EventId);
+
+public sealed record WorldwideResult(IReadOnlyList<WorldwideReport> Reports, string? Note);
+
 public static partial class WorldNewsFinder
 {
     public const double MinSimilarity = 0.45;
@@ -56,6 +61,34 @@ public static partial class WorldNewsFinder
         return string.Join(' ', text.Split(' ', StringSplitOptions.RemoveEmptyEntries).Select(word =>
             Cve().IsMatch(word) ? $"\"{word.ToUpperInvariant()}\""
             : word.Count(char.IsLetterOrDigit) >= 4 && word.All(char.IsLetterOrDigit) ? word + "*" : word));
+    }
+
+    // The words as GDELT's DOC API takes them: it refuses words under three letters and some
+    // punctuation, so those are dropped; quoted phrases and OR are kept; a CVE id is quoted.
+    public static string? GdeltQuery(string query)
+    {
+        var parts = new List<string>();
+        foreach (Match m in GdeltToken().Matches(query))
+        {
+            var token = m.Value;
+            if (token.StartsWith('"'))
+            {
+                var phrase = token.Trim('"').Trim();
+                if (phrase.Length >= 3) parts.Add($"\"{phrase}\"");
+            }
+            else if (token == "OR") { if (parts.Count > 0 && parts[^1] != "OR") parts.Add("OR"); }
+            else if (Cve().IsMatch(token)) parts.Add($"\"{token.ToUpperInvariant()}\"");
+            else
+            {
+                var word = new string(token.Where(c => char.IsLetterOrDigit(c) || c is '-' or '\'').ToArray()).Trim('-', '\'');
+                if (word.Length >= 3 && word is not ("AND" or "NOT")) parts.Add(word);
+            }
+        }
+        while (parts.Count > 0 && parts[^1] == "OR") parts.RemoveAt(parts.Count - 1);
+        while (parts.Count > 0 && parts[0] == "OR") parts.RemoveAt(0);
+        if (parts.Count == 0) return null;
+        // GDELT needs OR'd terms in parentheses.
+        return parts.Contains("OR") ? "(" + string.Join(' ', parts) + ")" : string.Join(' ', parts);
     }
 
     public static bool IsCyberQuery(string query) => CyberWords().IsMatch(query) || Cve().IsMatch(query);
@@ -93,6 +126,9 @@ public static partial class WorldNewsFinder
 
     [GeneratedRegex(@"\b(cyber[- ]?(attack|attacks|attacked|crime|criminals?|espionage|incident|breach)|ransomware|malware|spyware|data breach|breach(ed)? (of )?(customer|patient|user|personal) data|hack(ed|ers?|ing)\b|ddos|phishing|zero[- ]day|data leak|leak site|botnet|wiper|infostealer|exploited (flaw|vulnerability|bug))", RegexOptions.IgnoreCase)]
     private static partial Regex CyberHeadline();
+
+    [GeneratedRegex("\"[^\"]*\"?|\\S+")]
+    private static partial Regex GdeltToken();
 
     [GeneratedRegex(@"\b(AND|OR|NOT)\b")]
     private static partial Regex Operator();

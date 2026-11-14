@@ -2252,6 +2252,10 @@
             code = t.Code,
             name = t.Name,
             outlets = t.Outlets,
+            // The country's centre, so the Mac's native map (which has no country shapes) can pin it.
+            lat = GwsBusinessSuite.Infrastructure.Services.WorldNewsPlaces.Instance.Country(t.Code)?.Latitude,
+            lon = GwsBusinessSuite.Infrastructure.Services.WorldNewsPlaces.Instance.Country(t.Code)?.Longitude,
+            title = $"{t.Name}: {t.Outlets} outlets",
             stories = t.Stories.Select(story => new { id = story.Id, title = story.Title }).ToList()
         }).ToList());
     }

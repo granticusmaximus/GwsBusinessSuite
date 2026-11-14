@@ -50,6 +50,15 @@ public sealed class WorldNewsFinderTests : IDisposable
     }
 
     [Theory]
+    [InlineData("ransomware at a hospital", "ransomware hospital")]
+    [InlineData("\"port strike\" OR walkout", "(\"port strike\" OR walkout)")]
+    [InlineData("Ivanti cve-2025-0282", "Ivanti \"CVE-2025-0282\"")]
+    [InlineData("a an to", null)]
+    [InlineData("OR hack OR", "hack")]
+    public void GdeltQuery_ShouldDropShortWordsAndBracketOrs(string query, string? expected) =>
+        Assert.Equal(expected, WorldNewsFinder.GdeltQuery(query));
+
+    [Theory]
     [InlineData("ransomware hospital", true)]
     [InlineData("data breach at airline", true)]
     [InlineData("CVE-2026-1234", true)]

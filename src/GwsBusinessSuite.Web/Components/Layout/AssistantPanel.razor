@@ -17,6 +17,7 @@
 @inject ICurrentUserAccessor CurrentUserAccessor
 @inject NavigationManager Navigation
 @inject IJSRuntime JS
+@inject GwsBusinessSuite.Infrastructure.Services.SentinelModelLoader ModelLoader
 @inject Microsoft.Extensions.Options.IOptions<GwsBusinessSuite.Application.Abstractions.ServerAiOptions> ServerAi
 
 @* One SentinelGPT panel for every admin page. Since 30-10-26 it's an agent: asked to do
@@ -214,7 +215,7 @@
                     <i class="bi bi-mic" aria-hidden="true"></i><span class="visually-hidden">Dictate</span>
                 </button>
                 <div class="form-check form-switch gws-assistant-deep" title="Before answering, two adviser models on your Mac (Qwen, DeepSeek) give a second opinion. Slower.">
-                    <input class="form-check-input" type="checkbox" role="switch" id="gws-assistant-deep" @bind="_deepAnalysis" disabled="@_busy" />
+                    <input class="form-check-input" type="checkbox" role="switch" id="gws-assistant-deep" @bind="_deepAnalysis" @bind:after="DeepAnalysisChanged" disabled="@_busy" />
                     <label class="form-check-label" for="gws-assistant-deep">Deep Analysis</label>
                 </div>
             </div>
@@ -245,6 +246,12 @@
     private readonly List<AssistantAttachments.Attachment> _attached = [];
     private string? _attachProblem;
     private bool _deepAnalysis;
+
+    // Deep Analysis's advisers load on the Mac as soon as it's switched on, not at the first question.
+    private void DeepAnalysisChanged()
+    {
+        if (_deepAnalysis) ModelLoader.DeepAnalysisOn();
+    }
     private bool _open;
     private bool _busy;
     private string _input = string.Empty;
@@ -301,6 +308,8 @@
             return;
         }
         RightPanels.NotifyAssistantOpened();
+        // Load SentinelGPT's model where it will run while the question is being typed.
+        ModelLoader.SentinelOpened();
         await RefreshSelectionAsync();
     }
 

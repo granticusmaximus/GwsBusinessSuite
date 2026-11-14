@@ -355,6 +355,26 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
         consoleErrors.Should().BeEmpty();
     }
 
+    // Mac app (13-11-26): the weather panel is page HTML, so it shows in the Mac app too (it was only
+    // sent to the native map, which has nothing to draw for it).
+    [Fact]
+    public async Task MacApp_ShouldShowTheWeatherPanel_AndStillTellTheNativeMap()
+    {
+        var (page, consoleErrors) = await OpenHarnessAsync(fixture.Browser, macApp: true);
+        await using var pageScope = page;
+        (await InitAsync(page)).Should().BeNull();
+
+        await page.EvaluateAsync("""
+            () => window.tacticalGlobe.setWeatherSnapshot('tg-viewport', {
+                currentTemperatureFahrenheit: 61, currentConditions: 'Cloudy', forecastTemperatureFahrenheit: 64,
+                chanceOfPrecipitationPercent: 20, windDirection: 'NW', windSpeed: '8 mph', shortForecast: 'Mostly cloudy' })
+            """);
+
+        await page.WaitForSelectorAsync(".tg-weather-panel:has-text('61°F')", new PageWaitForSelectorOptions { Timeout = 5000 });
+        (await page.EvaluateAsync<bool>("() => window.__nativeMessages.some(m => m.operation === 'setWeatherSnapshot')")).Should().BeTrue();
+        consoleErrors.Should().BeEmpty();
+    }
+
     // Mac app (12-11-26): a native pin click opens what the same click opens on the Cesium globe.
     // Ships aren't clickable there, so not here either; aircraft open their window (it needed a
     // Cesium viewer before), and select mode adds cameras to the watch wall.

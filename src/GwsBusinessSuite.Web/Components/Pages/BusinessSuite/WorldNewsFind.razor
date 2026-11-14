@@ -12,6 +12,8 @@
 @inject ICurrentUserAccessor CurrentUserAccessor
 @inject NavigationManager Navigation
 @inject ILogger<WorldNewsFind> Logger
+@inject IOllamaWebSearchService WebSearch
+@inject GwsBusinessSuite.Infrastructure.WebCrawl.WebCrawler Crawler
 
 @* World News search (13-11-26, Grant's priority): any term or question, and every story with
    similar reports, by meaning and by words. Cyber in action: attacks and breaches in the news now,
@@ -104,6 +106,119 @@ else if (_result is { } result)
     </section>
 }
 
+
+@if (_wider is { } wider && _similarTo is null && !_busy)
+{
+    @* Wider search (13-11-26): the same words beyond World News' own reports. Each source is asked
+       once per search (nothing runs in the background), and nothing here visits a news site. *@
+    <section class="card border-0 shadow-sm mb-3" aria-labelledby="find-wider">
+        <div class="card-header find-head">
+            <strong id="find-wider"><i class="bi bi-globe2 me-1" aria-hidden="true"></i>Wider search</strong>
+            <small class="text-secondary">beyond the outlets World News follows</small>
+        </div>
+        <div class="card-body find-wider">
+            <h3 class="find-wider-heading">Worldwide coverage <small>GDELT: outlets in 65 languages, @RangeLabel(Math.Min(_days, 90))</small></h3>
+            @if (wider.Worldwide is not { } worldwide)
+            {
+                <LoadingIndicator Message="Asking GDELT…" CssClass="py-2" />
+            }
+            else
+            {
+                @if (worldwide.Note is { } gdeltNote) { <p class="small text-secondary">@gdeltNote</p> }
+                @if (worldwide.Reports.Count == 0 && worldwide.Note is null) { <p class="small text-secondary">No worldwide reports for these words.</p> }
+                <ul class="find-wide-list">
+                    @foreach (var hit in worldwide.Reports.Take(_worldwideShown))
+                    {
+                        <li @key="hit.Report.Id">
+                            <a href="@hit.Report.Url" target="_blank" rel="noopener noreferrer nofollow">@hit.Report.Title</a>
+                            <span class="find-meta">
+                                <span>@hit.Report.Outlet</span>
+                                @if (hit.Report.Language.Length > 0) { <span>@hit.Report.Language</span> }
+                                @if (hit.Report.Country.Length > 0) { <span>@hit.Report.Country</span> }
+                                <span>@hit.Report.SeenAt.ToLocalGwsDateTime()</span>
+                                @if (hit.EventId is { } eventId) { <a href="@StoryHref(eventId)">In World News</a> }
+                            </span>
+                        </li>
+                    }
+                </ul>
+                @if (worldwide.Reports.Count > _worldwideShown)
+                {
+                    <button type="button" class="btn btn-sm btn-link p-0" @onclick="() => _worldwideShown += 25">Show more (@(worldwide.Reports.Count - _worldwideShown) more)</button>
+                }
+            }
+
+            <h3 class="find-wider-heading">On the web <small>news results from this app's own search engine</small></h3>
+            @if (wider.Web is not { } web)
+            {
+                <LoadingIndicator Message="Searching the web…" CssClass="py-2" />
+            }
+            else if (web.Count == 0)
+            {
+                <p class="small text-secondary">@(wider.WebNote ?? "No web results for these words.")</p>
+            }
+            else
+            {
+                <ul class="find-wide-list">
+                    @foreach (var hit in web)
+                    {
+                        <li @key="hit.Url">
+                            <a href="@hit.Url" target="_blank" rel="noopener noreferrer nofollow">@hit.Title</a>
+                            <span class="find-meta"><span>@Host(hit.Url)</span></span>
+                            @if (hit.Content.Length > 0) { <span class="find-snippet">@Clip(hit.Content)</span> }
+                        </li>
+                    }
+                </ul>
+            }
+
+            <h3 class="find-wider-heading">Media Watch archive <small>pages Media Watch's crawler has already kept</small></h3>
+            @if (wider.Archive is not { } archive)
+            {
+                <LoadingIndicator Message="Searching the archive…" CssClass="py-2" />
+            }
+            else if (archive.Count == 0)
+            {
+                <p class="small text-secondary">Nothing in the Media Watch archive for these words.</p>
+            }
+            else
+            {
+                <ul class="find-wide-list">
+                    @foreach (var hit in archive)
+                    {
+                        <li @key="hit.Url">
+                            <a href="@hit.Url" target="_blank" rel="noopener noreferrer nofollow">@hit.Title</a>
+                            <span class="find-meta"><span>@hit.Host</span><span>@((hit.PublishedAt ?? hit.FetchedAt).ToLocalGwsDateTime())</span></span>
+                            @if (hit.Snippet.Length > 0) { <span class="find-snippet">@Clip(hit.Snippet)</span> }
+                        </li>
+                    }
+                </ul>
+            }
+
+            @if (wider.Cves is { } cves)
+            {
+                <h3 class="find-wider-heading">Vulnerabilities <small>CVEs published in the last 30 days that match (NVD)</small></h3>
+                @if (cves.Count == 0)
+                {
+                    <p class="small text-secondary">@(wider.CveNote ?? "No recent CVEs match these words.")</p>
+                }
+                else
+                {
+                    <ul class="find-wide-list">
+                        @foreach (var cve in cves)
+                        {
+                            <li @key="cve.CveId">
+                                <a href="@($"https://nvd.nist.gov/vuln/detail/{cve.CveId}")" target="_blank" rel="noopener noreferrer"><strong>@cve.CveId</strong></a>
+                                @if (cve.CvssSeverity is { } severity) { <span class="find-badge">@severity @(cve.CvssScore?.ToString("0.0"))</span> }
+                                @if (_kevIds.Contains(cve.CveId)) { <span class="find-badge find-kev-hit">exploited</span> }
+                                @if (cve.Description is { Length: > 0 } description) { <span class="find-snippet">@Clip(description)</span> }
+                            </li>
+                        }
+                    </ul>
+                }
+            }
+        </div>
+    </section>
+}
+
 @if (_cyber is not null && (_result is null || _cyberOnly))
 {
     <section class="card border-0 shadow-sm mb-3" aria-labelledby="find-cyber">
@@ -179,6 +294,56 @@ else if (_result is { } result)
     private string? _username;
     private bool _watched;
     private string? _watchError;
+    private Wider? _wider;
+    private int _worldwideShown = 25;
+
+    // The wider search's parts, each filled in as its source answers.
+    private sealed class Wider
+    {
+        public WorldwideResult? Worldwide;
+        public IReadOnlyList<OllamaWebSearchResult>? Web;
+        public string? WebNote;
+        public IReadOnlyList<GwsBusinessSuite.Application.NewsIntelligence.WebSearchHit>? Archive;
+        public IReadOnlyList<CveSummary>? Cves;
+        public string? CveNote;
+    }
+
+    private void StartWider(string query)
+    {
+        var wider = _wider = new Wider();
+        _worldwideShown = 25;
+        var token = _cts.Token;
+        _ = Fill(async () => wider.Worldwide = await News.WorldwideAsync(query, _days, token),
+            () => wider.Worldwide = new WorldwideResult([], "GDELT couldn't be reached just now."));
+        _ = Fill(async () =>
+        {
+            if (!WebSearch.IsConfigured) { wider.Web = []; wider.WebNote = "Web search isn't set up on this server."; return; }
+            // "!news" asks the search engine for its news category.
+            wider.Web = (await WebSearch.SearchAsync("!news " + query, 15, token)).Where(r => r.Url.StartsWith("http", StringComparison.Ordinal)).ToList();
+        }, () => { wider.Web = []; wider.WebNote = "The web search didn't answer just now."; });
+        _ = Fill(async () => wider.Archive = await Crawler.SearchAsync(query, 15, token), () => wider.Archive = []);
+        if (_cyberOnly || WorldNewsFinder.IsCyberQuery(query))
+        {
+            wider.Cves = null;
+            _ = Fill(async () => wider.Cves = await Vulnerabilities.SearchRecentCvesAsync(query, 30, token),
+                () => { wider.Cves = []; wider.CveNote = "NVD didn't answer just now (it limits requests)."; });
+        }
+
+        async Task Fill(Func<Task> load, Action failed)
+        {
+            try { await load(); }
+            catch (OperationCanceledException) { return; }
+            catch (Exception ex) when (ex is not ObjectDisposedException)
+            {
+                Logger.LogInformation(ex, "World News wider search: a source failed");
+                failed();
+            }
+            try { await InvokeAsync(StateHasChanged); } catch (ObjectDisposedException) { }
+        }
+    }
+
+    private static string Host(string url) => Uri.TryCreate(url, UriKind.Absolute, out var uri) ? uri.Host.Replace("www.", string.Empty) : url;
+    private static string Clip(string text) => text.Length <= 220 ? text : text[..220].TrimEnd() + "…";
 
     protected override async Task OnInitializedAsync()
     {
@@ -189,7 +354,11 @@ else if (_result is { } result)
         _similarTo = string.IsNullOrWhiteSpace(SimilarParameter) ? null : SimilarParameter;
         var cyber = LoadCyberAsync();
         if (_similarTo is not null) await RunAsync(() => News.SimilarToAsync(_similarTo, _cts.Token));
-        else if (_query.Length > 0) await RunAsync(() => News.FindAsync(_query, _days, _cyberOnly ? SituationKinds.Cyber : null, _cts.Token));
+        else if (_query.Length > 0)
+        {
+            StartWider(_query);
+            await RunAsync(() => News.FindAsync(_query, _days, _cyberOnly ? SituationKinds.Cyber : null, _cts.Token));
+        }
         await cyber;
     }
 
@@ -226,6 +395,7 @@ else if (_result is { } result)
         _query = _query.Trim();
         // A CVE or a cyber word with "All stories" still searches everything; the chip narrows.
         UpdateAddress();
+        StartWider(_query);
         await RunAsync(() => News.FindAsync(_query, _days, _cyberOnly ? SituationKinds.Cyber : null, _cts.Token));
     }
 
@@ -311,6 +481,7 @@ else if (_result is { } result)
     private async Task FindSimilarAsync(string eventId)
     {
         _similarTo = eventId;
+        _wider = null;
         Navigation.NavigateTo(Navigation.GetUriWithQueryParameters(new Dictionary<string, object?> { ["similar"] = eventId, ["q"] = null }), replace: true);
         await RunAsync(() => News.SimilarToAsync(eventId, _cts.Token));
     }

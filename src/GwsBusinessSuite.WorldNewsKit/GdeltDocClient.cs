@@ -16,6 +16,8 @@ public sealed class GdeltDocClient(HttpClient http, TimeProvider time, Func<Time
     public static readonly TimeSpan Spacing = TimeSpan.FromSeconds(6);
     public static readonly TimeSpan Cooldown = TimeSpan.FromMinutes(15);
     public static readonly TimeSpan MaxLookback = TimeSpan.FromHours(24);
+    // A person's search may look back further: the DOC API covers the last three months.
+    public static readonly TimeSpan SearchLookback = TimeSpan.FromDays(90);
     private const string Url = "https://api.gdeltproject.org/api/v2/doc/doc";
 
     private readonly SemaphoreSlim _gate = new(1, 1);
@@ -26,7 +28,12 @@ public sealed class GdeltDocClient(HttpClient http, TimeProvider time, Func<Time
     public bool IsCoolingDown => time.GetUtcNow() < _coolingUntil;
 
     // Articles GDELT has seen since `since` (at most a day back, 250 per call, newest first).
-    public async Task<GdeltResult> SearchAsync(string query, DateTimeOffset since, CancellationToken ct)
+    public Task<GdeltResult> SearchAsync(string query, DateTimeOffset since, CancellationToken ct) =>
+        SearchAsync(query, since, ct, MaxLookback, "datedesc", 250);
+
+    // World News search (13-11-26): one request per search, through the same paced gate, ranked by
+    // relevance and recency, looking back as far as the person chose (up to three months).
+    public async Task<GdeltResult> SearchAsync(string query, DateTimeOffset since, CancellationToken ct, TimeSpan maxLookback, string sort, int maxRecords)
     {
         if (IsCoolingDown) return new([], "GDELT asked for fewer requests; it's paused for a while.");
         await _gate.WaitAsync(ct);
@@ -35,9 +42,9 @@ public sealed class GdeltDocClient(HttpClient http, TimeProvider time, Func<Time
             var wait = _lastCall + Spacing - time.GetUtcNow();
             if (wait > TimeSpan.Zero) await _delay(wait, ct);
             var now = time.GetUtcNow();
-            var start = since < now - MaxLookback ? now - MaxLookback : since;
+            var start = since < now - maxLookback ? now - maxLookback : since;
             var url = string.Create(CultureInfo.InvariantCulture,
-                $"{Url}?query={Uri.EscapeDataString(query)}&mode=artlist&maxrecords=250&format=json&sort=datedesc&startdatetime={start.UtcDateTime:yyyyMMddHHmmss}");
+                $"{Url}?query={Uri.EscapeDataString(query)}&mode=artlist&maxrecords={Math.Clamp(maxRecords, 1, 250)}&format=json&sort={Uri.EscapeDataString(sort)}&startdatetime={start.UtcDateTime:yyyyMMddHHmmss}");
             using var response = await http.GetAsync(url, ct);
             _lastCall = time.GetUtcNow();
             if (response.StatusCode == HttpStatusCode.TooManyRequests)

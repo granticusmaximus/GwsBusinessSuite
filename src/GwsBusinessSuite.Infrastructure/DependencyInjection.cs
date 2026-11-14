@@ -165,6 +165,8 @@ public static class DependencyInjection
         {
             // Fails closed like DisabledOllamaService, except shared work, which runs on an Admin's Mac.
             services.AddSingleton<IOllamaService, MacRelayOllamaService>();
+            // No server model to load; the loader stays switched off (Enabled is false).
+            services.AddSingleton<SentinelModelLoader>();
         }
         else if (configuration.GetSection(ServerAiOptions.SectionName).Get<ServerAiOptions>() is { HasFailover: true } failover)
         {
@@ -196,6 +198,11 @@ public static class DependencyInjection
                     monitor, sp.GetRequiredService<ILogger<FailoverOllamaService>>());
             });
             services.AddHostedService<OllamaModelWarmupBackgroundService>();
+            // Lazy model loading on the connection that will answer (SentinelModelLoader).
+            services.AddSingleton(sp => new SentinelModelLoader(sp.GetRequiredService<IHttpClientFactory>(), sp.GetRequiredService<IServiceScopeFactory>(),
+                sp.GetRequiredService<ILogger<SentinelModelLoader>>(), sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<ServerAiOptions>>(),
+                sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<ContentStudioOptions>>(), sp.GetService<TimeProvider>(),
+                sp.GetRequiredService<OllamaFailoverMonitor>()));
         }
         else
         {
@@ -219,6 +226,13 @@ public static class DependencyInjection
                 });
             });
             services.AddHostedService<OllamaModelWarmupBackgroundService>();
+            services.AddHttpClient(SentinelModelLoader.SingleClient, (serviceProvider, client) =>
+            {
+                var options = serviceProvider.GetRequiredService<Microsoft.Extensions.Options.IOptions<ContentStudioOptions>>().Value;
+                client.BaseAddress = new Uri((string.IsNullOrWhiteSpace(options.BaseUrl) ? ContentStudioOptions.DefaultBaseUrl : options.BaseUrl).TrimEnd('/') + "/");
+                client.Timeout = TimeSpan.FromMinutes(5);
+            });
+            services.AddSingleton<SentinelModelLoader>();
             services.AddHttpClient(OllamaWatchdogBackgroundService.HttpClientName, client => client.Timeout = TimeSpan.FromSeconds(10));
             services.AddHostedService<OllamaWatchdogBackgroundService>();
         }

@@ -92,7 +92,9 @@ public sealed partial class WorldNewsService : IDisposable
             PausedFeeds = () => Store.PausedFeeds(),
             EmbedSlot = workloads is null ? null : ct => workloads.AcquireAsync(OllamaWorkloadPriority.Background, ct).AsTask()
         };
-        _pipeline = new WorldNewsPipeline(Store, http, new GdeltDocClient(http, TimeProvider.System), _ollama, TimeProvider.System, _options);
+        // One GDELT client for the reads and for people's searches, so both share its pacing.
+        _gdelt = new GdeltDocClient(http, TimeProvider.System);
+        _pipeline = new WorldNewsPipeline(Store, http, _gdelt, _ollama, TimeProvider.System, _options);
         // IOllamaService is a typed HttpClient, so each summary takes a fresh one rather than this
         // singleton holding one for the app's lifetime. 8k context fits SummaryOptions.MaxPromptChars.
         var model = _model = ollamaOptions.Value.Model;
@@ -550,6 +552,32 @@ public sealed partial class WorldNewsService : IDisposable
     // Cyber attacks and breaches in the news now, each with its status and the CVEs it names.
     // Classified cyber stories, and any recent story whose headline is plainly about an attack.
     private (DateTimeOffset At, int Hours, IReadOnlyList<FoundStory> Stories)? _cyberCache;
+    private readonly GdeltDocClient _gdelt;
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, (DateTimeOffset At, WorldwideResult Result)> _worldwideCache = new(StringComparer.OrdinalIgnoreCase);
+
+    // Wider search (13-11-26): the same words across every outlet GDELT reads, in 65 languages, as
+    // far back as chosen (three months at most). One request per search through the shared paced
+    // gate; the same search within ten minutes is answered from memory. Reports World News already
+    // holds are linked to their story.
+    public async Task<WorldwideResult> WorldwideAsync(string query, int days, CancellationToken ct = default)
+    {
+        var text = WorldNewsFinder.GdeltQuery(query);
+        if (text is null) return new WorldwideResult([], "Use words of three letters or more for the worldwide search.");
+        var key = $"{days}|{text}";
+        if (_worldwideCache.TryGetValue(key, out var cached) && DateTimeOffset.UtcNow - cached.At < TimeSpan.FromMinutes(10)) return cached.Result;
+        var since = DateTimeOffset.UtcNow.AddDays(-Math.Clamp(days, 1, 90));
+        var result = await _gdelt.SearchAsync(text, since, ct, GdeltDocClient.SearchLookback, "hybridrel", 75);
+        var known = await Task.Run(() => Store.EventsForArticles(result.Articles.Select(a => a.Id)), ct);
+        var worldwide = new WorldwideResult(
+            result.Articles.Select(a => new WorldwideReport(a, known.GetValueOrDefault(a.Id))).ToList(), result.Note);
+        if (result.Note is null)
+        {
+            _worldwideCache[key] = (DateTimeOffset.UtcNow, worldwide);
+            foreach (var old in _worldwideCache.Where(pair => DateTimeOffset.UtcNow - pair.Value.At > TimeSpan.FromMinutes(10)).Select(pair => pair.Key).ToList())
+                _worldwideCache.TryRemove(old, out _);
+        }
+        return worldwide;
+    }
 
     public async Task<IReadOnlyList<FoundStory>> CyberInActionAsync(int hours = 72, CancellationToken ct = default)
     {

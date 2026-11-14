@@ -123,6 +123,8 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
             case "mapTap": MapTap(arguments); return;
             case "setRadarTimeline": SetRadarTimeline(arguments); return;
             case "setTimeMachine": SetTimeMachine(arguments); return;
+            case "setAurora": SetAurora(arguments); return;
+            case "setTrafficFlow": SetTrafficFlow(arguments); return;
             case "clearTimeMachine": SetTimeMachine([]); return;
             case "setRadarVisible": _radarVisible = arguments.LastOrDefault() is true; RefreshRadar(); return;
             case "home":
@@ -171,9 +173,10 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
 
     private void Render(string operation, object?[] arguments)
     {
-        var payload = arguments.FirstOrDefault() is string ? arguments.ElementAtOrDefault(1) : arguments.FirstOrDefault();
+        // NativeShapes (shared, tested) reads every payload: points, lines, rings and rectangles.
+        var payload = NativeShapes.Payload(operation, arguments);
         if (payload is null) { Clear(operation); return; }
-        var items = Items(payload).Select(item => (Key: JsonSerializer.Serialize(item), Item: item)).ToList();
+        var items = NativeShapes.Items(payload).Select(item => (Key: JsonSerializer.Serialize(item), Item: item)).ToList();
         var signature = string.Join('\n', items.Select(entry => entry.Key));
         // The page re-sends every layer after each move; an unchanged layer costs nothing.
         if (_signatures.TryGetValue(operation, out var last) && last == signature) return;
@@ -183,6 +186,8 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
         var next = new Dictionary<string, IMKAnnotation>(StringComparer.Ordinal);
         var added = new List<IMKAnnotation>();
         var overlays = new List<IMKOverlay>();
+        var polygons = new List<MKPolygon>();
+        var lines = new List<MKPolyline>();
         foreach (var (itemKey, item) in items)
         {
             if (TryCoordinate(item, out var coordinate))
@@ -204,15 +209,17 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
                     added.Add(annotation);
                 }
             }
-            foreach (var coordinates in Paths(item))
+            foreach (var coordinates in NativeShapes.Paths(item).Select(path => path.Select(point => new CLLocationCoordinate2D(point.Lat, point.Lon)).ToArray()))
             {
                 if (coordinates.Length < 2) continue;
-                IMKOverlay overlay = coordinates.Length >= 3 && IsArea(operation)
-                    ? MKPolygon.FromCoordinates(coordinates)
-                    : MKPolyline.FromCoordinates(coordinates);
-                overlays.Add(overlay);
+                if (coordinates.Length >= 3 && NativeShapes.IsArea(operation)) polygons.Add(MKPolygon.FromCoordinates(coordinates));
+                else lines.Add(MKPolyline.FromCoordinates(coordinates));
             }
         }
+        // One overlay per layer for its areas and one for its lines: city traffic alone sends 4,000
+        // road pieces, and MapKit draws a multi-shape far faster than thousands of overlays.
+        if (polygons.Count > 0) overlays.Add(new MKMultiPolygon(polygons.ToArray()) { Title = operation });
+        if (lines.Count > 0) overlays.Add(new MKMultiPolyline(lines.ToArray()) { Title = operation });
         if (previous.Count > 0) _map.RemoveAnnotations(previous.Values.ToArray());
         if (added.Count > 0) _map.AddAnnotations(added.ToArray());
         if (next.Count > 0) _annotations[operation] = next;
@@ -225,37 +232,11 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
         }
     }
 
-    private static IEnumerable<Dictionary<string, object?>> Items(object payload)
-    {
-        if (payload is Dictionary<string, object?> item) yield return item;
-        if (payload is not object?[] items) yield break;
-        foreach (var value in items) if (value is Dictionary<string, object?> entry) yield return entry;
-    }
-
     private static bool TryCoordinate(Dictionary<string, object?> item, out CLLocationCoordinate2D coordinate)
     {
-        coordinate = default;
-        if (!TryDouble(item, out var latitude, "lat", "latitude") || !TryDouble(item, out var longitude, "lon", "lng", "longitude")) return false;
-        if (latitude is < -90 or > 90 || longitude is < -180 or > 180) return false;
-        coordinate = new CLLocationCoordinate2D(latitude, longitude);
-        return true;
-    }
-
-    private static IEnumerable<CLLocationCoordinate2D[]> Paths(Dictionary<string, object?> item)
-    {
-        foreach (var key in new[] { "path", "points", "positions", "polygon", "ring", "coordinates" })
-        {
-            if (!item.TryGetValue(key, out var value) || value is not object?[] values) continue;
-            var coordinates = values.Select(Pair).Where(value => value.HasValue).Select(value => value!.Value).ToArray();
-            if (coordinates.Length > 1) yield return coordinates;
-        }
-    }
-
-    private static CLLocationCoordinate2D? Pair(object? value)
-    {
-        if (value is Dictionary<string, object?> item && TryCoordinate(item, out var coordinate)) return coordinate;
-        if (value is not object?[] { Length: >= 2 } pair || !AsDouble(pair[0], out var longitude) || !AsDouble(pair[1], out var latitude)) return null;
-        return new CLLocationCoordinate2D(latitude, longitude);
+        var ok = NativeShapes.TryPoint(item, out var latitude, out var longitude);
+        coordinate = ok ? new CLLocationCoordinate2D(latitude, longitude) : default;
+        return ok;
     }
 
     private void FlyTo(object?[] arguments)
@@ -597,10 +578,68 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
             _timeMachineRadar = new StretchedTileOverlay(radar, 10);
             _map.AddOverlay(_timeMachineRadar, MKOverlayLevel.AboveRoads);
         }
-        var pins = new[] { "incidents", "earthquakes", "tracks" }
-            .SelectMany(key => snapshot.GetValueOrDefault(key) as object?[] ?? [])
-            .ToArray();
-        Render("setTimeMachine", [pins]);
+        Render("setTimeMachine", [NativeShapes.TimeMachinePins(snapshot)]);
+    }
+
+    // Aurora (13-11-26; before, the Mac drew nothing): the chance grid as areas (NativeShapes.AuroraCells).
+    private void SetAurora(object?[] arguments)
+    {
+        Clear("setAurora");
+        var payload = arguments.FirstOrDefault() is string ? arguments.ElementAtOrDefault(1) : arguments.FirstOrDefault();
+        if (payload is not Dictionary<string, object?> aurora) return;
+        // Thousands of grid runs: two multi-polygons (likely, then strong), not one overlay each.
+        var overlays = new List<IMKOverlay>();
+        foreach (var strength in NativeShapes.AuroraCells(aurora).GroupBy(cell => cell.Strong).OrderBy(group => group.Key))
+        {
+            var polygons = strength.Select(cell => MKPolygon.FromCoordinates(
+            [
+                new CLLocationCoordinate2D(cell.South, cell.West), new CLLocationCoordinate2D(cell.North, cell.West),
+                new CLLocationCoordinate2D(cell.North, cell.East), new CLLocationCoordinate2D(cell.South, cell.East),
+            ])).ToArray();
+            overlays.Add(new MKMultiPolygon(polygons) { Title = strength.Key ? "setAurora:strong" : "setAurora" });
+        }
+        if (overlays.Count == 0) return;
+        _map.AddOverlays(overlays.ToArray(), MKOverlayLevel.AboveRoads);
+        _overlays["setAurora"] = overlays;
+    }
+
+    // Live flow (13-11-26; before, the Mac drew nothing): TomTom's congestion tiles come through the
+    // server (it holds the key), which needs the person's sign-in, so tiles are fetched with the web
+    // view's cookies.
+    private MKTileOverlay? _trafficFlow;
+
+    private void SetTrafficFlow(object?[] arguments)
+    {
+        if (_trafficFlow is not null) { _map.RemoveOverlay(_trafficFlow); _trafficFlow = null; }
+        if (arguments.LastOrDefault() is not true || !_webView.TryGetTarget(out var webView) || webView.Url is not { } page) return;
+        var origin = $"{page.Scheme}://{page.Host}{(page.Port > 0 ? ":" + page.Port.ToString(CultureInfo.InvariantCulture) : string.Empty)}";
+        _trafficFlow = new SignedInTileOverlay(origin + "/admin/api/overwatch/traffic-flow/{z}/{x}/{y}?t=" + (DateTimeOffset.UtcNow.ToUnixTimeSeconds() / 120).ToString(CultureInfo.InvariantCulture));
+        _map.AddOverlay(_trafficFlow, MKOverlayLevel.AboveRoads);
+    }
+
+    private sealed class SignedInTileOverlay : MKTileOverlay
+    {
+        private readonly string _template;
+
+        public SignedInTileOverlay(string template) : base(template) => _template = template;
+
+        public override void LoadTileAtPath(MKTileOverlayPath path, MKTileOverlayLoadTileCompletionHandler result)
+        {
+            var url = new NSUrl(_template.Replace("{z}", path.Z.ToString(CultureInfo.InvariantCulture), StringComparison.Ordinal)
+                .Replace("{x}", path.X.ToString(CultureInfo.InvariantCulture), StringComparison.Ordinal)
+                .Replace("{y}", path.Y.ToString(CultureInfo.InvariantCulture), StringComparison.Ordinal));
+            WKWebsiteDataStore.DefaultDataStore.HttpCookieStore.GetAllCookies(cookies =>
+            {
+                var request = new NSMutableUrlRequest(url);
+                var headers = NSHttpCookie.RequestHeaderFieldsWithCookies(cookies.Where(c => url.Host?.EndsWith(c.Domain.TrimStart('.'), StringComparison.OrdinalIgnoreCase) == true).ToArray());
+                if (headers.TryGetValue(new NSString("Cookie"), out var cookieHeader)) request["Cookie"] = cookieHeader.ToString() ?? string.Empty;
+                NSUrlSession.SharedSession.CreateDataTask(request, (data, response, error) =>
+                {
+                    if (response is NSHttpUrlResponse { StatusCode: 200 } && data is not null) result(data, null!);
+                    else result(null!, error!);
+                }).Resume();
+            });
+        }
     }
 
     // Only https XYZ templates from the server's timeline.
@@ -732,6 +771,7 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
     {
         foreach (var operation in _annotations.Keys.Concat(_overlays.Keys).Distinct().ToList()) Clear(operation);
         if (_timeMachineRadar is not null) { _map.RemoveOverlay(_timeMachineRadar); _timeMachineRadar = null; }
+        if (_trafficFlow is not null) { _map.RemoveOverlay(_trafficFlow); _trafficFlow = null; }
     }
 
 
@@ -800,7 +840,6 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
     private static bool AsDouble(object? value, out double number) =>
         double.TryParse(value?.ToString(), NumberStyles.Float, CultureInfo.InvariantCulture, out number) && double.IsFinite(number);
     private static double NormalizeLongitude(double longitude) => (longitude + 540) % 360 - 180;
-    private static bool IsArea(string operation) => operation is "setPowerOutages" or "setNewsShading" or "setAurora" or "setMapNotes";
 
     private sealed class NativeAnnotation(string operation, Dictionary<string, object?> payload, CLLocationCoordinate2D coordinate) : MKPointAnnotation
     {
@@ -840,10 +879,53 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
         public override MKOverlayRenderer OverlayRenderer(MKMapView mapView, IMKOverlay overlay) => overlay switch
         {
             MKTileOverlay tiles => new MKTileOverlayRenderer(tiles) { Alpha = 0.75f },
-            MKPolygon polygon => new MKPolygonRenderer(polygon) { FillColor = UIColor.SystemOrange.ColorWithAlpha(0.22f), StrokeColor = UIColor.SystemOrange, LineWidth = 2 },
-            MKPolyline line => new MKPolylineRenderer(line) { StrokeColor = UIColor.SystemCyan, LineWidth = 3 },
+            MKMultiPolygon areas => AreaStyle(new MKMultiPolygonRenderer(areas), areas.Title),
+            MKMultiPolyline paths => LineStyle(new MKMultiPolylineRenderer(paths), paths.Title),
+            MKPolygon polygon => polygon.Title switch
+            {
+                "setWeatherAlerts" => new MKPolygonRenderer(polygon) { FillColor = UIColor.SystemRed.ColorWithAlpha(0.16f), StrokeColor = UIColor.SystemRed, LineWidth = 1.5f },
+                "setPowerOutages" => new MKPolygonRenderer(polygon) { FillColor = UIColor.SystemPink.ColorWithAlpha(0.22f), StrokeColor = UIColor.SystemPink, LineWidth = 1 },
+                "setAurora" => new MKPolygonRenderer(polygon) { FillColor = UIColor.SystemGreen.ColorWithAlpha(0.22f), StrokeColor = UIColor.Clear, LineWidth = 0 },
+                "setAurora:strong" => new MKPolygonRenderer(polygon) { FillColor = UIColor.SystemYellow.ColorWithAlpha(0.3f), StrokeColor = UIColor.Clear, LineWidth = 0 },
+                _ => new MKPolygonRenderer(polygon) { FillColor = UIColor.SystemOrange.ColorWithAlpha(0.22f), StrokeColor = UIColor.SystemOrange, LineWidth = 2 },
+            },
+            MKPolyline line => line.Title switch
+            {
+                "setRoadTraffic" => new MKPolylineRenderer(line) { StrokeColor = UIColor.SystemYellow.ColorWithAlpha(0.85f), LineWidth = 3 },
+                "setSatellites" => new MKPolylineRenderer(line) { StrokeColor = UIColor.White.ColorWithAlpha(0.45f), LineWidth = 1 },
+                _ => new MKPolylineRenderer(line) { StrokeColor = UIColor.SystemCyan, LineWidth = 3 },
+            },
             _ => new MKOverlayRenderer(overlay)
         };
+
+        // The same colours for a layer's grouped areas and lines.
+        private static MKOverlayRenderer AreaStyle(MKOverlayPathRenderer renderer, string? layer)
+        {
+            var (fill, stroke, width) = layer switch
+            {
+                "setWeatherAlerts" => (UIColor.SystemRed.ColorWithAlpha(0.16f), UIColor.SystemRed, 1.5f),
+                "setPowerOutages" => (UIColor.SystemPink.ColorWithAlpha(0.22f), UIColor.SystemPink, 1f),
+                "setAurora" => (UIColor.SystemGreen.ColorWithAlpha(0.22f), UIColor.Clear, 0f),
+                "setAurora:strong" => (UIColor.SystemYellow.ColorWithAlpha(0.3f), UIColor.Clear, 0f),
+                "setConvergence" => (UIColor.SystemOrange.ColorWithAlpha(0.18f), UIColor.SystemOrange, 1.5f),
+                _ => (UIColor.SystemOrange.ColorWithAlpha(0.22f), UIColor.SystemOrange, 2f),
+            };
+            renderer.FillColor = fill;
+            renderer.StrokeColor = stroke;
+            renderer.LineWidth = width;
+            return renderer;
+        }
+
+        private static MKOverlayRenderer LineStyle(MKOverlayPathRenderer renderer, string? layer)
+        {
+            (renderer.StrokeColor, renderer.LineWidth) = layer switch
+            {
+                "setRoadTraffic" => (UIColor.SystemYellow.ColorWithAlpha(0.85f), 3f),
+                "setSatellites" => (UIColor.White.ColorWithAlpha(0.45f), 1f),
+                _ => (UIColor.SystemCyan, 3f),
+            };
+            return renderer;
+        }
 
         // Clicks arrive through MapTap; this covers any selection MapKit makes itself. Deselecting
         // straight away means the same pin can be opened again.

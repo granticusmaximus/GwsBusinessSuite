@@ -4976,8 +4976,14 @@ window.tacticalGlobe = (function () {
             'setHumanitarian', 'clearHumanitarian', 'setWeatherSnapshot'
         ]);
 
+        // Ops that also draw page HTML (not the map) keep running on the page: the weather panel
+        // never showed in the Mac app while setWeatherSnapshot only went to the native map (13-11-26).
+        const pageAlso = new Set(['setWeatherSnapshot']);
         nativeOperations.forEach(function (name) {
-            api[name] = function () { postNative(name, arguments); };
+            const original = api[name];
+            api[name] = pageAlso.has(name) && typeof original === 'function'
+                ? function () { postNative(name, arguments); return original.apply(this, arguments); }
+                : function () { postNative(name, arguments); };
         });
 
         // The native map sits under the page at the container's rectangle. It was sent once, at
