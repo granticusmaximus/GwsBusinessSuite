@@ -99,8 +99,14 @@ public sealed class NativeOverwatchMacMapBridgeTests
             "src/GwsBusinessSuite.App/Platforms/MacCatalyst/MacNativeOverwatchBridge.cs"));
 
         bridge.Should().Contain("_map.AddAnnotations(added.ToArray())");
+        bridge.Should().Contain("_pendingLayers[layer] = (operation, arguments)");
+        bridge.Should().Contain("if (!_scheduledLayers.Add(layer)) return;");
+        bridge.Should().Contain("slow apply {operation}");
         bridge.Should().Contain("if (_signatures.TryGetValue(operation, out var last) && last == signature) return;");
-        bridge.Should().Contain("if (previous.Remove(key, out var kept))");
+        bridge.Should().Contain("if (previous.Remove(key, out var kept) && kept is NativeAnnotation native)");
+        bridge.Should().Contain("NativeShapes.Identity(operation, item)");
+        bridge.Should().Contain("native.Update(item, coordinate)");
+        bridge.Should().Contain("_annotationsByHandle.GetValueOrDefault(handle)");
         bridge.Should().Contain("_map.AddOverlays(overlays.ToArray())");
         bridge.Should().NotContain("_map.AddAnnotation(annotation)");
         bridge.Should().NotContain("_map.AddOverlay(overlay)");
@@ -170,7 +176,7 @@ public sealed class NativeOverwatchMacMapBridgeTests
         // matched to our pins by native handle; every click outcome is logged (12-11-26).
         bridge.Should().Contain("var pins = members.Select(Resolve).OfType<NativeAnnotation>().Where(IsSelectable).ToList();")
             .And.Contain("native.selectedMany(group)")
-            .And.Contain(".FirstOrDefault(pin => pin.Handle == handle)")
+            .And.Contain("_annotationsByHandle.GetValueOrDefault(handle)")
             .And.Contain("gws-overwatch-map.log")
             .And.Contain("Report($\"{operation} failed:")
             // Radar (12-11-26): the Mac app drew none. The latest frame, worldwide under the US layer,

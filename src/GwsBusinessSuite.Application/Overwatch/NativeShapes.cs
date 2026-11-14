@@ -42,6 +42,21 @@ public static class NativeShapes
         foreach (var value in items) if (value is Dictionary<string, object?> entry) yield return entry;
     }
 
+    // A stable MapKit identity must not include position or other changing display fields. Before
+    // 14-11-26 the bridge serialized the whole payload as its key, so every aircraft/ship move was
+    // a remove plus add. Most payloads carry id; the ordered fallbacks cover country shading,
+    // stations and provider data that use a different natural key.
+    public static string Identity(string operation, Dictionary<string, object?> item)
+    {
+        foreach (var key in new[] { "id", "eventId", "cameraId", "icao24", "mmsi", "code", "stationId" })
+            if (TextValue(item, key) is { Length: > 0 } value) return operation + ":" + key + ":" + value;
+        foreach (var key in new[] { "name", "title", "label", "callsign" })
+            if (TextValue(item, key) is { Length: > 0 } value) return operation + ":" + key + ":" + value;
+        if (TryDouble(item, out var latitude, "lat", "latitude") && TryDouble(item, out var longitude, "lon", "lng", "longitude"))
+            return FormattableString.Invariant($"{operation}:coordinate:{latitude:0.######},{longitude:0.######}");
+        return operation + ":anonymous";
+    }
+
     public static bool TryPoint(Dictionary<string, object?> item, out double latitude, out double longitude)
     {
         longitude = 0;
@@ -215,6 +230,9 @@ public static class NativeShapes
 
     private static string? Text(IReadOnlyDictionary<string, object?> item, string key) =>
         item.TryGetValue(key, out var value) ? value?.ToString()?.Trim().ToLowerInvariant() : null;
+
+    private static string? TextValue(IReadOnlyDictionary<string, object?> item, string key) =>
+        item.TryGetValue(key, out var value) ? value?.ToString()?.Trim() : null;
 
     // The aurora grid as areas: each band (north and south of the edge latitude) is rows x columns of
     // percent chances, row 0 at the band's top; runs of cells along a row become one rectangle, and

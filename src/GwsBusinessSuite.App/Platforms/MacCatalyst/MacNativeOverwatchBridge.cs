@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Diagnostics;
 using System.Text.Json;
 using CoreLocation;
 using Foundation;
@@ -18,8 +19,12 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
     // Each layer's pins keyed by their payload JSON, so a refresh with mostly the same pins only
     // removes and adds what changed (MapKit relays out every pin on each add/remove).
     private readonly Dictionary<string, Dictionary<string, IMKAnnotation>> _annotations = new(StringComparer.Ordinal);
+    private readonly Dictionary<ObjCRuntime.NativeHandle, NativeAnnotation> _annotationsByHandle = [];
     private readonly Dictionary<string, string> _signatures = new(StringComparer.Ordinal);
     private readonly Dictionary<string, List<IMKOverlay>> _overlays = new(StringComparer.Ordinal);
+    private readonly object _pendingLock = new();
+    private readonly Dictionary<string, (string Operation, object?[] Arguments)> _pendingLayers = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _scheduledLayers = new(StringComparer.Ordinal);
     private CancellationTokenSource? _regionChangeDebounce;
     private bool _pickPointMode;
     private bool _hasInitialRegion;
@@ -55,18 +60,59 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
         var operation = (body["operation"] as NSString)?.ToString();
         if (string.IsNullOrWhiteSpace(operation) || operation.Length > 80) return;
         var arguments = body["arguments"] is NSArray array ? array.Select(ToPlainValue).ToArray() : [];
+        QueueApply(operation, arguments);
+    }
+
+    // Layer refreshes can arrive in bursts when several server calls finish together or a moving
+    // source ticks while the previous revision is waiting for MapKit. Keep only the newest command
+    // for that layer. Navigation and pointer commands are never coalesced.
+    private void QueueApply(string operation, object?[] arguments)
+    {
+        var layer = operation.StartsWith("clear", StringComparison.Ordinal) ? "set" + operation[5..]
+            : operation.StartsWith("set", StringComparison.Ordinal) ? operation : null;
+        if (layer is null)
+        {
+            MainThread.BeginInvokeOnMainThread(() => ApplySafely(operation, arguments));
+            return;
+        }
+        lock (_pendingLock)
+        {
+            _pendingLayers[layer] = (operation, arguments);
+            if (!_scheduledLayers.Add(layer)) return;
+        }
         MainThread.BeginInvokeOnMainThread(() =>
         {
-            try
+            (string Operation, object?[] Arguments) pending;
+            lock (_pendingLock)
             {
-                Apply(operation, arguments);
+                if (!_pendingLayers.Remove(layer, out pending)) { _scheduledLayers.Remove(layer); return; }
+                _scheduledLayers.Remove(layer);
             }
-            catch (Exception ex)
-            {
-                // A bad payload must not take the app down or fail without a trace.
-                Report($"{operation} failed: {ex.GetType().Name}: {ex.Message}", ex.StackTrace);
-            }
+            ApplySafely(pending.Operation, pending.Arguments);
         });
+    }
+
+    private void ApplySafely(string operation, object?[] arguments)
+    {
+        var started = Stopwatch.GetTimestamp();
+        try
+        {
+            Apply(operation, arguments);
+        }
+        catch (Exception ex)
+        {
+            // A bad payload must not take the app down or fail without a trace.
+            Report($"{operation} failed: {ex.GetType().Name}: {ex.Message}", ex.StackTrace);
+        }
+        finally
+        {
+            var elapsed = Stopwatch.GetElapsedTime(started);
+            if (elapsed >= TimeSpan.FromMilliseconds(50))
+            {
+                var count = NativeShapes.Items(NativeShapes.Payload(operation, arguments)).Count();
+                MapLog($"slow apply {operation}: {elapsed.TotalMilliseconds:0} ms, {count} item(s)");
+            }
+        }
     }
 
     // What the map did with each click, and anything that failed, in the app's container
@@ -176,8 +222,9 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
         // NativeShapes (shared, tested) reads every payload: points, lines, rings and rectangles.
         var payload = NativeShapes.Payload(operation, arguments);
         if (payload is null) { Clear(operation); return; }
-        var items = NativeShapes.Items(payload).Select(item => (Key: JsonSerializer.Serialize(item), Item: item)).ToList();
-        var signature = string.Join('\n', items.Select(entry => entry.Key));
+        var items = NativeShapes.Items(payload).Select(item =>
+            (Key: NativeShapes.Identity(operation, item), Fingerprint: JsonSerializer.Serialize(item), Item: item)).ToList();
+        var signature = string.Join('\n', items.Select(entry => entry.Fingerprint));
         // The page re-sends every layer after each move; an unchanged layer costs nothing.
         if (_signatures.TryGetValue(operation, out var last) && last == signature) return;
         _signatures[operation] = signature;
@@ -188,15 +235,16 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
         var overlays = new List<IMKOverlay>();
         var polygons = new List<MKPolygon>();
         var lines = new List<MKPolyline>();
-        foreach (var (itemKey, item) in items)
+        foreach (var (itemKey, _, item) in items)
         {
             if (TryCoordinate(item, out var coordinate))
             {
                 var key = itemKey;
                 while (next.ContainsKey(key)) key += "#";
-                if (previous.Remove(key, out var kept))
+                if (previous.Remove(key, out var kept) && kept is NativeAnnotation native)
                 {
-                    next[key] = kept;
+                    native.Update(item, coordinate);
+                    next[key] = native;
                 }
                 else
                 {
@@ -207,6 +255,7 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
                     };
                     next[key] = annotation;
                     added.Add(annotation);
+                    _annotationsByHandle[annotation.Handle] = annotation;
                 }
             }
             foreach (var coordinates in NativeShapes.Paths(item).Select(path => path.Select(point => new CLLocationCoordinate2D(point.Lat, point.Lon)).ToArray()))
@@ -220,7 +269,11 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
         // road pieces, and MapKit draws a multi-shape far faster than thousands of overlays.
         if (polygons.Count > 0) overlays.Add(new MKMultiPolygon(polygons.ToArray()) { Title = operation });
         if (lines.Count > 0) overlays.Add(new MKMultiPolyline(lines.ToArray()) { Title = operation });
-        if (previous.Count > 0) _map.RemoveAnnotations(previous.Values.ToArray());
+        if (previous.Count > 0)
+        {
+            _map.RemoveAnnotations(previous.Values.ToArray());
+            foreach (var removed in previous.Values.OfType<NativeAnnotation>()) _annotationsByHandle.Remove(removed.Handle);
+        }
         if (added.Count > 0) _map.AddAnnotations(added.ToArray());
         if (next.Count > 0) _annotations[operation] = next;
 
@@ -521,7 +574,7 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
         : MemberArray(annotation)?.Count ?? 0;
 
     private NativeAnnotation? ResolveHandle(ObjCRuntime.NativeHandle handle) =>
-        _annotations.Values.SelectMany(pins => pins.Values).OfType<NativeAnnotation>().FirstOrDefault(pin => pin.Handle == handle);
+        _annotationsByHandle.GetValueOrDefault(handle);
 
     private const double StackedDegrees = 0.0005;
     private const double StreetLevelMetres = 1500;
@@ -530,7 +583,11 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
     private void Clear(string operation)
     {
         _signatures.Remove(operation);
-        if (_annotations.Remove(operation, out var annotations) && annotations.Count > 0) _map.RemoveAnnotations(annotations.Values.ToArray());
+        if (_annotations.Remove(operation, out var annotations) && annotations.Count > 0)
+        {
+            _map.RemoveAnnotations(annotations.Values.ToArray());
+            foreach (var annotation in annotations.Values.OfType<NativeAnnotation>()) _annotationsByHandle.Remove(annotation.Handle);
+        }
         if (_overlays.Remove(operation, out var overlays) && overlays.Count > 0) _map.RemoveOverlays(overlays.ToArray());
     }
 
@@ -844,8 +901,16 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
     private sealed class NativeAnnotation(string operation, Dictionary<string, object?> payload, CLLocationCoordinate2D coordinate) : MKPointAnnotation
     {
         public string Operation { get; } = operation;
-        public Dictionary<string, object?> Payload { get; } = payload;
+        public Dictionary<string, object?> Payload { get; private set; } = payload;
         public override CLLocationCoordinate2D Coordinate { get; set; } = coordinate;
+
+        public void Update(Dictionary<string, object?> next, CLLocationCoordinate2D coordinate)
+        {
+            Payload = next;
+            Coordinate = coordinate;
+            Title = ReadString(next, "title", "name", "label", "callsign", "code", "id") ?? Operation[3..];
+            Subtitle = ReadString(next, "summary", "description", "status", "source", "kind");
+        }
     }
 
     private sealed class MapDelegate(MacNativeOverwatchBridge owner) : MKMapViewDelegate

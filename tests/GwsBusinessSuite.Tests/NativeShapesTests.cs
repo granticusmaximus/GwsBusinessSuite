@@ -144,6 +144,16 @@ public sealed class NativeShapesTests
     }
 
     [Fact]
+    public void Identity_ShouldStayStableWhenAMovingObjectsPositionChanges()
+    {
+        var first = O(("id", "abc123"), ("lat", 33.7), ("lon", -84.4), ("heading", 90.0));
+        var moved = O(("id", "abc123"), ("lat", 33.8), ("lon", -84.2), ("heading", 110.0));
+
+        Assert.Equal(NativeShapes.Identity("setAircraft", first), NativeShapes.Identity("setAircraft", moved));
+        Assert.Equal("setAircraft:id:abc123", NativeShapes.Identity("setAircraft", moved));
+    }
+
+    [Fact]
     public void EveryLayerOperation_ShouldBeDrawnByAHandlerOrAsPointsAndPaths()
     {
         // Every set operation the page sends the Mac is either one of the bridge's own handlers or
