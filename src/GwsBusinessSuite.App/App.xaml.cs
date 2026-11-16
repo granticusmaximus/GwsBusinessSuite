@@ -10,10 +10,12 @@ public partial class App : Microsoft.Maui.Controls.Application
 	private readonly WorldNewsEmbedRelay _worldNewsEmbeddings;
 	private readonly SentinelAgentMacRelay _agentRelay;
 	private readonly SignInApprovalRelay _signInApprovals;
+	private readonly LocalAiPowerPolicyService _localAiPower;
 	private SignInApprovalPage? _approvalShown;
 
 	public App(OfflineSyncService offlineSync, NativeSessionClient session, WorldNewsSummaryRelay worldNewsSummaries,
-		WorldNewsEmbedRelay worldNewsEmbeddings, SentinelAgentMacRelay agentRelay, SignInApprovalRelay signInApprovals)
+		WorldNewsEmbedRelay worldNewsEmbeddings, SentinelAgentMacRelay agentRelay, SignInApprovalRelay signInApprovals,
+		LocalAiPowerPolicyService localAiPower)
 	{
 		InitializeComponent();
 		_offlineSync = offlineSync;
@@ -22,6 +24,7 @@ public partial class App : Microsoft.Maui.Controls.Application
 		_worldNewsEmbeddings = worldNewsEmbeddings;
 		_agentRelay = agentRelay;
 		_signInApprovals = signInApprovals;
+		_localAiPower = localAiPower;
 		_signInApprovals.RequestArrived += request => MainThread.BeginInvokeOnMainThread(() => _ = ShowSignInRequestAsync(request));
 	}
 
@@ -81,6 +84,7 @@ public partial class App : Microsoft.Maui.Controls.Application
 #if MACCATALYST
 		// This Mac is the AI server for your phone and tablet: keep the relays answering in the background (PWA phase 4).
 		MacAiServer.KeepRelayAnswering();
+		_localAiPower.Start();
 #endif
 	}
 

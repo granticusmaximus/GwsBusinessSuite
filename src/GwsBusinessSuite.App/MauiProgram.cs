@@ -84,6 +84,7 @@ public static class MauiProgram
 		builder.Services.AddSingleton<WorldNewsEmbedRelay>();
 		// SentinelGPT's agent: lets a browser on another computer think with this Mac's model.
 		builder.Services.AddSingleton<SentinelAgentMacRelay>();
+		builder.Services.AddSingleton<LocalAiPowerPolicyService>();
 		// "Approve on my Mac": browsers sign in with this Mac's Touch ID.
 		builder.Services.AddSingleton<SignInApprovalRelay>();
 		// Page lock / sign in with Touch ID.

@@ -21,6 +21,7 @@ public partial class SentinelGptPage : ContentPage
     private readonly NativeFallbackChatService _fallbackChat;
     private readonly DeviceSecretStore _deviceSecretStore;
     private readonly OllamaModelInstaller _modelInstaller;
+    private readonly LocalAiPowerPolicyService _localAiPower;
 
     // A few minutes, not DeepAnalysisAdvisor's 2-minute sub-advisor bound - this is the primary
     // chat turn, and CPU-bound local inference can legitimately take longer on slower hardware
@@ -80,7 +81,8 @@ public partial class SentinelGptPage : ContentPage
         NativeFallbackChatService fallbackChat,
         DeviceSecretStore deviceSecretStore,
         OllamaModelInstaller modelInstaller,
-        NativeSessionClient session)
+        NativeSessionClient session,
+        LocalAiPowerPolicyService localAiPower)
     {
         _ollama = ollama;
         _toolExecutor = toolExecutor;
@@ -93,6 +95,7 @@ public partial class SentinelGptPage : ContentPage
         _deviceSecretStore = deviceSecretStore;
         _modelInstaller = modelInstaller;
         _session = session;
+        _localAiPower = localAiPower;
 
         InitializeComponent();
         Transcript.ItemsSource = _messages;
@@ -100,6 +103,8 @@ public partial class SentinelGptPage : ContentPage
         ModelLibrary.ItemsSource = _modelLibrary;
         PersonaPicker.ItemsSource = AgentPersonas.All.Select(persona => persona.Name).ToList();
         PersonaPicker.SelectedIndex = AgentPersonas.All.ToList().IndexOf(AgentPersonas.Default);
+        BatteryPolicyPicker.ItemsSource = Enum.GetNames<GwsBusinessSuite.Application.Abstractions.LocalAiBatteryMode>();
+        BatteryPolicyPicker.SelectedIndex = (int)_localAiPower.Mode;
         // Enter sends, Shift+Enter inserts a newline. OnSendClicked already guards re-entry via
         // _sending, so a fast double Enter can't start two turns.
         PromptEditor.SendRequested += (_, _) => OnSendClicked(this, EventArgs.Empty);
@@ -511,6 +516,21 @@ public partial class SentinelGptPage : ContentPage
         if (!SettingsRow.IsVisible) return;
         _ = LoadApiKeyIntoFieldAsync();
         RefreshSkills();
+        RefreshBatteryPolicyStatus();
+    }
+
+    private void OnBatteryPolicyChanged(object? sender, EventArgs e)
+    {
+        if (BatteryPolicyPicker.SelectedIndex < 0) return;
+        _localAiPower.SetMode((GwsBusinessSuite.Application.Abstractions.LocalAiBatteryMode)BatteryPolicyPicker.SelectedIndex);
+        RefreshBatteryPolicyStatus();
+    }
+
+    private void RefreshBatteryPolicyStatus()
+    {
+        _localAiPower.Refresh();
+        BatteryPolicyStatusLabel.Text = _localAiPower.Decision.Reason +
+            " The display may sleep; closing the lid still sleeps a MacBook.";
     }
 
     // Rebuilt on open and whenever the attached folder changes, so a repo's own skills appear
