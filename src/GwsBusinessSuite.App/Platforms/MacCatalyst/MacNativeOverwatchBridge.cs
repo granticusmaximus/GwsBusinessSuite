@@ -13,6 +13,7 @@ namespace GwsBusinessSuite.App;
 internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
 {
     public const string Name = "gwsNativeOverwatch";
+    private const int MaximumNativeCameraPins = 750;
     private readonly WeakReference<WKWebView> _webView;
     private readonly MKMapView _map;
     private readonly MapDelegate _delegate;
@@ -222,7 +223,9 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
         // NativeShapes (shared, tested) reads every payload: points, lines, rings and rectangles.
         var payload = NativeShapes.Payload(operation, arguments);
         if (payload is null) { Clear(operation); return; }
-        var items = NativeShapes.Items(payload).Select(item =>
+        var shapedItems = NativeShapes.Items(payload);
+        if (operation == "setCameraPins") shapedItems = shapedItems.Take(MaximumNativeCameraPins);
+        var items = shapedItems.Select(item =>
             (Key: NativeShapes.Identity(operation, item), Fingerprint: JsonSerializer.Serialize(item), Item: item)).ToList();
         var signature = string.Join('\n', items.Select(entry => entry.Fingerprint));
         // The page re-sends every layer after each move; an unchanged layer costs nothing.

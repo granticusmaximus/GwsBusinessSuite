@@ -193,7 +193,9 @@ public static class DependencyInjection
                 var logger = sp.GetRequiredService<ILogger<OllamaService>>();
                 var options = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<ContentStudioOptions>>();
                 return new FailoverOllamaService(
-                    new OllamaService(clients.CreateClient(OllamaFailoverMonitor.PrimaryClient), monitor.PrimaryLane, tracker, logger, options),
+                    // The Mac also renders the native Overwatch map. Release large model memory
+                    // promptly so several local models do not crowd a dense MapKit session.
+                    new OllamaService(clients.CreateClient(OllamaFailoverMonitor.PrimaryClient), monitor.PrimaryLane, tracker, logger, options, "5m"),
                     new OllamaService(clients.CreateClient(OllamaFailoverMonitor.SecondaryClient), monitor.SecondaryLane, tracker, logger, options),
                     monitor, sp.GetRequiredService<ILogger<FailoverOllamaService>>());
             });

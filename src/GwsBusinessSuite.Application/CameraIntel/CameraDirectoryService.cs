@@ -58,6 +58,10 @@ public sealed class CameraDirectoryService(
             statusTracker?.RecordSuccess(provider.SourceName, SourceStatusTracker.CameraKind, cameras.Count);
             return cameras;
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
             statusTracker?.RecordFailure(provider.SourceName, SourceStatusTracker.CameraKind, ex.GetType().Name);

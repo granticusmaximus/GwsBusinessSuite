@@ -15,9 +15,9 @@ public sealed class OllamaService(
     OllamaWorkloadScheduler workloadScheduler,
     OllamaPerformanceTracker performanceTracker,
     ILogger<OllamaService> logger,
-    Microsoft.Extensions.Options.IOptions<GwsBusinessSuite.Application.ContentStudio.ContentStudioOptions>? options = null) : IOllamaService
+    Microsoft.Extensions.Options.IOptions<GwsBusinessSuite.Application.ContentStudio.ContentStudioOptions>? options = null,
+    string modelKeepAlive = "30m") : IOllamaService
 {
-    private const string ModelKeepAlive = "30m";
     // Asked once per instance (a request's worth of calls); a tags request is milliseconds against
     // a generation's seconds.
     private Task<IReadOnlyCollection<string>>? _installed;
@@ -73,7 +73,7 @@ public sealed class OllamaService(
                 stream = false,
                 system = systemPrompt,
                 prompt = userPrompt,
-                keep_alive = ModelKeepAlive,
+                keep_alive = modelKeepAlive,
                 options = new { num_ctx = contextSize }
             }
             : new
@@ -82,7 +82,7 @@ public sealed class OllamaService(
                 stream = false,
                 system = systemPrompt,
                 prompt = userPrompt,
-                keep_alive = ModelKeepAlive
+                keep_alive = modelKeepAlive
             };
 
         try
@@ -116,7 +116,7 @@ public sealed class OllamaService(
         {
             model,
             stream = false,
-            keep_alive = ModelKeepAlive
+            keep_alive = modelKeepAlive
         };
 
         var queueTimer = Stopwatch.StartNew();
@@ -132,7 +132,7 @@ public sealed class OllamaService(
             "Warmed Ollama model '{Model}' in {WarmupMs:F0} ms and will retain it for {KeepAlive}.",
             model,
             stopwatch.Elapsed.TotalMilliseconds,
-            ModelKeepAlive);
+            modelKeepAlive);
     }
 
     // NDJSON: Ollama writes one JSON object per line as generation progresses, with a final
@@ -172,7 +172,7 @@ public sealed class OllamaService(
                 stream = true,
                 system = systemPrompt,
                 prompt = userPrompt,
-                keep_alive = ModelKeepAlive,
+                keep_alive = modelKeepAlive,
                 options = new { num_predict = outputLimit }
             }
             : new
@@ -181,7 +181,7 @@ public sealed class OllamaService(
                 stream = true,
                 system = systemPrompt,
                 prompt = userPrompt,
-                keep_alive = ModelKeepAlive
+                keep_alive = modelKeepAlive
             };
 
         var workloadPriority = workloadScheduler.CurrentPriority;
@@ -306,7 +306,7 @@ public sealed class OllamaService(
         CancellationToken ct = default)
     {
         model = await ResolveModelAsync(model, ct);
-        var payload = OllamaChatPayload.Build(model, messages, tools, ModelKeepAlive);
+        var payload = OllamaChatPayload.Build(model, messages, tools, modelKeepAlive);
 
         try
         {
@@ -423,7 +423,7 @@ public sealed class OllamaService(
             model,
             input = inputs,
             truncate = true,
-            keep_alive = ModelKeepAlive
+            keep_alive = modelKeepAlive
         };
 
         try

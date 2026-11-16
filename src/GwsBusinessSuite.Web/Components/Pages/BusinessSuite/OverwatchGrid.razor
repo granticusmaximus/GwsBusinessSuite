@@ -1957,13 +1957,18 @@
     // from overwriting a newer one. Layers slower than SlowLayer are logged with their time.
     private static readonly TimeSpan SlowLayer = TimeSpan.FromSeconds(4);
     private int _viewGeneration;
+    private CancellationTokenSource? _cameraViewCancellation;
 
     [JSInvokable]
     public async Task OnGlobeViewChanged(double north, double south, double east, double west)
     {
-        _lastBbox = new BoundingBox(north, south, east, west);
+        var bounds = new BoundingBox(north, south, east, west);
+        _lastBbox = bounds;
         _hasSettledOnce = true;
         var generation = ++_viewGeneration;
+        _cameraViewCancellation?.Cancel();
+        _cameraViewCancellation?.Dispose();
+        var cameraCancellation = _cameraViewCancellation = new CancellationTokenSource();
         if (_timeMachineOn && !_tmPlaying) _ = InvokeAsync(async () => { await LoadTimeMachineAsync(); StateHasChanged(); });
 
         var centerLatitude = (north + south) / 2.0;
@@ -1973,8 +1978,17 @@
         await Task.WhenAll(
             TimedAsync("cameras", async () =>
             {
-                var result = await CameraDirectoryService.GetCamerasForViewAsync(_lastBbox,
-                    include: _hideUnhealthy ? c => !IsKnownUnhealthy(c.Id) : null);
+                CameraViewResult result;
+                try
+                {
+                    result = await CameraDirectoryService.GetCamerasForViewAsync(bounds,
+                        include: _hideUnhealthy ? c => !IsKnownUnhealthy(c.Id) : null,
+                        cancellationToken: cameraCancellation.Token);
+                }
+                catch (OperationCanceledException) when (cameraCancellation.IsCancellationRequested)
+                {
+                    return;
+                }
                 if (!Current()) return;
                 _visibleCameras = result.Cameras.ToList();
                 _camerasInViewTotal = result.TotalInView;
@@ -4959,6 +4973,8 @@
         _aircraftCts?.Cancel();
         _shipsCts?.Cancel();
         _satellitesCts?.Cancel();
+        _cameraViewCancellation?.Cancel();
+        _cameraViewCancellation?.Dispose();
         // The prerendered instance never initializes the browser viewport.
         if (_dotNetRef is null) return;
         try

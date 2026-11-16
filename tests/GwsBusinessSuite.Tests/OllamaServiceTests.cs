@@ -296,6 +296,23 @@ public sealed class OllamaServiceTests
     }
 
     [Fact]
+    public async Task GenerateAsync_ShouldUseTheConfiguredModelResidency()
+    {
+        string? payload = null;
+        var handler = new RecordingHandler(request =>
+        {
+            payload = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("""{"response":"ok","done":true}""") };
+        });
+        var service = new OllamaService(new HttpClient(handler) { BaseAddress = new Uri("http://localhost:11434") },
+            new OllamaWorkloadScheduler(), new OllamaPerformanceTracker(), new RecordingLogger<OllamaService>(), modelKeepAlive: "5m");
+
+        await service.GenerateAsync("sentinelgpt", "system", "prompt");
+
+        payload.Should().Contain("\"keep_alive\":\"5m\"");
+    }
+
+    [Fact]
     public async Task Generate_ShouldUseTheServersDefaultModel_WhenTheChosenOneIsntInstalled()
     {
         var asked = new List<string>();

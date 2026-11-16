@@ -54,6 +54,18 @@ public sealed class CameraDirectoryServiceTests
     }
 
     [Fact]
+    public async Task GetCamerasInBoundingBoxAsync_ShouldPropagateCancellationToSupersededViewLoads()
+    {
+        var service = new CameraDirectoryService([new WaitingCameraFeedProvider()], NullLogger<CameraDirectoryService>.Instance);
+        using var cancellation = new CancellationTokenSource();
+
+        var load = service.GetCamerasInBoundingBoxAsync(AnyBbox, cancellation.Token);
+        await cancellation.CancelAsync();
+
+        await FluentActions.Awaiting(() => load).Should().ThrowAsync<OperationCanceledException>();
+    }
+
+    [Fact]
     public async Task ProvidersWithACoverageArea_ShouldOnlyBeAskedAboutViewsThatOverlapIt()
     {
         var hongKong = new FakeCameraFeedProvider("HK", [Camera("hk", "HK")]) { Coverage = new BoundingBox(22.6, 22.1, 114.5, 113.8) };
@@ -162,5 +174,16 @@ public sealed class CameraDirectoryServiceTests
 
         public Task<IReadOnlyList<CameraFeed>> GetCamerasAsync(BoundingBox bbox, CancellationToken cancellationToken = default) =>
             throw new InvalidOperationException("Simulated provider failure.");
+    }
+
+    private sealed class WaitingCameraFeedProvider : ICameraFeedProvider
+    {
+        public string SourceName => "Waiting";
+
+        public async Task<IReadOnlyList<CameraFeed>> GetCamerasAsync(BoundingBox bbox, CancellationToken cancellationToken = default)
+        {
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            return [];
+        }
     }
 }
