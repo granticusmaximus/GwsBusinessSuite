@@ -995,10 +995,11 @@ public sealed partial class WorldNewsService : IDisposable
             return title;
         }
         return ShiftHandover.Markdown(since, now, Store.Budget(), Store.Holds(),
-            Store.LabelSnapshots().Where(s => s.TakenAt >= since.AddHours(-1)).ToList(),
+            Store.LabelSnapshots(since: since, limit: 1000),
             Store.Challenges().Where(c => c.Status == "open").ToList(),
             Store.Tips().Where(t => t.CreatedAt >= since).ToList(),
-            Store.DeskNotes(limit: 200), Store.LiveUpdates(limit: 200), TitleOf, at => at.ToLocalGwsDateTime());
+            Store.DeskNotes(limit: 200), Store.LiveUpdates(limit: 200), TitleOf, at => at.ToLocalGwsDateTime(),
+            Store.BudgetLabelLevels());
     }
 
     // B3: a story's pictures that were used earlier in other stories, and how many carry Content

@@ -10,6 +10,41 @@ namespace GwsBusinessSuite.Infrastructure.Services;
 // the evidence written in (StoryDraft). A draft only: a person edits and publishes it.
 public sealed partial class WorldNewsDeskService(IAppDbContext db, WorldNewsService news)
 {
+    public async Task<string> HandoverAsync(int hours, string username, CancellationToken cancellationToken = default)
+    {
+        await RequireDeskUserAsync(username, cancellationToken);
+        if (hours is < 1 or > 72) throw new ArgumentOutOfRangeException(nameof(hours), "Choose a handover range from 1 to 72 hours.");
+        return await Task.Run(() => news.HandoverMarkdown(hours), cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<DeskNote>> NotesAsync(string eventId, string username, CancellationToken cancellationToken = default)
+    {
+        await RequireDeskUserAsync(username, cancellationToken);
+        if (!await Task.Run(() => news.Store.HasEvent(eventId), cancellationToken))
+            throw new InvalidOperationException("This story is no longer available.");
+        return await Task.Run(() => news.Store.DeskNotes(eventId, limit: 100), cancellationToken);
+    }
+
+    public async Task<DeskNote> AddNoteAsync(string eventId, string text, string username, CancellationToken cancellationToken = default)
+    {
+        await RequireDeskUserAsync(username, cancellationToken);
+        if (DeskNotes.Problem(text) is { } problem) throw new ArgumentException(problem, nameof(text));
+        if (!await Task.Run(() => news.Store.HasEvent(eventId), cancellationToken))
+            throw new InvalidOperationException("This story is no longer available. Open a current story before adding a note.");
+        var mentions = DeskNotes.Mentions(text).Select(name => name.ToLowerInvariant()).ToList();
+        var recipients = (await db.AppUsers.AsNoTracking()
+            .Where(user => user.IsActive && user.Role == AppRoles.Admin && mentions.Contains(user.Username.ToLower()))
+            .Select(user => user.Username).ToListAsync(cancellationToken)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return await Task.Run(() => news.AddDeskNote(eventId, username, text, recipients.Contains), cancellationToken);
+    }
+
+    private async Task RequireDeskUserAsync(string username, CancellationToken cancellationToken)
+    {
+        if (!await db.AppUsers.AsNoTracking()
+                .AnyAsync(user => user.Username == username && user.IsActive && user.Role == AppRoles.Admin, cancellationToken))
+            throw new UnauthorizedAccessException("Only active administrators can access the news desk.");
+    }
+
     public async Task<Guid> CreateDraftAsync(StoryDocument story, EvidenceBoard? board, string username, CancellationToken cancellationToken = default)
     {
         // N11: nothing is drafted from a story on hold until its release time.

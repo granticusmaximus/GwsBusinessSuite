@@ -15,3 +15,4 @@
 .desk-beat-queue { margin-bottom: 0; padding-left: 1.5rem; }
 .desk-beat-queue li { margin-bottom: .75rem; overflow-wrap: anywhere; }
 .desk-beat-queue span { display: block; }
+.desk-handover-text { white-space: pre-wrap; overflow-wrap: anywhere; }

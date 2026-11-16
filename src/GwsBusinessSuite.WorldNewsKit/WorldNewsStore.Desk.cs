@@ -151,13 +151,30 @@ public sealed partial class WorldNewsStore
         insert.ExecuteNonQuery();
     }
 
+    // ---- N6 shift handover ----
+
+    public IReadOnlyDictionary<string, string> BudgetLabelLevels()
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT b.event_id, (SELECT level FROM label_snapshots WHERE event_id = b.event_id ORDER BY id DESC LIMIT 1)
+            FROM budget b
+            """;
+        using var reader = command.ExecuteReader();
+        var levels = new Dictionary<string, string>(StringComparer.Ordinal);
+        while (reader.Read())
+            if (!reader.IsDBNull(1)) levels[reader.GetString(0)] = reader.GetString(1);
+        return levels;
+    }
+
     // ---- N7 desk notes ----
 
     public IReadOnlyList<DeskNote> DeskNotes(string? eventId = null, int limit = 500)
     {
         using var connection = Open();
         using var command = connection.CreateCommand();
-        command.CommandText = "SELECT id, event_id, username, text, created_at FROM desk_notes" + (eventId is null ? "" : " WHERE event_id = $event") + " ORDER BY created_at DESC LIMIT $limit";
+        command.CommandText = "SELECT id, event_id, username, text, created_at FROM desk_notes" + (eventId is null ? "" : " WHERE event_id = $event") + " ORDER BY created_at DESC, rowid DESC LIMIT $limit";
         if (eventId is not null) command.Parameters.AddWithValue("$event", eventId);
         command.Parameters.AddWithValue("$limit", limit);
         using var reader = command.ExecuteReader();
@@ -170,8 +187,8 @@ public sealed partial class WorldNewsStore
     // or the event id when it isn't in one yet). Returns the note and the alerts to raise.
     public (DeskNote Note, IReadOnlyList<WorldNewsAlert> Alerts) AddDeskNote(string eventId, string username, string text, DateTimeOffset now, Func<string, bool>? knownUser = null)
     {
+        if (global::GwsBusinessSuite.WorldNewsKit.DeskNotes.Problem(text) is { } problem) throw new ArgumentException(problem, nameof(text));
         text = text.Trim();
-        if (text.Length > global::GwsBusinessSuite.WorldNewsKit.DeskNotes.MaxLength) text = text[..global::GwsBusinessSuite.WorldNewsKit.DeskNotes.MaxLength];
         var note = new DeskNote(NewId(), eventId, username, text, now);
         var title = Event(eventId) is { } e ? e.Headline ?? e.Title : "A story";
         var situationId = SituationOf(eventId) ?? eventId;

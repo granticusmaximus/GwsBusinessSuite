@@ -8,6 +8,8 @@
 @inject WorldNewsService News
 @inject ICurrentUserAccessor CurrentUserAccessor
 @inject ILogger<WorldNewsDesk> Logger
+@inject IServiceScopeFactory ScopeFactory
+@inject IJSRuntime JS
 
 @* World News trust plan N3/N4 (13-11-26): the story budget (what the desk is following, who owns
    it, where it stands, what's next) and the tips sent from /tip. *@
@@ -93,6 +95,34 @@
                     </ol>
                 }
             }
+        }
+    </div>
+</section>
+
+<section class="card border-0 shadow-sm mb-3" aria-labelledby="desk-handover">
+    <div class="card-header"><strong id="desk-handover">Shift handover</strong></div>
+    <div class="card-body">
+        <p class="small text-secondary">A factual draft of budget changes, single-source stories, holds, open challenges, tips and desk activity. Contains private newsroom material: share only within the desk.</p>
+        <form class="desk-beat-form" @onsubmit="GenerateHandoverAsync" @onsubmit:preventDefault>
+            <label>Look back
+                <select class="form-select form-select-sm" @bind="_handoverHours" disabled="@_handoverBusy">
+                    <option value="8">8 hours</option>
+                    <option value="12">12 hours</option>
+                    <option value="24">24 hours</option>
+                    <option value="72">72 hours</option>
+                </select>
+            </label>
+            <button type="submit" class="btn btn-sm btn-primary" disabled="@_handoverBusy">Generate handover</button>
+            <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@(_handoverBusy || _handover is null)" @onclick="CopyHandoverAsync">Copy handover</button>
+        </form>
+        @if (_handoverBusy) { <LoadingIndicator Message="Preparing the shift handover..." /> }
+        @if (_handoverError is { } handoverError) { <p class="alert alert-warning mt-3" role="alert">@handoverError</p> }
+        @if (_handoverStatus is { } handoverStatus) { <p class="small text-secondary mt-2" role="status">@handoverStatus</p> }
+        @if (_handover is not null)
+        {
+            <label class="form-label mt-3" for="desk-handover-text">Handover draft</label>
+            <textarea id="desk-handover-text" class="form-control desk-handover-text" rows="16" readonly>@_handover</textarea>
+            <p class="small text-secondary mt-2 mb-0">Includes the latest 1,000 label records in the period and up to 200 recent notes and live updates. Regenerate to include newer activity. No AI or external service is used.</p>
         }
     </div>
 </section>
@@ -184,6 +214,48 @@
     private string? _beatError;
     private bool _beatsBusy = true;
     private IReadOnlyList<string> BeatValues => _beatKind == BeatRules.Region ? WorldRegions.All : SituationKinds.All;
+    private int _handoverHours = 8;
+    private bool _handoverBusy;
+    private string? _handover;
+    private string? _handoverError;
+    private string? _handoverStatus;
+
+    private async Task GenerateHandoverAsync()
+    {
+        if (_handoverBusy) return;
+        _handoverBusy = true;
+        _handover = null;
+        _handoverError = _handoverStatus = null;
+        try
+        {
+            var hours = _handoverHours;
+            var username = await CurrentUserAccessor.GetCurrentUsernameAsync();
+            await using var scope = ScopeFactory.CreateAsyncScope();
+            _handover = await scope.ServiceProvider.GetRequiredService<WorldNewsDeskService>().HandoverAsync(hours, username);
+        }
+        catch (Exception ex) when (ex is Microsoft.Data.Sqlite.SqliteException or InvalidOperationException or UnauthorizedAccessException)
+        {
+            Logger.LogWarning(ex, "World News: couldn't prepare a shift handover");
+            _handoverError = "The handover couldn't be prepared. Refresh the desk and try again.";
+        }
+        finally { _handoverBusy = false; }
+    }
+
+    private async Task CopyHandoverAsync()
+    {
+        if (_handover is null) return;
+        _handoverError = _handoverStatus = null;
+        try
+        {
+            await JS.InvokeVoidAsync("gwsAssistant.copy", _handover);
+            _handoverStatus = "Handover copied. Share it only within the desk.";
+        }
+        catch (JSException ex)
+        {
+            Logger.LogWarning(ex, "World News: couldn't copy a shift handover");
+            _handoverError = "Clipboard access failed. Select and copy the handover draft below.";
+        }
+    }
 
     protected override async Task OnInitializedAsync()
     {

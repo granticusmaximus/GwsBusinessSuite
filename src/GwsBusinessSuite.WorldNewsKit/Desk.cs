@@ -44,6 +44,10 @@ public static partial class DeskNotes
 {
     public const int MaxLength = 4000;
 
+    public static string? Problem(string? text) =>
+        string.IsNullOrWhiteSpace(text) ? "Write a desk note first."
+        : text.Trim().Length > MaxLength ? $"Keep a desk note to {MaxLength} characters or fewer." : null;
+
     public static IReadOnlyList<string> Mentions(string text) =>
         Mention().Matches(text).Select(m => m.Groups[1].Value).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
 
@@ -210,7 +214,8 @@ public static class ShiftHandover
         IReadOnlyList<DeskNote> notes,
         IReadOnlyList<LiveUpdate> liveUpdates,
         Func<string, string?> titleOf,
-        Func<DateTimeOffset, string> formatTime)
+        Func<DateTimeOffset, string> formatTime,
+        IReadOnlyDictionary<string, string>? currentBudgetLabels = null)
     {
         var md = new StringBuilder();
         md.AppendLine($"# Handover, {formatTime(since)} to {formatTime(now)}").AppendLine();
@@ -238,7 +243,9 @@ public static class ShiftHandover
             md.AppendLine();
         }
 
-        var unconfirmed = budget.Where(item => labelChanges.Where(s => s.EventId == item.EventId).OrderBy(s => s.Id).LastOrDefault()?.Level == "SingleSource").ToList();
+        var unconfirmed = budget.Where(item =>
+            (currentBudgetLabels?.GetValueOrDefault(item.EventId)
+                ?? labelChanges.Where(s => s.EventId == item.EventId).OrderBy(s => s.Id).LastOrDefault()?.Level) == "SingleSource").ToList();
         if (unconfirmed.Count > 0)
         {
             md.AppendLine("## Still on one source").AppendLine();

@@ -322,6 +322,7 @@ else
                 }
             </ul>
             @if (_deskError is not null) { <p class="text-danger small" role="alert">@_deskError</p> }
+            <WorldNewsDeskNotes @key="e.Id" EventId="@e.Id" />
         </section>
 
         @* 1. What happened. *@

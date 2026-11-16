@@ -131,6 +131,47 @@ public sealed class WorldNewsDeskTests : IDisposable
     }
 
     [Fact]
+    public void DeskNotes_ShouldRejectEmptyOrOverlongText_WithoutSavingOrAlerting()
+    {
+        var store = Store();
+
+        foreach (var text in new[] { "", "   ", new string('x', DeskNotes.MaxLength + 1) })
+            Assert.Throws<ArgumentException>(() => store.AddDeskNote("e1", "ana", text, Now));
+
+        Assert.Empty(store.DeskNotes("e1"));
+        Assert.Empty(store.Alerts("ben"));
+    }
+
+    [Fact]
+    public void DeskNotes_ShouldKeepTheNewestNotesWhenTimestampsTie()
+    {
+        var store = Store();
+        store.AddDeskNote("e1", "ana", "First observation", Now);
+        var second = store.AddDeskNote("e1", "ana", "Second observation", Now).Note;
+        var latest = store.AddDeskNote("e1", "ben", "Latest observation", Now).Note;
+
+        Assert.Equal([latest.Id, second.Id], store.DeskNotes("e1", limit: 2).Select(note => note.Id));
+    }
+
+    [Fact]
+    public void HandoverLabels_ShouldReadOnlyRecentRecords_KeepTheLatestLimit_AndReturnThemInLedgerOrder()
+    {
+        var store = Store();
+        store.AppendLabelSnapshots([("old", "SingleSource", "Old label", 1, 1)], "v", Now.AddDays(-2));
+        store.AppendLabelSnapshots([("e1", "SingleSource", "First label", 1, 1)], "v", Now.AddHours(-3));
+        store.AppendLabelSnapshots([("e1", "Reported", "Second source", 2, 2)], "v", Now.AddHours(-2));
+        store.AppendLabelSnapshots([("e2", "Confirmed", "Official record", 3, 3)], "v", Now.AddHours(-1));
+
+        var latest = store.LabelSnapshots(since: Now.AddHours(-8), limit: 2);
+
+        Assert.Equal(["e1", "e2"], latest.Select(snapshot => snapshot.EventId));
+        Assert.Equal(["Reported", "Confirmed"], latest.Select(snapshot => snapshot.Level));
+        Assert.Equal(3, store.LabelSnapshots(since: Now.AddHours(-8)).Count);
+        Assert.Equal(4, store.LabelSnapshots().Count);
+        Assert.Equal("Reported", Assert.Single(store.LabelSnapshots("e1", Now.AddHours(-8), 1)).Level);
+    }
+
+    [Fact]
     public void SourceBook_ShouldBePrivateToItsOwner_AndTrackAccuracy()
     {
         var store = Store();

@@ -1,0 +1,4 @@
+.desk-notes { margin-top: 1.25rem; padding-top: 1rem; border-top: 1px solid var(--neu-border, var(--bs-border-color)); }
+.desk-notes-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; margin-top: .5rem; }
+.desk-notes-list li { padding: .75rem 0; border-top: 1px solid var(--neu-border, var(--bs-border-color)); }
+.desk-note-text { white-space: pre-wrap; overflow-wrap: anywhere; margin: .25rem 0 0; }

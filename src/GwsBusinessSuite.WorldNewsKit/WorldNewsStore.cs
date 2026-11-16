@@ -106,6 +106,7 @@ public sealed partial class WorldNewsStore
                 id INTEGER PRIMARY KEY AUTOINCREMENT, event_id TEXT NOT NULL, level TEXT NOT NULL, reason TEXT NOT NULL, independent INTEGER NOT NULL,
                 outlets INTEGER NOT NULL, rules_version TEXT NOT NULL, taken_at INTEGER NOT NULL, previous_hash TEXT NOT NULL, hash TEXT NOT NULL);
             CREATE INDEX IF NOT EXISTS ix_label_snapshots_event ON label_snapshots (event_id, id);
+            CREATE INDEX IF NOT EXISTS ix_label_snapshots_taken ON label_snapshots (taken_at);
             CREATE TABLE IF NOT EXISTS label_challenges (
                 id TEXT PRIMARY KEY, event_id TEXT NOT NULL, username TEXT NOT NULL, note TEXT NOT NULL, evidence_url TEXT, created_at INTEGER NOT NULL,
                 status TEXT NOT NULL, resolved_by TEXT, resolution TEXT, resolved_at INTEGER);
@@ -517,13 +518,22 @@ public sealed partial class WorldNewsStore
         return added;
     }
 
-    public IReadOnlyList<LabelSnapshot> LabelSnapshots(string? eventId = null)
+    public IReadOnlyList<LabelSnapshot> LabelSnapshots(string? eventId = null, DateTimeOffset? since = null, int? limit = null)
     {
+        if (limit is <= 0) throw new ArgumentOutOfRangeException(nameof(limit));
         using var connection = Open();
         using var command = connection.CreateCommand();
-        command.CommandText = "SELECT id, event_id, level, reason, independent, outlets, rules_version, taken_at, previous_hash, hash FROM label_snapshots "
-            + (eventId is null ? "" : "WHERE event_id = $event ") + "ORDER BY id";
+        var conditions = new List<string>();
+        if (eventId is not null) conditions.Add("event_id = $event");
+        if (since is not null) conditions.Add("taken_at >= $since");
+        var query = "SELECT id, event_id, level, reason, independent, outlets, rules_version, taken_at, previous_hash, hash FROM label_snapshots"
+            + (conditions.Count == 0 ? "" : " WHERE " + string.Join(" AND ", conditions));
+        command.CommandText = limit is not null
+            ? $"SELECT * FROM ({query} ORDER BY id DESC LIMIT $limit) ORDER BY id"
+            : query + " ORDER BY id";
         if (eventId is not null) command.Parameters.AddWithValue("$event", eventId);
+        if (since is { } start) command.Parameters.AddWithValue("$since", start.ToUnixTimeSeconds());
+        if (limit is { } count) command.Parameters.AddWithValue("$limit", count);
         using var reader = command.ExecuteReader();
         var snapshots = new List<LabelSnapshot>();
         while (reader.Read())

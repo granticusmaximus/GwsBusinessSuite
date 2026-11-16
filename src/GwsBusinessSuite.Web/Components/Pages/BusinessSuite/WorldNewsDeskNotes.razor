@@ -1,0 +1,115 @@
+@using GwsBusinessSuite.Application.Abstractions
+@using GwsBusinessSuite.Infrastructure.Services
+@using GwsBusinessSuite.WorldNewsKit
+@inject IServiceScopeFactory ScopeFactory
+@inject ICurrentUserAccessor CurrentUserAccessor
+@inject ILogger<WorldNewsDeskNotes> Logger
+
+<section class="desk-notes" aria-label="Private desk notes">
+    <h3 class="h6">Desk notes</h3>
+    <p class="small text-secondary">Shared with the admin desk, not published with the story. Mention an active admin as @@username to notify them.</p>
+    @if (_error is { } error) { <p class="alert alert-warning" role="alert">@error</p> }
+    <form @onsubmit="SaveAsync" @onsubmit:preventDefault>
+        <fieldset disabled="@(_loading || _saving)">
+            <legend class="visually-hidden">Add a private desk note</legend>
+            <textarea class="form-control form-control-sm" rows="3" maxlength="@DeskNotes.MaxLength"
+                      aria-label="New desk note" placeholder="What did you check, and what should the next person know?"
+                      @bind="_text" @bind:event="oninput"></textarea>
+            <div class="desk-notes-actions">
+                <button type="submit" class="btn btn-sm btn-outline-primary" disabled="@(string.IsNullOrWhiteSpace(_text))">Add note</button>
+                <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="LoadAsync">Refresh notes</button>
+                <span class="small text-secondary">@_text.Length / @DeskNotes.MaxLength</span>
+            </div>
+        </fieldset>
+    </form>
+    @if (_loading || _saving)
+    {
+        <LoadingIndicator Message="@(_saving ? "Saving the desk note..." : "Loading desk notes...")" />
+    }
+    else if (_error is null && _notes.Count == 0)
+    {
+        <p class="small text-secondary mt-2">No desk notes on this story yet.</p>
+    }
+    @if (_notes.Count > 0)
+    {
+        <p class="small text-secondary mt-3">Latest @(_notes.Count == 100 ? "100 " : "")notes, newest first.</p>
+        <ol class="list-unstyled desk-notes-list">
+            @foreach (var note in _notes)
+            {
+                <li @key="note.Id">
+                    <div class="small text-secondary">@note.Username · @note.CreatedAt.ToLocalGwsDateTime()</div>
+                    <p class="desk-note-text">@note.Text</p>
+                </li>
+            }
+        </ol>
+    }
+</section>
+
+@code {
+    [Parameter, EditorRequired] public string EventId { get; set; } = string.Empty;
+
+    private IReadOnlyList<DeskNote> _notes = [];
+    private string _text = string.Empty;
+    private string? _error;
+    private string? _loadedFor;
+    private bool _loading;
+    private bool _saving;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_loadedFor == EventId) return;
+        _loadedFor = EventId;
+        _notes = [];
+        _text = string.Empty;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        var eventId = EventId;
+        _loading = true;
+        _error = null;
+        try
+        {
+            var username = await CurrentUserAccessor.GetCurrentUsernameAsync();
+            await using var scope = ScopeFactory.CreateAsyncScope();
+            var notes = await scope.ServiceProvider.GetRequiredService<WorldNewsDeskService>().NotesAsync(eventId, username);
+            if (eventId == EventId) _notes = notes;
+        }
+        catch (Exception ex) when (ex is Microsoft.Data.Sqlite.SqliteException or InvalidOperationException or UnauthorizedAccessException)
+        {
+            Logger.LogWarning(ex, "World News: couldn't load desk notes for {EventId}", eventId);
+            if (eventId == EventId)
+            {
+                _notes = [];
+                _error = "Desk notes couldn't be loaded. Try refreshing them.";
+            }
+        }
+        finally { if (eventId == EventId) _loading = false; }
+    }
+
+    private async Task SaveAsync()
+    {
+        if (_saving || _loading) return;
+        _error = DeskNotes.Problem(_text);
+        if (_error is not null) return;
+        var eventId = EventId;
+        var text = _text;
+        _saving = true;
+        try
+        {
+            var username = await CurrentUserAccessor.GetCurrentUsernameAsync();
+            await using var scope = ScopeFactory.CreateAsyncScope();
+            await scope.ServiceProvider.GetRequiredService<WorldNewsDeskService>().AddNoteAsync(eventId, text, username);
+            if (eventId != EventId) return;
+            _text = string.Empty;
+            await LoadAsync();
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or UnauthorizedAccessException or Microsoft.Data.Sqlite.SqliteException)
+        {
+            Logger.LogWarning(ex, "World News: couldn't save a desk note for {EventId}", eventId);
+            if (eventId == EventId) _error = "The note couldn't be saved. Refresh the story and try again; your text has been kept.";
+        }
+        finally { _saving = false; }
+    }
+}

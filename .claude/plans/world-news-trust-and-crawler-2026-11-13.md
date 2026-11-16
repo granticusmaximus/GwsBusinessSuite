@@ -200,6 +200,18 @@ and the write-up both draw on the evidence; then B3-B9 and N5-N15; B10 (reading)
     tests. Its changes to those three files were reversed in the working tree without rewriting history.
   - Remaining product work is still the N5-N15 UI/endpoints and B10 reading features. The N5-N15
     backend from 04d4f0f should be extended, not rebuilt in parallel.
-- 16-11-26: N5 personal beat UI/queue implementation started after confirming the existing
-  `Beats`/`BeatQueue`/`CreateBeatAlerts` backend and pipeline. This unit is tracked in
-  `open-work-and-newsroom-beats-2026-11-16.md`; it does not close N6-N15 or B10.
+- 16-11-26: N5 personal beat UI/queue implemented on News desk using the existing
+  `Beats`/`BeatQueue`/`CreateBeatAlerts` backend and pipeline. Also fixed corroboration retries
+  consuming alert history and cross-owner beat removal clearing another person's alert history.
+  World News guide updated; focused newsroom tests passed (43). The full release-gate invocation
+  was interrupted; Grant stopped further tests in this workspace because Docker is absent.
+  Release readiness and browser interaction remain unverified. Handoff:
+  `open-work-and-newsroom-beats-2026-11-16.md`. N6-N15 and B10 remain open.
+- 16-11-26 World News continuation: N6 handover and N7 desk-note UI implemented, using the existing
+  newsroom store/service. Handover is on demand, copied as plain text, and keeps unchanged
+  single-source budget stories visible; recent label reads are capped and time-indexed.
+  Story notes use fresh service scopes and active-admin checks for both access and mention
+  recipients. Blank/overlong notes are rejected without truncation. Guide and regression-test
+  sources updated. No tests, builds or release gate run for this continuation, per Grant's
+  instruction; compilation, browser behavior and release readiness remain unverified.
+  N8-N15 and B10 remain open.
