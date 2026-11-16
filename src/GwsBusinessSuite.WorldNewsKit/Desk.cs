@@ -69,8 +69,10 @@ public static class SourceBook
     public static double? Accuracy(IEnumerable<SourceUse> uses)
     {
         var known = uses.Where(use => use.Outcome is "held" or "wrong").ToList();
-        return known.Count == 0 ? null : (double)known.Count(use => use.Outcome == "held") / known.Count;
+        return Accuracy(known.Count(use => use.Outcome == "held"), known.Count(use => use.Outcome == "wrong"));
     }
+
+    public static double? Accuracy(int held, int wrong) => held + wrong == 0 ? null : (double)held / (held + wrong);
 
     public static string? Problem(string name, int reliability) =>
         string.IsNullOrWhiteSpace(name) ? "A contact needs a name." : reliability is < 1 or > 5 ? "Reliability is 1 to 5." : null;
@@ -80,6 +82,8 @@ public static class SourceBook
 // two different people; each signature is chained to the one before, like the label ledger, so a
 // signature can't be rewritten without breaking the chain.
 public sealed record SignOff(long Id, string EventId, string Kind, string Username, string LabelLevel, DateTimeOffset At, string PreviousHash, string Hash);
+
+public sealed record DeskApprovals(IReadOnlyList<SignOff> Records, bool ChecklistComplete, string LabelLevel);
 
 public static class SignOffs
 {
@@ -93,7 +97,9 @@ public static class SignOffs
     // Null when this person may sign now; otherwise why not.
     public static string? Problem(IEnumerable<SignOff> existing, string kind, string username, bool checklistComplete)
     {
-        if (kind == Verdict && !checklistComplete) return "Finish the verification checklist first.";
+        if (kind is not (Verdict or Publish)) return "Choose a verdict or publication approval.";
+        if (string.IsNullOrWhiteSpace(username)) return "Sign in before recording an approval.";
+        if (!checklistComplete) return "Finish the verification checklist first.";
         if (kind == Publish && !IsComplete(existing, Verdict)) return "The verdict needs two sign-offs before publication can be signed.";
         if (existing.Any(s => s.Kind == kind && string.Equals(s.Username, username, StringComparison.OrdinalIgnoreCase))) return "You've already signed this; a second person must sign.";
         return null;

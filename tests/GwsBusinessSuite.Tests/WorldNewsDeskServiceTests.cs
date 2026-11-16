@@ -68,6 +68,13 @@ public sealed class WorldNewsDeskServiceTests : IAsyncLifetime
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() => _desk.NotesAsync("e1", username));
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() => _desk.AddNoteAsync("e1", "Private desk note", username));
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() => _desk.HandoverAsync(8, username));
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => _desk.ContactsAsync(username));
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => _desk.SaveContactAsync(new SourceContact("", "ana", "Source", "", "", 3, "", DateTimeOffset.UtcNow), username));
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => _desk.RemoveContactAsync("source", username));
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => _desk.SourceHistoryAsync("source", username));
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => _desk.RecordSourceUseAsync("source", "e1", "held", "", username));
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => _desk.ApprovalsAsync("e1", username));
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => _desk.SignAsync("e1", SignOffs.Verdict, username));
 
         Assert.Empty(_news.Store.DeskNotes("e1"));
     }
@@ -96,6 +103,63 @@ public sealed class WorldNewsDeskServiceTests : IAsyncLifetime
         Assert.Contains("- Quake hits Tokyo (ana)", handover);
         Assert.DoesNotContain("## Labels that changed", handover);
         Assert.DoesNotContain("not-on-budget", handover);
+    }
+
+    [Fact]
+    public async Task SourceBook_ShouldDeriveOwnershipFromTheCaller_AndKeepAdminContactsPrivate()
+    {
+        var contact = await _desk.SaveContactAsync(new SourceContact("", "ben", "Private source", "Private organisation",
+            "Private contact", 4, "Private notes", DateTimeOffset.UtcNow), "ana");
+
+        Assert.Equal("ana", contact.Owner);
+        Assert.Single(await _desk.ContactsAsync("ana"));
+        Assert.Empty(await _desk.ContactsAsync("ben"));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => _desk.SourceHistoryAsync(contact.Id, "ben"));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => _desk.SaveContactAsync(contact with { Name = "Stolen" }, "ben"));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => _desk.RecordSourceUseAsync(contact.Id, "e1", "held", "Other person's note", "ben"));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => _desk.RemoveContactAsync(contact.Id, "ben"));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => _desk.RecordSourceUseAsync(contact.Id, "missing", "held", "", "ana"));
+        await Assert.ThrowsAsync<ArgumentException>(() => _desk.RecordSourceUseAsync(contact.Id, "e1", "maybe", "", "ana"));
+        await _desk.RecordSourceUseAsync(contact.Id, "e1", "unknown", "Private use note", "ana");
+        await _desk.RecordSourceUseAsync(contact.Id, "e1", "held", "Checked privately", "ana");
+
+        var history = await _desk.SourceHistoryAsync(contact.Id, "ana");
+        Assert.Equal((1, 1, 0), history.Counts);
+        Assert.Equal("held", Assert.Single(history.Uses).Outcome);
+        Assert.Empty(_news.Store.DeskNotes());
+        var handover = await _desk.HandoverAsync(8, "ana");
+        Assert.DoesNotContain(contact.Name, handover);
+        Assert.DoesNotContain(contact.Contact, handover);
+        Assert.DoesNotContain(contact.Notes, handover);
+        Assert.DoesNotContain("Checked privately", handover);
+    }
+
+    [Fact]
+    public async Task Approvals_ShouldRequireTwoPeople_AndKeepTheGlobalChainAcrossStories()
+    {
+        await Assert.ThrowsAsync<InvalidOperationException>(() => _desk.SignAsync("missing", SignOffs.Verdict, "ana"));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => _desk.SignAsync("e1", SignOffs.Verdict, "ana"));
+        _store.SeedEvent("s2", "e2", "Another story", ["A", "B"], WorldNewsTestStore.Now);
+        foreach (var eventId in new[] { "e1", "e2" })
+            foreach (var (key, _, _) in DeskChecklist.Items)
+                _news.Store.SetDeskCheck(eventId, key, true, "Checked the record", "ana", DateTimeOffset.UtcNow);
+
+        var first = await _desk.SignAsync("e1", SignOffs.Verdict, "ana");
+        await _desk.SignAsync("e2", SignOffs.Verdict, "ana");
+        await Assert.ThrowsAsync<InvalidOperationException>(() => _desk.SignAsync("e1", SignOffs.Verdict, "ana"));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => _desk.SignAsync("e1", SignOffs.Publish, "ben"));
+        await _desk.SignAsync("e1", SignOffs.Verdict, "ben");
+        await _desk.SignAsync("e1", SignOffs.Publish, "ana");
+        await _desk.SignAsync("e1", SignOffs.Publish, "ben");
+
+        var state = await _desk.ApprovalsAsync("e1", "ana");
+        Assert.True(state.ChecklistComplete);
+        Assert.Equal(state.LabelLevel, first.LabelLevel);
+        Assert.True(SignOffs.IsComplete(state.Records, SignOffs.Verdict));
+        Assert.True(SignOffs.IsComplete(state.Records, SignOffs.Publish));
+        Assert.Equal(4, state.Records.Count);
+        Assert.Null(SignOffs.FirstBroken(_news.Store.SignOffs()));
+        Assert.Empty(_db.Articles);
     }
 
     public async Task DisposeAsync()

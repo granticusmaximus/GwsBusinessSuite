@@ -1,0 +1,98 @@
+@using GwsBusinessSuite.Application.Abstractions
+@using GwsBusinessSuite.Infrastructure.Services
+@using GwsBusinessSuite.WorldNewsKit
+@inject IServiceScopeFactory ScopeFactory
+@inject ICurrentUserAccessor CurrentUserAccessor
+@inject ILogger<WorldNewsSignOffs> Logger
+
+<section class="desk-signoffs" aria-label="Desk approval records">
+    <h3 class="h6">Two-person approval records</h3>
+    <p class="small text-secondary">Historical desk approvals, not a CMS publishing gate.
+        Signing does not publish an article, release a hold or approve later changes to the story, checklist or article.
+        Each person can sign each kind once; records cannot be edited here.</p>
+    @if (_error is { } error) { <p class="alert alert-warning" role="alert">@error</p> }
+    @if (_status is { } status) { <p class="small" role="status">@status</p> }
+    <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@_busy" @onclick="LoadAsync">Refresh approvals</button>
+    @if (_busy) { <LoadingIndicator Message="Updating desk approval records..." /> }
+    @if (_state is { } state)
+    {
+        <p class="small text-secondary mt-2">Current stored-story label: @state.LabelLevel.
+            Checklist: @(state.ChecklistComplete ? "complete" : "incomplete").</p>
+        @foreach (var kind in new[] { SignOffs.Verdict, SignOffs.Publish })
+        {
+            var records = state.Records.Where(record => record.Kind == kind).ToList();
+            var problem = SignOffs.Problem(state.Records, kind, _username, state.ChecklistComplete);
+            <div class="desk-approval-kind" @key="kind">
+                <h4 class="h6">@(kind == SignOffs.Verdict ? "Verdict" : "Publication") approvals</h4>
+                <p class="small">@(SignOffs.IsComplete(records, kind) ? "Two-person threshold recorded." : $"{records.Count} of {SignOffs.Needed} people recorded.")</p>
+                <ul class="list-unstyled">
+                    @foreach (var record in records)
+                    {
+                        <li @key="record.Id">
+                            <strong>@record.Username</strong> - @record.At.ToLocalGwsDateTime() - @record.LabelLevel
+                            <details><summary class="small">Record hash</summary><code>@record.Hash</code></details>
+                        </li>
+                    }
+                </ul>
+                <button type="button" class="btn btn-sm btn-outline-primary" disabled="@(_busy || problem is not null)"
+                        @onclick="() => SignAsync(kind)">@(kind == SignOffs.Verdict ? "Sign verdict approval" : "Sign publication approval")</button>
+                @if (problem is not null) { <p class="small text-secondary mt-1">@problem</p> }
+            </div>
+        }
+        <p class="small text-secondary">These hashes belong to the shared, cross-story approval ledger.
+            This view does not independently verify the full chain or sign an immutable article revision.</p>
+    }
+</section>
+
+@code {
+    [Parameter, EditorRequired] public string EventId { get; set; } = string.Empty;
+    [Parameter] public bool ChecklistComplete { get; set; }
+
+    private DeskApprovals? _state;
+    private string _username = string.Empty;
+    private string? _loadedFor, _error, _status;
+    private bool _loadedChecklist, _busy;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_loadedFor == EventId && _loadedChecklist == ChecklistComplete) return;
+        _loadedFor = EventId;
+        await LoadAsync();
+    }
+
+    private Task LoadAsync() => UpdateAsync(null);
+    private Task SignAsync(string kind) => UpdateAsync(kind);
+
+    private async Task UpdateAsync(string? kind)
+    {
+        if (_busy) return;
+        var eventId = EventId;
+        _loadedChecklist = ChecklistComplete;
+        _busy = true;
+        _error = _status = null;
+        _state = null;
+        try
+        {
+            var username = await CurrentUserAccessor.GetCurrentUsernameAsync();
+            await using var scope = ScopeFactory.CreateAsyncScope();
+            var desk = scope.ServiceProvider.GetRequiredService<WorldNewsDeskService>();
+            if (kind is not null)
+            {
+                await desk.SignAsync(eventId, kind, username);
+                if (eventId == EventId) _status = "Approval recorded. CMS publishing is unchanged.";
+            }
+            var state = await desk.ApprovalsAsync(eventId, username);
+            if (eventId == EventId) { _username = username; _state = state; }
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or UnauthorizedAccessException or Microsoft.Data.Sqlite.SqliteException)
+        {
+            Logger.LogWarning(ex, "World News: couldn't update approval records for {EventId}", eventId);
+            if (eventId == EventId)
+                _error = ex is Microsoft.Data.Sqlite.SqliteException
+                    ? "Approval records couldn't be refreshed. Refresh before retrying; a signature may already have been saved."
+                    : ex.Message;
+        }
+        finally { _busy = false; }
+        if (eventId == EventId && _loadedChecklist != ChecklistComplete) await LoadAsync();
+    }
+}

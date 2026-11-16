@@ -1,0 +1,280 @@
+@page "/admin/world-news/source-book"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = "AdminOnly")]
+@using Microsoft.AspNetCore.Authorization
+@using GwsBusinessSuite.Application.Abstractions
+@using GwsBusinessSuite.Infrastructure.Services
+@using GwsBusinessSuite.WorldNewsKit
+@inject IServiceScopeFactory ScopeFactory
+@inject ICurrentUserAccessor CurrentUserAccessor
+@inject ILogger<WorldNewsSourceBook> Logger
+
+<PageTitle>My World News source book</PageTitle>
+<PageHeader Title="My source book" Icon="bi-person-lines-fill" Description="Your private World News contacts and their track records.">
+    <Actions>
+        <a class="btn btn-outline-secondary" href="admin/world-news/desk">News desk</a>
+        @if (!string.IsNullOrWhiteSpace(EventId))
+        {
+            <a class="btn btn-outline-secondary" href="@($"admin/world-news/events/{Uri.EscapeDataString(EventId)}")">Back to story</a>
+        }
+    </Actions>
+</PageHeader>
+
+<p class="small text-secondary">Only your account can access these contacts, including their notes and history. Other admins cannot see them.
+    They are not added to AI prompts, shared desk notes, handovers or article exports.</p>
+@if (_error is { } error) { <p class="alert alert-warning" role="alert">@error</p> }
+@if (_status is { } status) { <p class="alert alert-success" role="status">@status</p> }
+@if (_busy) { <LoadingIndicator Message="Updating your private source book..." /> }
+
+<section class="card mb-3" aria-label="My contacts">
+    <div class="card-body">
+        <div class="source-actions">
+            <h2 class="h5 mb-0">My contacts</h2>
+            <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@_busy" @onclick="RefreshAsync">Refresh contacts</button>
+        </div>
+        @if (_loaded && _contacts.Count == 0) { <p class="small text-secondary">No contacts on this page.</p> }
+        <ul class="list-unstyled source-list">
+            @foreach (var contact in _contacts)
+            {
+                <li @key="contact.Id">
+                    <strong>@contact.Name</strong> <span class="text-secondary">@contact.Organisation</span>
+                    <div class="source-text small">@contact.Contact</div>
+                    <div class="small text-secondary">Manual reliability: @contact.Reliability / 5</div>
+                    <div class="source-actions">
+                        <button type="button" class="btn btn-sm btn-outline-primary" disabled="@_busy" @onclick="() => Edit(contact)">Edit</button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@_busy" @onclick="() => ShowHistoryAsync(contact)">History / record use</button>
+                        <button type="button" class="btn btn-sm btn-outline-danger" disabled="@_busy" @onclick="() => _removeId = contact.Id">Remove</button>
+                    </div>
+                    @if (_removeId == contact.Id)
+                    {
+                        <div class="alert alert-warning mt-2">
+                            Remove this contact and all its private use history? This cannot be undone.
+                            <div class="source-actions">
+                                <button type="button" class="btn btn-sm btn-danger" disabled="@_busy" @onclick="() => RemoveAsync(contact.Id)">Remove permanently</button>
+                                <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@_busy" @onclick="() => _removeId = null">Cancel</button>
+                            </div>
+                        </div>
+                    }
+                </li>
+            }
+        </ul>
+        <nav class="source-actions" aria-label="Contact pages">
+            <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@(_busy || _page == 0)" @onclick="() => ChangePageAsync(-1)">Previous contacts</button>
+            <span class="small">Page @(_page + 1)</span>
+            <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@(_busy || !_hasMore)" @onclick="() => ChangePageAsync(1)">Next contacts</button>
+        </nav>
+    </div>
+</section>
+
+<section class="card mb-3" aria-label="Contact editor">
+    <div class="card-body">
+        <h2 class="h5">@(_edit.Id.Length == 0 ? "Add a contact" : "Edit contact")</h2>
+        <form @onsubmit="SaveAsync" @onsubmit:preventDefault>
+            <fieldset class="source-fields" disabled="@_busy">
+                <legend class="visually-hidden">Contact details</legend>
+                <label>Name <input class="form-control" @bind="_edit.Name" @bind:event="oninput" required /></label>
+                <label>Organisation <input class="form-control" @bind="_edit.Organisation" @bind:event="oninput" /></label>
+                <label>Contact details <textarea class="form-control" rows="2" @bind="_edit.Contact" @bind:event="oninput"></textarea></label>
+                <label>Manual reliability (1 low, 5 high)
+                    <select class="form-select" @bind="_edit.Reliability">
+                        @for (var value = 1; value <= 5; value++) { <option value="@value">@value</option> }
+                    </select>
+                </label>
+                <label>Private notes <textarea class="form-control" rows="3" @bind="_edit.Notes" @bind:event="oninput"></textarea></label>
+                <p class="small text-secondary mb-0">Reliability is your own assessment, not measured past accuracy.</p>
+                <div class="source-actions">
+                    <button type="submit" class="btn btn-primary" disabled="@(string.IsNullOrWhiteSpace(_edit.Name))">Save contact</button>
+                    <button type="button" class="btn btn-outline-secondary" @onclick="() => _edit = new()">Clear / new contact</button>
+                </div>
+            </fieldset>
+        </form>
+    </div>
+</section>
+
+@if (_selected is { } selected)
+{
+    <section class="card mb-3" aria-label="Private source use history">
+        <div class="card-body">
+            <h2 class="h5">Use history: @selected.Name</h2>
+            @if (_historyLoaded)
+            {
+                <p class="small text-secondary">@_counts.Total stories; @_counts.Held held, @_counts.Wrong wrong.
+                    Past accuracy: @(SourceBook.Accuracy(_counts.Held, _counts.Wrong) is { } accuracy ? accuracy.ToString("P0") : "not yet known").
+                    Unknown outcomes are excluded from accuracy, not counted as failures.</p>
+                <ul class="list-unstyled source-list">
+                    @foreach (var use in _history)
+                    {
+                        <li @key="use.EventId">
+                            <a href="@($"admin/world-news/events/{Uri.EscapeDataString(use.EventId)}")">Open story</a>
+                            <span class="small text-secondary">@use.At.ToLocalGwsDateTime() - @use.Outcome</span>
+                            <p class="source-text">@use.Note</p>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@_busy" @onclick="() => EditUse(use)">Edit this outcome</button>
+                        </li>
+                    }
+                </ul>
+                <nav class="source-actions" aria-label="History pages">
+                    <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@(_busy || _historyPage == 0)" @onclick="() => ChangeHistoryPageAsync(-1)">Previous history</button>
+                    <span class="small">Page @(_historyPage + 1)</span>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@(_busy || !_historyMore)" @onclick="() => ChangeHistoryPageAsync(1)">Next history</button>
+                </nav>
+            }
+            <h3 class="h6 mt-3">Record or update use on a story</h3>
+            <p class="small text-secondary">One outcome is kept per contact and story; saving again replaces it.
+                Use a story's <strong>My source book</strong> link to prefill its ID.
+                Retained history can outlive a story, so an old story link may no longer open.</p>
+            <form @onsubmit="SaveUseAsync" @onsubmit:preventDefault>
+                <fieldset class="source-fields" disabled="@_busy">
+                    <legend class="visually-hidden">Private story use</legend>
+                    <label>Story ID <input class="form-control" @bind="_useStory" @bind:event="oninput" required /></label>
+                    <label>Outcome
+                        <select class="form-select" @bind="_useOutcome">
+                            @foreach (var outcome in SourceBook.Outcomes) { <option value="@outcome">@outcome</option> }
+                        </select>
+                    </label>
+                    <label>Private use notes <textarea class="form-control" rows="3" @bind="_useNote" @bind:event="oninput"></textarea></label>
+                    <div><button type="submit" class="btn btn-outline-primary" disabled="@(string.IsNullOrWhiteSpace(_useStory))">Save outcome</button></div>
+                </fieldset>
+            </form>
+        </div>
+    </section>
+}
+
+@code {
+    [SupplyParameterFromQuery(Name = "event")] public string? EventId { get; set; }
+
+    private IReadOnlyList<SourceContact> _contacts = [];
+    private IReadOnlyList<SourceUse> _history = [];
+    private (int Total, int Held, int Wrong) _counts;
+    private ContactEdit _edit = new();
+    private SourceContact? _selected;
+    private string? _queryEvent, _removeId, _error, _status;
+    private string _useStory = string.Empty, _useOutcome = "unknown", _useNote = string.Empty;
+    private int _page, _historyPage;
+    private bool _busy, _loaded, _hasMore, _historyMore, _historyLoaded;
+
+    protected override Task OnInitializedAsync() => RefreshAsync();
+
+    protected override void OnParametersSet()
+    {
+        if (_queryEvent == EventId) return;
+        _queryEvent = EventId;
+        _useStory = EventId ?? string.Empty;
+        _useOutcome = "unknown";
+        _useNote = string.Empty;
+    }
+
+    private async Task RunAsync(Func<WorldNewsDeskService, string, Task> action)
+    {
+        if (_busy) return;
+        _busy = true;
+        _error = _status = null;
+        try
+        {
+            var username = await CurrentUserAccessor.GetCurrentUsernameAsync();
+            await using var scope = ScopeFactory.CreateAsyncScope();
+            await action(scope.ServiceProvider.GetRequiredService<WorldNewsDeskService>(), username);
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or UnauthorizedAccessException or Microsoft.Data.Sqlite.SqliteException)
+        {
+            Logger.LogWarning(ex, "World News: private source-book operation failed");
+            _status = null;
+            _error = ex is Microsoft.Data.Sqlite.SqliteException
+                ? "The source book couldn't be updated. Refresh it and check before retrying; your input has been kept."
+                : ex.Message;
+            _contacts = [];
+            _history = [];
+            _loaded = _historyLoaded = false;
+        }
+        finally { _busy = false; }
+    }
+
+    private async Task LoadContactsAsync(WorldNewsDeskService desk, string username, int page)
+    {
+        var contacts = await desk.ContactsAsync(username, page);
+        if (contacts.Count == 0 && page > 0) { page--; contacts = await desk.ContactsAsync(username, page); }
+        _page = page;
+        _hasMore = contacts.Count > WorldNewsDeskService.SourceBookPageSize;
+        _contacts = contacts.Take(WorldNewsDeskService.SourceBookPageSize).ToList();
+        _loaded = true;
+    }
+
+    private Task RefreshAsync() => RunAsync((desk, user) => LoadContactsAsync(desk, user, _page));
+    private Task ChangePageAsync(int direction) => RunAsync((desk, user) => LoadContactsAsync(desk, user, _page + direction));
+
+    private void Edit(SourceContact contact) => _edit = new()
+    {
+        Id = contact.Id, Name = contact.Name, Organisation = contact.Organisation,
+        Contact = contact.Contact, Reliability = contact.Reliability, Notes = contact.Notes,
+    };
+
+    private Task SaveAsync() => RunAsync(async (desk, user) =>
+    {
+        var saved = await desk.SaveContactAsync(new SourceContact(_edit.Id, string.Empty, _edit.Name, _edit.Organisation,
+            _edit.Contact, _edit.Reliability, _edit.Notes, DateTimeOffset.UtcNow), user);
+        Edit(saved);
+        if (_selected?.Id == saved.Id) _selected = saved;
+        _status = "Contact saved.";
+        await LoadContactsAsync(desk, user, _page);
+    });
+
+    private Task RemoveAsync(string id) => RunAsync(async (desk, user) =>
+    {
+        await desk.RemoveContactAsync(id, user);
+        _removeId = null;
+        if (_edit.Id == id) _edit = new();
+        if (_selected?.Id == id) { _selected = null; _history = []; _historyLoaded = false; }
+        _status = "Contact and private history removed.";
+        await LoadContactsAsync(desk, user, _page);
+    });
+
+    private async Task LoadHistoryAsync(WorldNewsDeskService desk, string user, string id, int page)
+    {
+        _historyLoaded = false;
+        _history = [];
+        var result = await desk.SourceHistoryAsync(id, user, page);
+        _historyPage = page;
+        _historyMore = result.Uses.Count > WorldNewsDeskService.SourceBookPageSize;
+        _history = result.Uses.Take(WorldNewsDeskService.SourceBookPageSize).ToList();
+        _counts = result.Counts;
+        _historyLoaded = true;
+    }
+
+    private Task ShowHistoryAsync(SourceContact contact) => RunAsync(async (desk, user) =>
+    {
+        _selected = contact;
+        _useStory = EventId ?? string.Empty;
+        _useOutcome = "unknown";
+        _useNote = string.Empty;
+        await LoadHistoryAsync(desk, user, contact.Id, 0);
+    });
+
+    private Task ChangeHistoryPageAsync(int direction) => RunAsync(async (desk, user) =>
+    {
+        if (_selected is { } contact) await LoadHistoryAsync(desk, user, contact.Id, _historyPage + direction);
+    });
+
+    private void EditUse(SourceUse use)
+    {
+        _useStory = use.EventId;
+        _useOutcome = use.Outcome;
+        _useNote = use.Note;
+    }
+
+    private Task SaveUseAsync() => RunAsync(async (desk, user) =>
+    {
+        if (_selected is not { } contact) throw new InvalidOperationException("Choose a contact first.");
+        await desk.RecordSourceUseAsync(contact.Id, _useStory.Trim(), _useOutcome, _useNote, user);
+        _status = "Private story outcome saved.";
+        await LoadHistoryAsync(desk, user, contact.Id, 0);
+    });
+
+    private sealed class ContactEdit
+    {
+        public string Id { get; set; } = string.Empty;
+        public string Name { get; set; } = string.Empty;
+        public string Organisation { get; set; } = string.Empty;
+        public string Contact { get; set; } = string.Empty;
+        public int Reliability { get; set; } = 3;
+        public string Notes { get; set; } = string.Empty;
+    }
+}

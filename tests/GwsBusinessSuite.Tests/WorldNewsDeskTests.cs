@@ -11,6 +11,12 @@ public sealed class WorldNewsDeskTests : IDisposable
 
     private WorldNewsStore Store() => new(Path.Combine(_folder, "worldnews.db"));
 
+    private static void CompleteChecklist(WorldNewsStore store, string eventId = "e1")
+    {
+        foreach (var (key, _, _) in DeskChecklist.Items)
+            store.SetDeskCheck(eventId, key, true, "Evidence checked", "ana", Now);
+    }
+
     [Fact]
     public void Beats_ShouldMatchRegionsAndTopics_AndRefuseUnknownOnes()
     {
@@ -189,12 +195,56 @@ public sealed class WorldNewsDeskTests : IDisposable
     }
 
     [Fact]
+    public void SourceBook_ShouldRejectInvalidOrForeignEdits_AndPreserveCreationTime()
+    {
+        var store = Store();
+        var contact = store.SaveSourceContact(new SourceContact("", "ana", "A source", "", "", 3, "", Now));
+        Assert.Throws<ArgumentException>(() => store.SaveSourceContact(contact with { Name = " " }));
+        Assert.Throws<ArgumentException>(() => store.SaveSourceContact(contact with { Reliability = 6 }));
+        Assert.Throws<InvalidOperationException>(() => store.SaveSourceContact(contact with { Owner = "ben", Name = "Stolen" }));
+        Assert.Equal("A source", Assert.Single(store.SourceContacts("ana")).Name);
+        Assert.Empty(store.SourceContacts("ben"));
+
+        var saved = store.SaveSourceContact(contact with { Name = " Updated ", Organisation = " Office ", Contact = " Details ", Notes = " Notes ", CreatedAt = Now.AddDays(1) });
+        Assert.Equal(("Updated", "Office", "Details", "Notes", Now), (saved.Name, saved.Organisation, saved.Contact, saved.Notes, saved.CreatedAt));
+        Assert.Equal(saved, store.FindSourceContact("ana", saved.Id));
+        Assert.Null(store.FindSourceContact("ben", saved.Id));
+        Assert.True(store.RecordSourceUse("ana", saved.Id, "e1", "held", "", Now));
+        Assert.Throws<InvalidOperationException>(() => store.RemoveSourceContact("ben", saved.Id));
+        Assert.Single(store.SourceUses("ana"));
+        store.RemoveSourceContact("ana", saved.Id);
+        Assert.Empty(store.SourceContacts("ana"));
+        Assert.Empty(store.SourceUses("ana"));
+    }
+
+    [Fact]
+    public void SourceBook_ShouldPagePrivateContactsAndUses_WithoutLosingAccuracy()
+    {
+        var store = Store();
+        var contact = store.SaveSourceContact(new SourceContact("", "ana", "A source", "", "", 3, "", Now));
+        store.SaveSourceContact(new SourceContact("", "ana", "B source", "", "", 3, "", Now));
+        store.SaveSourceContact(new SourceContact("", "ben", "Another person's source", "", "", 3, "", Now));
+        Assert.Equal("B source", Assert.Single(store.SourceContacts("ana", offset: 1, limit: 1)).Name);
+        foreach (var (eventId, outcome) in new[] { ("e1", "held"), ("e2", "wrong"), ("e3", "unknown") })
+            Assert.True(store.RecordSourceUse("ana", contact.Id, eventId, outcome, "", Now));
+
+        Assert.Equal("e3", Assert.Single(store.SourceUses("ana", sourceId: contact.Id, limit: 1)).EventId);
+        Assert.Equal("e2", Assert.Single(store.SourceUses("ana", sourceId: contact.Id, offset: 1, limit: 1)).EventId);
+        Assert.Empty(store.SourceUses("ben", sourceId: contact.Id));
+        var counts = store.SourceUseCounts("ana", contact.Id);
+        Assert.Equal((3, 1, 1), counts);
+        Assert.Equal(0.5, SourceBook.Accuracy(counts.Held, counts.Wrong));
+        Assert.Equal((0, 0, 0), store.SourceUseCounts("ben", contact.Id));
+    }
+
+    [Fact]
     public void SignOffs_ShouldNeedTwoDifferentPeople_AndChainLikeTheLedger()
     {
         var store = Store();
         Assert.NotNull(SignOffs.Problem([], SignOffs.Verdict, "ana", checklistComplete: false));
         Assert.Null(SignOffs.Problem([], SignOffs.Verdict, "ana", checklistComplete: true));
 
+        CompleteChecklist(store);
         var first = store.AddSignOff("e1", SignOffs.Verdict, "ana", "Reported", Now);
         Assert.NotNull(SignOffs.Problem(store.SignOffs("e1"), SignOffs.Verdict, "Ana", true));
         Assert.NotNull(SignOffs.Problem(store.SignOffs("e1"), SignOffs.Publish, "ben", true));
@@ -206,6 +256,41 @@ public sealed class WorldNewsDeskTests : IDisposable
         Assert.Null(SignOffs.FirstBroken(store.SignOffs()));
         var tampered = store.SignOffs().Select(s => s.Id == first.Id ? s with { Username = "mallory" } : s).ToList();
         Assert.Equal(first.Id, SignOffs.FirstBroken(tampered));
+    }
+
+    [Fact]
+    public void SignOffs_ShouldEnforcePrerequisitesInsideTheLedgerWrite()
+    {
+        var store = Store();
+        Assert.Throws<InvalidOperationException>(() => store.AddSignOff("e1", SignOffs.Verdict, "ana", "Reported", Now));
+        CompleteChecklist(store);
+        Assert.Throws<InvalidOperationException>(() => store.AddSignOff("e1", "unknown", "ana", "Reported", Now));
+        Assert.Throws<InvalidOperationException>(() => store.AddSignOff("e1", SignOffs.Publish, "ana", "Reported", Now));
+        store.AddSignOff("e1", SignOffs.Verdict, "ana", "Reported", Now);
+        Assert.Throws<InvalidOperationException>(() => store.AddSignOff("e1", SignOffs.Verdict, " ANA ", "Reported", Now));
+        store.AddSignOff("e1", SignOffs.Verdict, "ben", "Reported", Now);
+        store.SetDeskCheck("e1", "origin", false, null, "ana", Now);
+        Assert.Throws<InvalidOperationException>(() => store.AddSignOff("e1", SignOffs.Publish, "ana", "Reported", Now));
+        Assert.Equal(2, store.SignOffs().Count);
+        Assert.Null(SignOffs.FirstBroken(store.SignOffs()));
+    }
+
+    [Fact]
+    public async Task SignOffs_ShouldSerializeConcurrentDuplicateApprovals()
+    {
+        var store = Store();
+        CompleteChecklist(store);
+        bool Sign(string username)
+        {
+            try { store.AddSignOff("e1", SignOffs.Verdict, username, "Reported", Now); return true; }
+            catch (InvalidOperationException) { return false; }
+        }
+
+        var results = await Task.WhenAll(Task.Run(() => Sign("ana")), Task.Run(() => Sign("ANA")));
+
+        Assert.Single(results.Where(saved => saved));
+        Assert.Single(store.SignOffs("e1"));
+        Assert.Null(SignOffs.FirstBroken(store.SignOffs()));
     }
 
     [Fact]
@@ -258,6 +343,7 @@ public sealed class WorldNewsDeskTests : IDisposable
     public void Metrics_ShouldMeasureTimeToVerdict_AndWhetherVerdictsHeld()
     {
         var store = Store();
+        CompleteChecklist(store);
         store.SetBudgetItem(new BudgetItem("e1", "Bridge", "ana", "watching", "Verify", Now, "ana"));
         store.SetBudgetItem(new BudgetItem("e1", "Bridge", "ana", "verifying", "Call the council", Now.AddHours(1), "ana"));
         store.SetBudgetItem(new BudgetItem("e1", "Bridge", "ana", "ready", "Publish", Now.AddHours(3), "ana"));

@@ -219,12 +219,16 @@ public sealed partial class WorldNewsStore
 
     // ---- N8 source book (private to its owner) ----
 
-    public IReadOnlyList<SourceContact> SourceContacts(string owner)
+    public IReadOnlyList<SourceContact> SourceContacts(string owner, int offset = 0, int? limit = null)
     {
+        ArgumentOutOfRangeException.ThrowIfNegative(offset);
+        if (limit is <= 0) throw new ArgumentOutOfRangeException(nameof(limit));
         using var connection = Open();
         using var command = connection.CreateCommand();
-        command.CommandText = "SELECT id, owner, name, organisation, contact, reliability, notes, created_at FROM source_contacts WHERE owner = $owner ORDER BY name";
+        command.CommandText = "SELECT id, owner, name, organisation, contact, reliability, notes, created_at FROM source_contacts WHERE owner = $owner ORDER BY name, id LIMIT $limit OFFSET $offset";
         command.Parameters.AddWithValue("$owner", NormalizeUsername(owner));
+        command.Parameters.AddWithValue("$offset", offset);
+        command.Parameters.AddWithValue("$limit", limit ?? -1);
         using var reader = command.ExecuteReader();
         var contacts = new List<SourceContact>();
         while (reader.Read())
@@ -232,36 +236,60 @@ public sealed partial class WorldNewsStore
         return contacts;
     }
 
+    public SourceContact? FindSourceContact(string owner, string id)
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT id, owner, name, organisation, contact, reliability, notes, created_at FROM source_contacts WHERE owner = $owner AND id = $id";
+        command.Parameters.AddWithValue("$owner", NormalizeUsername(owner));
+        command.Parameters.AddWithValue("$id", id);
+        using var reader = command.ExecuteReader();
+        return reader.Read()
+            ? new SourceContact(reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3), reader.GetString(4), reader.GetInt32(5), reader.GetString(6), At(reader, 7))
+            : null;
+    }
+
     public SourceContact SaveSourceContact(SourceContact contact)
     {
-        var saved = contact with { Owner = NormalizeUsername(contact.Owner), Id = string.IsNullOrEmpty(contact.Id) ? NewId() : contact.Id };
+        if (SourceBook.Problem(contact.Name, contact.Reliability) is { } problem) throw new ArgumentException(problem, nameof(contact));
+        var saved = contact with
+        {
+            Owner = NormalizeUsername(contact.Owner), Id = string.IsNullOrEmpty(contact.Id) ? NewId() : contact.Id,
+            Name = contact.Name.Trim(), Organisation = contact.Organisation.Trim(), Contact = contact.Contact.Trim(), Notes = contact.Notes.Trim(),
+        };
         using var connection = Open();
         using var command = connection.CreateCommand();
         command.CommandText = """
             INSERT INTO source_contacts (id, owner, name, organisation, contact, reliability, notes, created_at) VALUES ($id, $owner, $name, $org, $contact, $rel, $notes, $at)
             ON CONFLICT(id) DO UPDATE SET name = excluded.name, organisation = excluded.organisation, contact = excluded.contact, reliability = excluded.reliability, notes = excluded.notes
             WHERE source_contacts.owner = excluded.owner
+            RETURNING created_at
             """;
         command.Parameters.AddWithValue("$id", saved.Id);
         command.Parameters.AddWithValue("$owner", saved.Owner);
-        command.Parameters.AddWithValue("$name", saved.Name.Trim());
-        command.Parameters.AddWithValue("$org", saved.Organisation.Trim());
-        command.Parameters.AddWithValue("$contact", saved.Contact.Trim());
-        command.Parameters.AddWithValue("$rel", Math.Clamp(saved.Reliability, 1, 5));
-        command.Parameters.AddWithValue("$notes", saved.Notes.Trim());
+        command.Parameters.AddWithValue("$name", saved.Name);
+        command.Parameters.AddWithValue("$org", saved.Organisation);
+        command.Parameters.AddWithValue("$contact", saved.Contact);
+        command.Parameters.AddWithValue("$rel", saved.Reliability);
+        command.Parameters.AddWithValue("$notes", saved.Notes);
         command.Parameters.AddWithValue("$at", Unix(saved.CreatedAt));
-        command.ExecuteNonQuery();
-        return saved;
+        if (command.ExecuteScalar() is not long createdAt)
+            throw new InvalidOperationException("That contact is no longer available in your source book.");
+        return saved with { CreatedAt = DateTimeOffset.FromUnixTimeSeconds(createdAt) };
     }
 
     public void RemoveSourceContact(string owner, string id)
     {
         using var connection = Open();
+        using var transaction = connection.BeginTransaction();
         using var command = connection.CreateCommand();
+        command.Transaction = transaction;
         command.CommandText = "DELETE FROM source_uses WHERE source_id = $id AND EXISTS (SELECT 1 FROM source_contacts WHERE id = $id AND owner = $owner); DELETE FROM source_contacts WHERE id = $id AND owner = $owner";
         command.Parameters.AddWithValue("$id", id);
         command.Parameters.AddWithValue("$owner", NormalizeUsername(owner));
-        command.ExecuteNonQuery();
+        if (command.ExecuteNonQuery() == 0)
+            throw new InvalidOperationException("That contact is no longer available in your source book.");
+        transaction.Commit();
     }
 
     // Only the owner's contacts can be used; a use by anyone else is ignored.
@@ -285,18 +313,40 @@ public sealed partial class WorldNewsStore
     }
 
     // The owner's uses: all of them, or those on one story.
-    public IReadOnlyList<SourceUse> SourceUses(string owner, string? eventId = null)
+    public IReadOnlyList<SourceUse> SourceUses(string owner, string? eventId = null, string? sourceId = null, int offset = 0, int? limit = null)
     {
+        ArgumentOutOfRangeException.ThrowIfNegative(offset);
+        if (limit is <= 0) throw new ArgumentOutOfRangeException(nameof(limit));
         using var connection = Open();
         using var command = connection.CreateCommand();
         command.CommandText = "SELECT u.source_id, u.event_id, u.outcome, u.note, u.at FROM source_uses u JOIN source_contacts c ON c.id = u.source_id WHERE c.owner = $owner"
-            + (eventId is null ? "" : " AND u.event_id = $event") + " ORDER BY u.at DESC";
+            + (eventId is null ? "" : " AND u.event_id = $event") + (sourceId is null ? "" : " AND u.source_id = $source")
+            + " ORDER BY u.at DESC, u.rowid DESC LIMIT $limit OFFSET $offset";
         command.Parameters.AddWithValue("$owner", NormalizeUsername(owner));
         if (eventId is not null) command.Parameters.AddWithValue("$event", eventId);
+        if (sourceId is not null) command.Parameters.AddWithValue("$source", sourceId);
+        command.Parameters.AddWithValue("$offset", offset);
+        command.Parameters.AddWithValue("$limit", limit ?? -1);
         using var reader = command.ExecuteReader();
         var uses = new List<SourceUse>();
         while (reader.Read()) uses.Add(new SourceUse(reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3), At(reader, 4)));
         return uses;
+    }
+
+    public (int Total, int Held, int Wrong) SourceUseCounts(string owner, string sourceId)
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT COUNT(*), COALESCE(SUM(u.outcome = 'held'), 0), COALESCE(SUM(u.outcome = 'wrong'), 0)
+            FROM source_uses u JOIN source_contacts c ON c.id = u.source_id
+            WHERE c.owner = $owner AND c.id = $source
+            """;
+        command.Parameters.AddWithValue("$owner", NormalizeUsername(owner));
+        command.Parameters.AddWithValue("$source", sourceId);
+        using var reader = command.ExecuteReader();
+        if (!reader.Read()) throw new InvalidOperationException("Source history counts couldn't be read.");
+        return (reader.GetInt32(0), reader.GetInt32(1), reader.GetInt32(2));
     }
 
     // ---- N9 sign-offs ----
@@ -304,7 +354,13 @@ public sealed partial class WorldNewsStore
     public IReadOnlyList<SignOff> SignOffs(string? eventId = null)
     {
         using var connection = Open();
+        return SignOffs(connection, eventId);
+    }
+
+    private static IReadOnlyList<SignOff> SignOffs(SqliteConnection connection, string? eventId, SqliteTransaction? transaction = null)
+    {
         using var command = connection.CreateCommand();
+        command.Transaction = transaction;
         command.CommandText = "SELECT id, event_id, kind, username, label_level, at, previous_hash, hash FROM sign_offs" + (eventId is null ? "" : " WHERE event_id = $event") + " ORDER BY id";
         if (eventId is not null) command.Parameters.AddWithValue("$event", eventId);
         using var reader = command.ExecuteReader();
@@ -317,15 +373,21 @@ public sealed partial class WorldNewsStore
     public SignOff AddSignOff(string eventId, string kind, string username, string labelLevel, DateTimeOffset now)
     {
         using var connection = Open();
-        using var transaction = connection.BeginTransaction();
+        using var transaction = connection.BeginTransaction(deferred: false);
+        username = username.Trim();
+        if (global::GwsBusinessSuite.WorldNewsKit.SignOffs.Problem(SignOffs(connection, eventId, transaction), kind, username,
+                DeskChecklist.IsComplete(DeskChecks(connection, eventId, transaction))) is { } problem)
+            throw new InvalidOperationException(problem);
         string previous;
         using (var last = connection.CreateCommand())
         {
+            last.Transaction = transaction;
             last.CommandText = "SELECT hash FROM sign_offs ORDER BY id DESC LIMIT 1";
             previous = last.ExecuteScalar() as string ?? LabelLedger.Genesis;
         }
         var hash = global::GwsBusinessSuite.WorldNewsKit.SignOffs.HashOf(previous, eventId, kind, username, labelLevel, now);
         using var insert = connection.CreateCommand();
+        insert.Transaction = transaction;
         insert.CommandText = "INSERT INTO sign_offs (event_id, kind, username, label_level, at, previous_hash, hash) VALUES ($event, $kind, $user, $level, $at, $previous, $hash); SELECT last_insert_rowid()";
         insert.Parameters.AddWithValue("$event", eventId);
         insert.Parameters.AddWithValue("$kind", kind);

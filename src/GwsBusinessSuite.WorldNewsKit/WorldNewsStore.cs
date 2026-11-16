@@ -305,7 +305,13 @@ public sealed partial class WorldNewsStore
     public IReadOnlyList<DeskCheck> DeskChecks(string eventId)
     {
         using var connection = Open();
+        return DeskChecks(connection, eventId);
+    }
+
+    private static IReadOnlyList<DeskCheck> DeskChecks(SqliteConnection connection, string eventId, SqliteTransaction? transaction = null)
+    {
         using var command = connection.CreateCommand();
+        command.Transaction = transaction;
         command.CommandText = "SELECT event_id, item, done, evidence, checked_by, checked_at FROM desk_checks WHERE event_id = $event";
         command.Parameters.AddWithValue("$event", eventId);
         using var reader = command.ExecuteReader();

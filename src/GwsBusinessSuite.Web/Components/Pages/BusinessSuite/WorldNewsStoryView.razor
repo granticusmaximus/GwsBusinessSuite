@@ -258,6 +258,7 @@ else
         @* The desk (World News trust plan B1/B2/N1-N3, 13-11-26): evidence, checklist, budget, draft. *@
         <section class="story-desk" aria-label="The desk">
             <div class="story-desk-actions">
+                <a class="btn btn-sm btn-outline-secondary" href="@($"admin/world-news/source-book?event={Uri.EscapeDataString(e.Id)}")">My source book</a>
                 <button type="button" class="btn btn-sm btn-outline-primary" @onclick="AddToBudgetAsync" disabled="@_onBudget">
                     <i class="bi bi-kanban me-1" aria-hidden="true"></i>@(_onBudget ? "On the budget" : "Add to the budget")
                 </button>
@@ -323,6 +324,7 @@ else
             </ul>
             @if (_deskError is not null) { <p class="text-danger small" role="alert">@_deskError</p> }
             <WorldNewsDeskNotes @key="e.Id" EventId="@e.Id" />
+            <WorldNewsSignOffs @key="(e.Id, typeof(WorldNewsSignOffs))" EventId="@e.Id" ChecklistComplete="@DeskChecklist.IsComplete(_checks)" />
         </section>
 
         @* 1. What happened. *@

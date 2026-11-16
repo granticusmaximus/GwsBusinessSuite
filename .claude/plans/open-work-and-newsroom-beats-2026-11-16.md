@@ -94,3 +94,18 @@ Implementation notes:
   ordering, bounded ledger reads and an unchanged single-source story in a handover.
 - No tests, builds, browser execution, dependency installs or release gate were run for N6/N7.
   No commit, push or deployment was performed by this assistant.
+
+## World News continuation: private sources and approval records (N8/N9)
+
+Grant approved proceeding, then selected **desk approvals only; leave CMS publishing unchanged**.
+N9 in this unit records historical approvals, not a publishing gate or signatures over an
+immutable article revision. Do not silently change CMS publishing behavior.
+
+- [ ] N8: owner-private source-book page with create/edit/remove, per-source use history,
+  story/outcome recording and measured accuracy. Page through contacts and history; scope
+  every query/mutation to the authenticated owner, including guessed contact ids.
+- [ ] N9: story approval controls showing both people, times, trust label and record hashes.
+  Require a complete checklist, two verdict approvals before publication approvals, and
+  distinct signers. Validate inside the existing ledger write transaction.
+- [ ] Add regression sources and update guides/parent plan without executing tests or builds.
+- [ ] Compile, browser-check and run the release gate later in an authorized environment.

@@ -10,6 +10,75 @@ namespace GwsBusinessSuite.Infrastructure.Services;
 // the evidence written in (StoryDraft). A draft only: a person edits and publishes it.
 public sealed partial class WorldNewsDeskService(IAppDbContext db, WorldNewsService news)
 {
+    public const int SourceBookPageSize = 25;
+
+    public async Task<IReadOnlyList<SourceContact>> ContactsAsync(string username, int page = 0, CancellationToken cancellationToken = default)
+    {
+        await RequireDeskUserAsync(username, cancellationToken);
+        ArgumentOutOfRangeException.ThrowIfNegative(page);
+        return await Task.Run(() => news.Store.SourceContacts(username, checked(page * SourceBookPageSize), SourceBookPageSize + 1), cancellationToken);
+    }
+
+    public async Task<SourceContact> SaveContactAsync(SourceContact contact, string username, CancellationToken cancellationToken = default)
+    {
+        await RequireDeskUserAsync(username, cancellationToken);
+        return await Task.Run(() => news.Store.SaveSourceContact(contact with { Owner = username }), cancellationToken);
+    }
+
+    public async Task RemoveContactAsync(string id, string username, CancellationToken cancellationToken = default)
+    {
+        await RequireDeskUserAsync(username, cancellationToken);
+        await Task.Run(() => news.Store.RemoveSourceContact(username, id), cancellationToken);
+    }
+
+    public async Task<(IReadOnlyList<SourceUse> Uses, (int Total, int Held, int Wrong) Counts)> SourceHistoryAsync(
+        string id, string username, int page = 0, CancellationToken cancellationToken = default)
+    {
+        await RequireDeskUserAsync(username, cancellationToken);
+        ArgumentOutOfRangeException.ThrowIfNegative(page);
+        return await Task.Run(() =>
+        {
+            if (news.Store.FindSourceContact(username, id) is null)
+                throw new InvalidOperationException("That contact is no longer available in your source book.");
+            return (news.Store.SourceUses(username, sourceId: id, offset: checked(page * SourceBookPageSize), limit: SourceBookPageSize + 1),
+                news.Store.SourceUseCounts(username, id));
+        }, cancellationToken);
+    }
+
+    public async Task RecordSourceUseAsync(string id, string eventId, string outcome, string note, string username, CancellationToken cancellationToken = default)
+    {
+        await RequireDeskUserAsync(username, cancellationToken);
+        if (!SourceBook.Outcomes.Contains(outcome)) throw new ArgumentException("Choose unknown, held or wrong as the outcome.", nameof(outcome));
+        await Task.Run(() =>
+        {
+            if (!news.Store.HasEvent(eventId)) throw new InvalidOperationException("That story is no longer available. Choose a current World News story.");
+            if (!news.Store.RecordSourceUse(username, id, eventId, outcome, note, DateTimeOffset.UtcNow))
+                throw new InvalidOperationException("That contact is no longer available in your source book.");
+        }, cancellationToken);
+    }
+
+    public async Task<DeskApprovals> ApprovalsAsync(string eventId, string username, CancellationToken cancellationToken = default)
+    {
+        await RequireDeskUserAsync(username, cancellationToken);
+        return await Task.Run(() =>
+        {
+            var story = news.Story(eventId, username) ?? throw new InvalidOperationException("That story is no longer available.");
+            var label = story.Trust?.Confidence.Level.ToString() ?? throw new InvalidOperationException("Refresh the story's trust label before approving it.");
+            return new DeskApprovals(news.Store.SignOffs(eventId), DeskChecklist.IsComplete(news.Store.DeskChecks(eventId)), label);
+        }, cancellationToken);
+    }
+
+    public async Task<SignOff> SignAsync(string eventId, string kind, string username, CancellationToken cancellationToken = default)
+    {
+        await RequireDeskUserAsync(username, cancellationToken);
+        return await Task.Run(() =>
+        {
+            var story = news.Story(eventId, username) ?? throw new InvalidOperationException("That story is no longer available.");
+            var label = story.Trust?.Confidence.Level.ToString() ?? throw new InvalidOperationException("Refresh the story's trust label before approving it.");
+            return news.Store.AddSignOff(eventId, kind, username, label, DateTimeOffset.UtcNow);
+        }, cancellationToken);
+    }
+
     public async Task<string> HandoverAsync(int hours, string username, CancellationToken cancellationToken = default)
     {
         await RequireDeskUserAsync(username, cancellationToken);
