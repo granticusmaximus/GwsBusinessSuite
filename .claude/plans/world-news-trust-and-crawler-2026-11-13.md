@@ -245,3 +245,20 @@ and the write-up both draw on the evidence; then B3-B9 and N5-N15; B10 (reading)
   restriction. Upgrade, capacity, query timing and rollback still require validation on an
   equipped machine. This is not completion of the other B10 reading items. Details:
   `open-work-and-newsroom-beats-2026-11-16.md`.
+- N11 continuation: added active-admin set/replace/release controls to the existing story
+  live editor, sharing its refreshed hold state. Explicit UTC input/display, future-time and
+  reason limits, missing-story rejection, indexed hold lookups and inline release confirmation
+  extend the existing draft/live/alert guards. CMS publication remains unchanged. Guide,
+  regression sources and shared tracker updated. Source review and whitespace checks only;
+  no build/tests/browser/release gate, per Grant's restriction. Runtime verification remains
+  blocked; N12-N15 and other B10 reading items remain.
+- N12 continuation: append-only public correction notices now have an active-admin story
+  editor with review/confirmation, a paged anonymous log with permanent notice links, and
+  methodology/live navigation. Optional explicit published-CMS slug association displays
+  notices beneath the article, with a paged article-history link. New notices respect holds;
+  existing notices remain public after a hold or pruning. Public projections omit usernames,
+  and rendered notice text is encoded. Article body/status, trust labels, challenges and
+  approvals are unchanged. Additive raw SQLite upgrade, guide and regression sources added.
+  Public article reads fail explicitly with 503 if correction loading fails. No builds,
+  tests, browser or release gate run; verification blocked on this machine. N13-N15 and
+  other B10 reading items remain. Handoff: `open-work-and-newsroom-beats-2026-11-16.md`.

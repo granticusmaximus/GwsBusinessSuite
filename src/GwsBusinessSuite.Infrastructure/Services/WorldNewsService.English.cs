@@ -13,12 +13,14 @@ public sealed partial class WorldNewsService
     private readonly SemaphoreSlim _englishRunning = new(1, 1);
     private readonly OllamaWorkloadScheduler? _workloads;
     private DateTimeOffset _lastEnglishListInvalidation;
+    private bool _englishListsDirty;
 
     public string EnglishStatus { get; private set; } = "English translations and report summaries are queued.";
 
     public async Task<bool> ProcessEnglishAsync(CancellationToken cancellationToken)
     {
         if (!await _englishRunning.WaitAsync(0, cancellationToken)) return false;
+        var noWorkDue = false;
         try
         {
             Store.EnsureEnglishQueueIndex();
@@ -29,6 +31,7 @@ public sealed partial class WorldNewsService
                 .DistinctBy(article => article.Id).ToList();
             if (pending.Count == 0)
             {
+                noWorkDue = true;
                 EnglishStatus = "Waiting for incoming reports or scheduled English retries.";
                 return false;
             }
@@ -52,12 +55,7 @@ public sealed partial class WorldNewsService
                 _logger.LogInformation("World News English pass discarded {Count} removed or changed reports", translations.Count - saved);
             EnglishStatus = $"Prepared {saved} English reports this pass; incoming news and archive processing continue." +
                 (translations.Count < pending.Count ? " Missing results are scheduled for retry." : "");
-            if (saved > 0 && DateTimeOffset.UtcNow - _lastEnglishListInvalidation >= TimeSpan.FromMinutes(1))
-            {
-                ClearLists(rebuild: false);
-                _mapCache?.Clear();
-                _lastEnglishListInvalidation = DateTimeOffset.UtcNow;
-            }
+            if (saved > 0) _englishListsDirty = true;
             return saved > 0;
         }
         catch (ServerAiUnavailableException)
@@ -78,6 +76,14 @@ public sealed partial class WorldNewsService
         }
         finally
         {
+            if (_englishListsDirty &&
+                (noWorkDue || DateTimeOffset.UtcNow - _lastEnglishListInvalidation >= TimeSpan.FromMinutes(1)))
+            {
+                ClearLists(rebuild: false);
+                _mapCache?.Clear();
+                _lastEnglishListInvalidation = DateTimeOffset.UtcNow;
+                _englishListsDirty = false;
+            }
             _englishRunning.Release();
             Changed?.Invoke();
         }

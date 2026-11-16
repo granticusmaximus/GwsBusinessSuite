@@ -1,0 +1,126 @@
+@page "/world-news/corrections"
+@page "/world-news/corrections/{CorrectionId}"
+@attribute [AllowAnonymous]
+@layout PublicShareLayout
+@using System.Globalization
+@using Microsoft.AspNetCore.Http
+@using GwsBusinessSuite.Infrastructure.Services
+@using GwsBusinessSuite.WorldNewsKit
+@inject WorldNewsService News
+@inject ILogger<WorldNewsCorrections> Logger
+
+<PageTitle>World News corrections</PageTitle>
+
+<main class="news-corrections-page">
+    <header class="mb-4">
+        <h1 class="h3">World News corrections</h1>
+        <p class="text-secondary">Published correction notices from the desk, newest first. Notices are retained after story pruning or a hold.
+            They do not silently rewrite an article or automatically change a trust label.</p>
+        <nav class="news-corrections-actions" aria-label="Corrections navigation">
+            <a href="world-news/corrections">All corrections</a>
+            <a href="world-news/live">Live coverage</a>
+            <a href="admin/world-news/methodology">Desk methodology (sign-in required)</a>
+        </nav>
+    </header>
+    @if (_loading)
+    {
+        <LoadingIndicator Message="Loading correction notices..." />
+    }
+    else if (_error is { } error)
+    {
+        <p class="alert alert-warning" role="alert">@error</p>
+    }
+    else if (_notices.Count == 0)
+    {
+        <p>No published correction notices are available.</p>
+    }
+    else
+    {
+        <ol class="list-unstyled">
+            @foreach (var notice in _notices)
+            {
+                <li class="card mb-3" @key="notice.Id">
+                    <article class="card-body">
+                        <h2 class="h5">@notice.Title</h2>
+                        <time class="small text-secondary" datetime="@notice.At.ToString("O")">@notice.At.ToLocalGwsDateTime()</time>
+                        <p class="news-correction-text">@notice.Text</p>
+                        <a href="@($"world-news/corrections/{Uri.EscapeDataString(notice.Id)}")">Permanent notice link</a>
+                    </article>
+                </li>
+            }
+        </ol>
+    }
+    @if (!_loading && _error is null && CorrectionId is null && (_page > 1 || _hasMore))
+    {
+        <nav class="news-corrections-actions" aria-label="Correction notice pages">
+            @if (_page > 1) { <a href="@PageUrl(_page - 1)" data-enhance-nav="false">Newer notices</a> }
+            <span class="small">Page @_page</span>
+            @if (_hasMore) { <a href="@PageUrl(_page + 1)" data-enhance-nav="false">Older notices</a> }
+        </nav>
+    }
+</main>
+
+@code {
+    [Parameter] public string? CorrectionId { get; set; }
+    [SupplyParameterFromQuery(Name = "page")] public string? Page { get; set; }
+    [SupplyParameterFromQuery(Name = "story")] public string? Story { get; set; }
+    [SupplyParameterFromQuery(Name = "article")] public string? Article { get; set; }
+    [CascadingParameter] private HttpContext? RequestContext { get; set; }
+
+    private IReadOnlyList<PublicCorrection> _notices = [];
+    private string? _error;
+    private int _page = 1;
+    private bool _loading = true, _hasMore;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _loading = true;
+        _notices = [];
+        _error = null;
+        _hasMore = false;
+        if (RequestContext is not null && !RequestContext.Response.HasStarted)
+            RequestContext.Response.Headers["Cache-Control"] = "no-store";
+        try
+        {
+            if (!int.TryParse(Page ?? "1", NumberStyles.None, CultureInfo.InvariantCulture, out var page)
+                || page < 1 || page > int.MaxValue / Corrections.PageSize || (CorrectionId is not null && page != 1))
+            {
+                Fail(StatusCodes.Status400BadRequest, "That page number is invalid.");
+                return;
+            }
+            Guid? articleId = null;
+            if (Article is not null)
+            {
+                if (!Guid.TryParse(Article, out var parsed))
+                {
+                    Fail(StatusCodes.Status400BadRequest, "That article reference is invalid.");
+                    return;
+                }
+                articleId = parsed;
+            }
+            _page = page;
+            var notices = await Task.Run(() => News.PublicCorrections(page - 1, Story, CorrectionId, articleId));
+            _hasMore = notices.Count > Corrections.PageSize;
+            _notices = notices.Take(Corrections.PageSize).ToList();
+            if (_notices.Count == 0 && (CorrectionId is not null || page > 1))
+                Fail(StatusCodes.Status404NotFound, "That correction notice or page is not available.");
+        }
+        catch (Microsoft.Data.Sqlite.SqliteException ex)
+        {
+            Logger.LogWarning(ex, "World News: public corrections could not be loaded");
+            Fail(StatusCodes.Status503ServiceUnavailable, "Corrections could not be loaded. Please try again later.");
+        }
+        finally { _loading = false; }
+    }
+
+    private void Fail(int status, string message)
+    {
+        _error = message;
+        _notices = [];
+        if (RequestContext is not null && !RequestContext.Response.HasStarted) RequestContext.Response.StatusCode = status;
+    }
+
+    private string PageUrl(int page) => $"world-news/corrections?page={page}"
+        + (Story is null ? "" : $"&story={Uri.EscapeDataString(Story)}")
+        + (Article is null ? "" : $"&article={Uri.EscapeDataString(Article)}");
+}

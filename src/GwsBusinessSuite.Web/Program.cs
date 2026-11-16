@@ -3231,6 +3231,8 @@ app.MapGet("/blog/{slug}", async (
         IAffiliateRotationService affiliateRotationService,
         IContentLocalizationService contentLocalizationService,
         IRelatedArticlesService relatedArticlesService,
+        WorldNewsService worldNews,
+        ILogger<WorldNewsService> newsLogger,
         IConfiguration configuration) =>
     {
         await using var db = await dbFactory.CreateDbContextAsync();
@@ -3290,13 +3292,28 @@ app.MapGet("/blog/{slug}", async (
         var replyComment = replyToCommentId.HasValue ? FindCommentById(approvedComments, replyToCommentId.Value) : null;
         var relatedArticles = await relatedArticlesService.GetRelatedArticlesAsync(a);
 
+        request.HttpContext.Response.Headers["Cache-Control"] = "no-store";
+        IReadOnlyList<ArticleCorrectionView> corrections;
+        try
+        {
+            var notices = await Task.Run(() => worldNews.PublicCorrections(articleId: a.Id), request.HttpContext.RequestAborted);
+            corrections = notices.Take(GwsBusinessSuite.WorldNewsKit.Corrections.PageSize)
+                .Select(c => new ArticleCorrectionView(c.Id, c.Title, c.Text, c.At)).ToList();
+        }
+        catch (Microsoft.Data.Sqlite.SqliteException ex)
+        {
+            newsLogger.LogWarning(ex, "World News: article correction notices could not be loaded for {ArticleId}", a.Id);
+            return Results.Content("Article corrections could not be loaded. Please try again later.", "text/plain", statusCode: StatusCodes.Status503ServiceUnavailable);
+        }
         var bodyHtml = PublicSiteHtmlRenderer.BlogPostBody(
             a.Title, a.MetaDescription, a.Author, a.PublishedAt, a.EstimatedReadingTime, a.PrimaryKeyword,
             heroImageUrl, a.HeroImageAltText, a.HeroImageCaption, renderedMarkdown,
             articleCategory?.Name, articleCategory?.Slug, ParseTags(a.Tags), a.Slug, approvedComments,
             replyToCommentId: replyComment?.Id,
             replyToAuthorName: replyComment?.AuthorName,
-            relatedArticles: relatedArticles);
+            relatedArticles: relatedArticles,
+            corrections: corrections,
+            correctionsArticleId: a.Id);
 
         if (request.Query["comment"] == "1")
         {

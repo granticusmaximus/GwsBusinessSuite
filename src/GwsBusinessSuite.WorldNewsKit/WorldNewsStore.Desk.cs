@@ -25,7 +25,7 @@ public sealed partial class WorldNewsStore
             corrected_text TEXT, corrected_at INTEGER);
         CREATE INDEX IF NOT EXISTS ix_live_updates_event ON live_updates (event_id, created_at);
         CREATE TABLE IF NOT EXISTS holds (event_id TEXT PRIMARY KEY, until INTEGER NOT NULL, reason TEXT NOT NULL, set_by TEXT NOT NULL, set_at INTEGER NOT NULL);
-        CREATE TABLE IF NOT EXISTS corrections (id TEXT PRIMARY KEY, event_id TEXT NOT NULL, title TEXT NOT NULL, text TEXT NOT NULL, username TEXT NOT NULL, at INTEGER NOT NULL);
+        CREATE TABLE IF NOT EXISTS corrections (id TEXT PRIMARY KEY, event_id TEXT NOT NULL, title TEXT NOT NULL, text TEXT NOT NULL, username TEXT NOT NULL, at INTEGER NOT NULL, article_id TEXT);
         CREATE TABLE IF NOT EXISTS dossier_items (
             id TEXT PRIMARY KEY, event_id TEXT NOT NULL, kind TEXT NOT NULL, title TEXT NOT NULL, url TEXT, detail TEXT NOT NULL, added_by TEXT NOT NULL, at INTEGER NOT NULL);
         CREATE INDEX IF NOT EXISTS ix_dossier_items_event ON dossier_items (event_id, at);
@@ -36,6 +36,18 @@ public sealed partial class WorldNewsStore
     private static string NewId() => Guid.NewGuid().ToString("N");
     private static long Unix(DateTimeOffset at) => at.ToUnixTimeSeconds();
     private static DateTimeOffset At(SqliteDataReader reader, int i) => DateTimeOffset.FromUnixTimeSeconds(reader.GetInt64(i));
+
+    private static void EnsureDeskSchema(SqliteConnection connection)
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT COUNT(*) FROM pragma_table_info('corrections') WHERE name = 'article_id'";
+        if ((long)command.ExecuteScalar()! == 0) Execute(connection, "ALTER TABLE corrections ADD COLUMN article_id TEXT");
+        Execute(connection, """
+            CREATE INDEX IF NOT EXISTS ix_corrections_at ON corrections (at DESC, id DESC);
+            CREATE INDEX IF NOT EXISTS ix_corrections_event ON corrections (event_id, at DESC, id DESC);
+            CREATE INDEX IF NOT EXISTS ix_corrections_article ON corrections (article_id, at DESC, id DESC);
+            """);
+    }
 
     // ---- N5 beats ----
 
@@ -431,7 +443,7 @@ public sealed partial class WorldNewsStore
         var update = new LiveUpdate(NewId(), eventId, username, text.Trim(), status, now, null, null);
         using var connection = Open();
         using var transaction = connection.BeginTransaction(deferred: false);
-        EnsureLiveStoryWritable(connection, transaction, eventId, now);
+        EnsureStoryWritable(connection, transaction, eventId, now);
         using var command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = "INSERT INTO live_updates (id, event_id, username, text, status, created_at) VALUES ($id, $event, $user, $text, $status, $at)";
@@ -460,7 +472,7 @@ public sealed partial class WorldNewsStore
             if (eventId is not null) find.Parameters.AddWithValue("$event", eventId);
             if (find.ExecuteScalar() is not string savedEventId)
                 throw new InvalidOperationException("That live update is no longer available on this story.");
-            EnsureLiveStoryWritable(connection, transaction, savedEventId, now);
+            EnsureStoryWritable(connection, transaction, savedEventId, now);
         }
         using var command = connection.CreateCommand();
         command.Transaction = transaction;
@@ -473,7 +485,7 @@ public sealed partial class WorldNewsStore
         transaction.Commit();
     }
 
-    private static void EnsureLiveStoryWritable(SqliteConnection connection, SqliteTransaction transaction, string eventId, DateTimeOffset now)
+    private static void EnsureStoryWritable(SqliteConnection connection, SqliteTransaction transaction, string eventId, DateTimeOffset now)
     {
         using var command = connection.CreateCommand();
         command.Transaction = transaction;
@@ -482,7 +494,7 @@ public sealed partial class WorldNewsStore
         using var reader = command.ExecuteReader();
         if (!reader.Read()) throw new InvalidOperationException("That story is no longer available. Open a current World News story.");
         if (!reader.IsDBNull(0) && At(reader, 0) > now)
-            throw new InvalidOperationException("This story is on hold. Wait for its release time or release the hold before posting live.");
+            throw new InvalidOperationException("This story is on hold. Wait for its release time or release the hold before publishing.");
     }
 
     public IReadOnlyList<PublicLiveStory> PublicLiveStories(DateTimeOffset now, int offset = 0, int limit = 50, string? eventId = null)
@@ -551,20 +563,34 @@ public sealed partial class WorldNewsStore
         return holds;
     }
 
-    public StoryHold? Hold(string eventId) => Holds().GetValueOrDefault(eventId);
-
-    public void SetHold(StoryHold hold)
+    public StoryHold? Hold(string eventId)
     {
         using var connection = Open();
         using var command = connection.CreateCommand();
-        command.CommandText = "INSERT INTO holds (event_id, until, reason, set_by, set_at) VALUES ($event, $until, $reason, $by, $at) "
-            + "ON CONFLICT(event_id) DO UPDATE SET until = excluded.until, reason = excluded.reason, set_by = excluded.set_by, set_at = excluded.set_at";
+        command.CommandText = "SELECT event_id, until, reason, set_by, set_at FROM holds WHERE event_id = $event";
+        command.Parameters.AddWithValue("$event", eventId);
+        using var reader = command.ExecuteReader();
+        return reader.Read() ? new StoryHold(reader.GetString(0), At(reader, 1), reader.GetString(2), reader.GetString(3), At(reader, 4)) : null;
+    }
+
+    public void SetHold(StoryHold hold)
+    {
+        if (global::GwsBusinessSuite.WorldNewsKit.Holds.Problem(hold.Until, hold.Reason, hold.SetAt) is { } problem)
+            throw new ArgumentException(problem, nameof(hold));
+        if (string.IsNullOrWhiteSpace(hold.SetBy)) throw new ArgumentException("Sign in before setting a hold.", nameof(hold));
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            INSERT INTO holds (event_id, until, reason, set_by, set_at)
+            SELECT id, $until, $reason, $by, $at FROM events WHERE id = $event
+            ON CONFLICT(event_id) DO UPDATE SET until = excluded.until, reason = excluded.reason, set_by = excluded.set_by, set_at = excluded.set_at
+            """;
         command.Parameters.AddWithValue("$event", hold.EventId);
         command.Parameters.AddWithValue("$until", Unix(hold.Until));
         command.Parameters.AddWithValue("$reason", hold.Reason.Trim());
         command.Parameters.AddWithValue("$by", hold.SetBy);
         command.Parameters.AddWithValue("$at", Unix(hold.SetAt));
-        command.ExecuteNonQuery();
+        if (command.ExecuteNonQuery() != 1) throw new InvalidOperationException("That story is no longer available.");
     }
 
     public void ReleaseHold(string eventId)
@@ -573,44 +599,87 @@ public sealed partial class WorldNewsStore
         using var command = connection.CreateCommand();
         command.CommandText = "DELETE FROM holds WHERE event_id = $event";
         command.Parameters.AddWithValue("$event", eventId);
-        command.ExecuteNonQuery();
+        if (command.ExecuteNonQuery() != 1) throw new InvalidOperationException("That hold is no longer available. Refresh its status.");
     }
 
     // Whether any story in a situation is on hold now (alerts are per situation).
     public bool IsSituationHeld(string situationId, DateTimeOffset now)
     {
-        var holds = Holds();
-        return EventsForSituation(situationId).Any(e => global::GwsBusinessSuite.WorldNewsKit.Holds.IsHeld(holds.GetValueOrDefault(e.Id), now));
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT EXISTS (SELECT 1 FROM events e JOIN holds h ON h.event_id = e.id
+                           WHERE e.situation_id = $situation AND h.until > $now)
+            """;
+        command.Parameters.AddWithValue("$situation", situationId);
+        command.Parameters.AddWithValue("$now", Unix(now));
+        return (long)command.ExecuteScalar()! != 0;
     }
 
     // ---- N12 corrections ----
 
-    public IReadOnlyList<Correction> Corrections(string? eventId = null, int limit = 200)
+    public IReadOnlyList<Correction> Corrections(string? eventId = null, int limit = 200, int offset = 0)
     {
+        ArgumentOutOfRangeException.ThrowIfNegative(offset);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(limit);
         using var connection = Open();
         using var command = connection.CreateCommand();
-        command.CommandText = "SELECT id, event_id, title, text, username, at FROM corrections" + (eventId is null ? "" : " WHERE event_id = $event") + " ORDER BY at DESC LIMIT $limit";
+        command.CommandText = "SELECT id, event_id, title, text, username, at, article_id FROM corrections"
+            + (eventId is null ? "" : " WHERE event_id = $event") + " ORDER BY at DESC, id DESC LIMIT $limit OFFSET $offset";
         if (eventId is not null) command.Parameters.AddWithValue("$event", eventId);
         command.Parameters.AddWithValue("$limit", limit);
+        command.Parameters.AddWithValue("$offset", offset);
         using var reader = command.ExecuteReader();
         var list = new List<Correction>();
-        while (reader.Read()) list.Add(new Correction(reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3), reader.GetString(4), At(reader, 5)));
+        while (reader.Read()) list.Add(new Correction(reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3), reader.GetString(4), At(reader, 5))
+        {
+            ArticleId = reader.IsDBNull(6) ? null : Guid.Parse(reader.GetString(6))
+        });
         return list;
     }
 
-    public Correction AddCorrection(string eventId, string title, string text, string username, DateTimeOffset now)
+    public IReadOnlyList<PublicCorrection> PublicCorrections(int offset = 0, int limit = 25, string? eventId = null, string? id = null, Guid? articleId = null)
     {
-        var correction = new Correction(NewId(), eventId, title, text.Trim(), username, now);
+        ArgumentOutOfRangeException.ThrowIfNegative(offset);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(limit);
         using var connection = Open();
         using var command = connection.CreateCommand();
-        command.CommandText = "INSERT INTO corrections (id, event_id, title, text, username, at) VALUES ($id, $event, $title, $text, $user, $at)";
+        command.CommandText = "SELECT id, event_id, title, text, at FROM corrections WHERE 1 = 1"
+            + (eventId is null ? "" : " AND event_id = $event")
+            + (id is null ? "" : " AND id = $id")
+            + (articleId is null ? "" : " AND article_id = $article")
+            + " ORDER BY at DESC, id DESC LIMIT $limit OFFSET $offset";
+        if (eventId is not null) command.Parameters.AddWithValue("$event", eventId);
+        if (id is not null) command.Parameters.AddWithValue("$id", id);
+        if (articleId is { } article) command.Parameters.AddWithValue("$article", article.ToString("N"));
+        command.Parameters.AddWithValue("$limit", limit);
+        command.Parameters.AddWithValue("$offset", offset);
+        using var reader = command.ExecuteReader();
+        var list = new List<PublicCorrection>();
+        while (reader.Read()) list.Add(new PublicCorrection(reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3), At(reader, 4)));
+        return list;
+    }
+
+    public Correction AddCorrection(string eventId, string title, string text, string username, DateTimeOffset now, Guid? articleId = null)
+    {
+        if (global::GwsBusinessSuite.WorldNewsKit.Corrections.Problem(title, text) is { } problem) throw new ArgumentException(problem, nameof(text));
+        if (string.IsNullOrWhiteSpace(username)) throw new ArgumentException("Sign in before publishing a correction.", nameof(username));
+        var correction = new Correction(NewId(), eventId, title.Trim(), text.Trim(), username, now) { ArticleId = articleId };
+        using var connection = Open();
+        using var transaction = connection.BeginTransaction(deferred: false);
+        EnsureStoryWritable(connection, transaction, eventId, now);
+        using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = "INSERT INTO corrections (id, event_id, title, text, username, at, article_id) VALUES ($id, $event, $title, $text, $user, $at, $article)";
         command.Parameters.AddWithValue("$id", correction.Id);
         command.Parameters.AddWithValue("$event", eventId);
-        command.Parameters.AddWithValue("$title", title);
+        command.Parameters.AddWithValue("$title", correction.Title);
         command.Parameters.AddWithValue("$text", correction.Text);
         command.Parameters.AddWithValue("$user", username);
         command.Parameters.AddWithValue("$at", Unix(now));
+        command.Parameters.AddWithValue("$article", articleId is { } article ? article.ToString("N") : DBNull.Value);
         command.ExecuteNonQuery();
+        transaction.Commit();
         return correction;
     }
 

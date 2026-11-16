@@ -353,6 +353,26 @@ public sealed class PublicSiteHtmlRendererTests
     }
 
     [Fact]
+    public void BlogPostBody_ShouldEncodeCorrectionNotices_AndLinkTheirPermanentHistory()
+    {
+        var articleId = Guid.NewGuid();
+        var html = PublicSiteHtmlRenderer.BlogPostBody(
+            "Title", "", "Desk", null, "", "", null, "", "", "Original article body",
+            corrections: [new ArticleCorrectionView("notice-id", "<script>title</script>", "<img src=x onerror=alert(1)>\nCorrected wording", DateTimeOffset.UtcNow)],
+            correctionsArticleId: articleId);
+
+        Assert.Contains("Original article body", html);
+        Assert.Contains("Latest published corrections", html);
+        Assert.Contains("&lt;script&gt;title&lt;/script&gt;", html);
+        Assert.Contains("&lt;img", html);
+        Assert.Contains("<br />Corrected wording", html);
+        Assert.DoesNotContain("<script>title", html);
+        Assert.DoesNotContain("<img src=x", html);
+        Assert.Contains("/world-news/corrections/notice-id", html);
+        Assert.Contains($"/world-news/corrections?article={articleId:N}", html);
+    }
+
+    [Fact]
     public void BlogPostBody_ShouldRenderClickableCategoryAndTagPills_WhenPresent()
     {
         var html = PublicSiteHtmlRenderer.BlogPostBody(

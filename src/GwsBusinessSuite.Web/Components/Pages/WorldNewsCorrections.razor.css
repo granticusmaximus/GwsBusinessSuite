@@ -1,0 +1,4 @@
+.news-corrections-page { max-width: 60rem; margin: 0 auto; padding: 2rem 1rem; }
+.news-corrections-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .75rem; }
+.news-correction-text { white-space: pre-wrap; overflow-wrap: anywhere; margin: .75rem 0; }
+.news-corrections-page h2 { overflow-wrap: anywhere; }

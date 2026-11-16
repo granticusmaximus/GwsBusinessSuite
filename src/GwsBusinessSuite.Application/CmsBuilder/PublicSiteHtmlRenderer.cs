@@ -2,6 +2,7 @@ using System.Net;
 using System.Text;
 using System.Text.Json;
 using System.Xml.Linq;
+using GwsBusinessSuite.Application.Abstractions;
 using GwsBusinessSuite.Application.Comments;
 using GwsBusinessSuite.Domain.Entities;
 using Markdig;
@@ -23,6 +24,8 @@ namespace GwsBusinessSuite.Application.CmsBuilder;
 // (CmsBlockHtmlRenderer.RenderRelatedPosts), which shows a thumbnail per related article;
 // BlogPostBody's own plain-text link list below never reads it.
 public sealed record RelatedArticleView(string Title, string Slug, string? HeroImageUrl = null);
+
+public sealed record ArticleCorrectionView(string Id, string Title, string Text, DateTimeOffset At);
 
 public static class PublicSiteHtmlRenderer
 {
@@ -617,7 +620,9 @@ public static class PublicSiteHtmlRenderer
         IReadOnlyList<CommentView>? approvedComments = null,
         Guid? replyToCommentId = null,
         string? replyToAuthorName = null,
-        IReadOnlyList<RelatedArticleView>? relatedArticles = null)
+        IReadOnlyList<RelatedArticleView>? relatedArticles = null,
+        IReadOnlyList<ArticleCorrectionView>? corrections = null,
+        Guid? correctionsArticleId = null)
     {
         var dateLabel = publishedAt?.ToString("dd-MM-yy") ?? "";
         var heroHtml = string.IsNullOrWhiteSpace(heroImageUrl)
@@ -698,6 +703,23 @@ public static class PublicSiteHtmlRenderer
                 </section>
                 """;
 
+        var correctionsHtml = corrections is not { Count: > 0 } ? string.Empty : $"""
+            <section class="blog-post-body" aria-label="Published corrections">
+              <h2>Latest published corrections</h2>
+              <ol>
+                {string.Concat(corrections.Select(c => $"""
+                  <li>
+                    <h3>{Html(c.Title)}</h3>
+                    <time datetime="{Html(c.At.ToString("O"))}">{Html(c.At.ToLocalGwsDateTime())}</time>
+                    <p>{Html(c.Text).ReplaceLineEndings("<br />")}</p>
+                    <a href="/world-news/corrections/{Uri.EscapeDataString(c.Id)}">Permanent correction notice</a>
+                  </li>
+                  """))}
+              </ol>
+              <a href="/world-news/corrections{(correctionsArticleId is { } articleId ? $"?article={articleId:N}" : "")}">Full corrections log</a>
+            </section>
+            """;
+
         return $"""
             <article>
               {heroHtml}
@@ -714,6 +736,7 @@ public static class PublicSiteHtmlRenderer
                 {(string.IsNullOrWhiteSpace(metaDescription) ? "" : $"""<p class="blog-post-lead">{Html(metaDescription)}</p>""")}
                 <p class="blog-post-author">By {Html(author)}</p>
                 <div class="blog-post-body">{bodyHtml}</div>
+                {correctionsHtml}
                 {relatedPostsHtml}
                 <footer class="blog-post-footer">
                   <a href="/blog">&larr; All articles</a>

@@ -146,22 +146,39 @@ public sealed record StoryHold(string EventId, DateTimeOffset Until, string Reas
 
 public static class Holds
 {
+    public const int MaxReasonLength = 1000;
+
     public static bool IsHeld(StoryHold? hold, DateTimeOffset now) => hold is not null && hold.Until > now;
 
     public static string Describe(StoryHold hold, Func<DateTimeOffset, string> formatTime) =>
         $"On hold until {formatTime(hold.Until)}: {hold.Reason} ({hold.SetBy})";
 
     public static string? Problem(DateTimeOffset until, string reason, DateTimeOffset now) =>
-        until <= now ? "The release time has to be in the future." : string.IsNullOrWhiteSpace(reason) ? "Give the reason for the hold." : null;
+        until.ToUnixTimeSeconds() <= now.ToUnixTimeSeconds() ? "The release time has to be in the future."
+        : string.IsNullOrWhiteSpace(reason) ? "Give the reason for the hold."
+        : reason.Trim().Length > MaxReasonLength ? $"Keep the hold reason to {MaxReasonLength} characters or fewer." : null;
 }
 
 // N12: a published correction to a story, shown on the story, on the public corrections page, and
 // alongside the methodology log.
-public sealed record Correction(string Id, string EventId, string Title, string Text, string Username, DateTimeOffset At);
+public sealed record Correction(string Id, string EventId, string Title, string Text, string Username, DateTimeOffset At)
+{
+    public Guid? ArticleId { get; init; }
+}
+
+public sealed record PublicCorrection(string Id, string EventId, string Title, string Text, DateTimeOffset At);
 
 public static class Corrections
 {
     public const int MaxLength = 4000;
+    public const int MaxTitleLength = 200;
+    public const int PageSize = 25;
+
+    public static string? Problem(string title, string text) =>
+        string.IsNullOrWhiteSpace(title) ? "Give the correction a public title."
+        : title.Trim().Length > MaxTitleLength ? $"Keep the title to {MaxTitleLength} characters or fewer."
+        : string.IsNullOrWhiteSpace(text) ? "Explain what was wrong and what is correct."
+        : text.Trim().Length > MaxLength ? $"Keep the correction to {MaxLength} characters or fewer." : null;
 }
 
 // N14: a dossier: what the desk pinned on a story (reports, official records, notes, links), kept

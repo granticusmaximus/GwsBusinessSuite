@@ -220,3 +220,52 @@ Pending/failed work must be visible rather than mislabeled as translated.
   model output checks with several source languages and missing descriptions; a large-store
   query/catch-up measurement; original-text/pending/mobile/Overwatch browser checks; and the
   required release verification. Check upgrade and rollback on a copied database first.
+
+## N11: hold management
+
+Progress: source implementation written; runtime/release verification blocked.
+
+- [x] Add active-admin hold management using the existing store and story live editor.
+- [x] Validate future release times/reasons and reject missing stories; keep hold reads indexed.
+- [x] Add focused regression sources and user guidance; inspect the patch without execution.
+- [ ] Runtime/release verification remains blocked by the no-tests instruction.
+
+Hold times are entered and displayed explicitly in UTC to avoid browser/server time-zone ambiguity.
+Existing draft/live/alert guards remain authoritative. This does not revoke already-published
+CMS articles or add a new CMS publishing gate.
+The existing live editor owns the hold controls and shares its refreshed hold state, avoiding
+a second store reader or stale sibling panel. Release uses inline confirmation; an absent
+hold fails explicitly. Hold updates are last-writer-wins, not an immutable audit trail.
+Regression sources cover desk authorization, replacement, missing stories, invalid times,
+reason limits, exact expiry and live/public gating. Existing raw hold tests now seed a real
+story. No build, test, browser or release-gate execution was performed. N12 is the next unit.
+
+## N12: corrections publishing
+
+Progress: source implementation written; runtime/release verification blocked.
+
+- [x] Validate and authorize publication; block new notices for held/missing stories.
+- [x] Add a story editor, public paged log/permalinks and methodology-log navigation.
+- [x] Optionally associate a currently published CMS article and show notices beneath it.
+- [x] Add focused regression sources, update the guide and inspect the patch.
+- [ ] Runtime/release verification remains blocked by the no-tests instruction.
+
+Existing notices remain public after a hold or story pruning; corrections do not silently
+rewrite article text or alter CMS publication/approval rules. CMS association is explicit by
+published article slug. The additive article reference lives in the existing raw SQLite
+corrections table, not a new EF entity. Public projections omit the internal desk username.
+
+The story editor requires review followed by explicit public confirmation. Existing notices
+have no edit/delete/reassignment action. Public list/permalink routes use no-store responses,
+deterministic paging and explicit 400/404/503 outcomes. Article notices are loaded by article
+ID through WorldNewsService and rendered with encoded text, outside the article's Markdown;
+25 latest notices are shown with a link to the full article-filtered log. Both publication
+status and scheduling are checked when associating a CMS slug. The article body, CMS status,
+trust labels, challenges and approvals are not modified.
+
+Public blog reads now depend on the World News corrections store: on a store failure, return
+503 rather than silently omit corrections. The guide documents this monitoring/rollback
+concern. Regression sources cover auth, public-only association, holds, limits, stable paging,
+privacy projection, retention after pruning, legacy schema upgrade and encoded HTML.
+Static source/call-site and tracked patch-whitespace checks only; no build, test, browser,
+release gate, commit, push or deployment performed. Next unit: N13 morgue/archive search.

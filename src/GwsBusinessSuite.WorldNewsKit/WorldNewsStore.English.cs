@@ -36,7 +36,10 @@ public sealed partial class WorldNewsStore
         Execute(connection, """
             CREATE TRIGGER IF NOT EXISTS article_english_changed AFTER UPDATE OF title, snippet ON articles
                 WHEN old.title IS NOT new.title OR old.snippet IS NOT new.snippet
-                BEGIN UPDATE articles SET english_pending = 1 WHERE id = new.id; END;
+                BEGIN
+                    UPDATE articles SET english_pending = 1 WHERE id = new.id;
+                    UPDATE article_translations SET english = '' WHERE article_id = new.id AND source_title IS NULL;
+                END;
             CREATE VIRTUAL TABLE IF NOT EXISTS article_english_fts USING fts5(
                 english, description, summary, content='article_translations', content_rowid='rowid',
                 tokenize='unicode61 remove_diacritics 2');
@@ -72,6 +75,10 @@ public sealed partial class WorldNewsStore
         if ((long)command.ExecuteScalar()! != 0) return false;
         Execute(connection, """
             INSERT INTO article_english_fts(article_english_fts) VALUES('rebuild');
+            UPDATE articles SET english_pending = 0 WHERE id IN (
+                SELECT t.article_id FROM article_translations t JOIN articles a ON a.id = t.article_id
+                WHERE t.summary IS NOT NULL AND t.english <> '' AND t.source_title = a.title
+                  AND COALESCE(t.source_snippet, '') = COALESCE(a.snippet, ''));
             UPDATE events SET english_article_id = (
                 SELECT a.id FROM articles a JOIN article_translations t ON t.article_id = a.id
                 WHERE a.event_id = events.id AND t.english <> ''
@@ -215,7 +222,9 @@ public sealed partial class WorldNewsStore
         {
             using var command = connection.CreateCommand();
             command.CommandText = $"""
-                SELECT t.article_id, COALESCE(t.source_title, a.title), t.source_snippet, t.english, t.description, t.summary
+                SELECT t.article_id, COALESCE(t.source_title, a.title),
+                    CASE WHEN t.source_title IS NULL THEN a.snippet ELSE t.source_snippet END,
+                    t.english, t.description, t.summary
                 FROM article_translations t JOIN articles a ON a.id = t.article_id
                 WHERE (t.source_title IS NULL OR ({CurrentEnglish})) AND t.english <> ''
                   AND t.article_id IN ({string.Join(',', batch.Select((_, i) => $"$id{i}"))})
@@ -226,7 +235,8 @@ public sealed partial class WorldNewsStore
                 translations.Add(reader.GetString(0), ReadEnglishReport(reader));
         }
 
-        return articles.Select(article => translations.TryGetValue(article.Id, out var translation)
+        return articles.Select(article => translations.TryGetValue(article.Id, out var translation) &&
+            translation.SourceTitle == article.Title && (translation.SourceSnippet ?? "") == (article.Snippet ?? "")
             ? article with { English = translation } : article).ToList();
     }
 

@@ -129,6 +129,7 @@ public sealed partial class WorldNewsStore
             """);
         // The desk's tables (N5-N15, 14-11-26) live in WorldNewsStore.Desk.cs.
         Execute(connection, DeskSchema);
+        EnsureDeskSchema(connection);
         // Databases from before outlet feeds (21-10-26) have no snippet column.
         using var columns = connection.CreateCommand();
         columns.CommandText = "SELECT COUNT(*) FROM pragma_table_info('articles') WHERE name = 'snippet'";

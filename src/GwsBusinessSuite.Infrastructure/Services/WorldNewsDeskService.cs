@@ -12,6 +12,50 @@ public sealed partial class WorldNewsDeskService(IAppDbContext db, WorldNewsServ
 {
     public const int SourceBookPageSize = 25;
 
+    public async Task<IReadOnlyList<Correction>> CorrectionsAsync(string eventId, string username, int page = 0, CancellationToken cancellationToken = default)
+    {
+        await RequireDeskUserAsync(username, cancellationToken);
+        ArgumentOutOfRangeException.ThrowIfNegative(page);
+        return await Task.Run(() =>
+        {
+            if (!news.Store.HasEvent(eventId)) throw new InvalidOperationException("That story is no longer available.");
+            return news.Store.Corrections(eventId, Corrections.PageSize + 1, checked(page * Corrections.PageSize));
+        }, cancellationToken);
+    }
+
+    public async Task<Correction> PublishCorrectionAsync(string eventId, string title, string text, string? articleSlug, string username, CancellationToken cancellationToken = default)
+    {
+        await RequireDeskUserAsync(username, cancellationToken);
+        if (Corrections.Problem(title, text) is { } problem) throw new ArgumentException(problem, nameof(text));
+        Guid? articleId = null;
+        if (!string.IsNullOrWhiteSpace(articleSlug))
+        {
+            var slug = articleSlug.Trim();
+            var article = await db.Articles.AsNoTracking().Where(a => a.Slug == slug && a.TrashedAt == null)
+                .Select(a => new { a.Id, a.Status, a.PublishedAt }).SingleOrDefaultAsync(cancellationToken);
+            if (article is null || !PublicationWindows.IsVisible(article.Status, ArticleStatuses.Published, article.PublishedAt, DateTimeOffset.UtcNow))
+                throw new ArgumentException("Choose the slug of a currently published article, or leave it empty.", nameof(articleSlug));
+            articleId = article.Id;
+        }
+        return await Task.Run(() => news.Store.AddCorrection(eventId, title, text, username, DateTimeOffset.UtcNow, articleId), cancellationToken);
+    }
+
+    public async Task<StoryHold> SetHoldAsync(string eventId, DateTimeOffset until, string reason, string username, CancellationToken cancellationToken = default)
+    {
+        await RequireDeskUserAsync(username, cancellationToken);
+        var now = DateTimeOffset.UtcNow;
+        if (Holds.Problem(until, reason, now) is { } problem) throw new ArgumentException(problem, nameof(until));
+        var hold = new StoryHold(eventId, until.ToUniversalTime(), reason.Trim(), username, now);
+        await Task.Run(() => news.Store.SetHold(hold), cancellationToken);
+        return hold;
+    }
+
+    public async Task ReleaseHoldAsync(string eventId, string username, CancellationToken cancellationToken = default)
+    {
+        await RequireDeskUserAsync(username, cancellationToken);
+        await Task.Run(() => news.Store.ReleaseHold(eventId), cancellationToken);
+    }
+
     public async Task<(IReadOnlyList<LiveUpdate> Updates, StoryHold? Hold)> LiveUpdatesAsync(
         string eventId, string username, int page = 0, CancellationToken cancellationToken = default)
     {

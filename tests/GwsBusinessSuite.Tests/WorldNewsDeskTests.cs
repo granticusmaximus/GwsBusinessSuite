@@ -381,16 +381,40 @@ public sealed class WorldNewsDeskTests : IDisposable
     [Fact]
     public void Holds_ShouldStopAlertsForTheWholeSituation_UntilRelease()
     {
-        var store = Store();
+        using var fixture = new WorldNewsTestStore();
+        fixture.SeedEvent("s1", "e1", "Quake hits Tokyo", ["A", "B"], Now);
+        var store = fixture.Store;
         var hold = new StoryHold("e1", Now.AddHours(2), "Embargoed until the briefing", "ana", Now);
         store.SetHold(hold);
 
         Assert.True(Holds.IsHeld(store.Hold("e1"), Now));
         Assert.False(Holds.IsHeld(store.Hold("e1"), Now.AddHours(3)));
+        Assert.False(store.IsSituationHeld("s1", hold.Until));
+        Assert.True(store.IsSituationHeld("s1", hold.Until.AddMilliseconds(-1)));
         Assert.Contains("Embargoed", Holds.Describe(hold, at => at.ToString("HH:mm")));
         Assert.NotNull(Holds.Problem(Now.AddHours(-1), "late", Now));
         store.ReleaseHold("e1");
         Assert.Null(store.Hold("e1"));
+        Assert.False(store.IsSituationHeld("s1", Now));
+        Assert.Throws<InvalidOperationException>(() => store.ReleaseHold("e1"));
+    }
+
+    [Fact]
+    public void Holds_ShouldRejectMissingStoriesAndInvalidReasons_WithoutReplacingAValidHold()
+    {
+        using var fixture = new WorldNewsTestStore();
+        fixture.SeedEvent("s1", "e1", "Quake hits Tokyo", ["A", "B"], Now);
+        var store = fixture.Store;
+        var hold = new StoryHold("e1", Now.AddHours(1), new string('x', Holds.MaxReasonLength), "ana", Now);
+        store.SetHold(hold);
+
+        Assert.Throws<InvalidOperationException>(() => store.SetHold(hold with { EventId = "missing" }));
+        Assert.Throws<ArgumentException>(() => store.SetHold(hold with { Until = Now }));
+        Assert.Throws<ArgumentException>(() => store.SetHold(hold with { Until = Now.AddMilliseconds(500) }));
+        Assert.Throws<ArgumentException>(() => store.SetHold(hold with { Reason = "  " }));
+        Assert.Throws<ArgumentException>(() => store.SetHold(hold with { Reason = new string('x', Holds.MaxReasonLength + 1) }));
+        Assert.Equal(hold, store.Hold("e1"));
+        Assert.Null(store.Hold("missing"));
     }
 
     [Fact]
@@ -456,7 +480,9 @@ public sealed class WorldNewsDeskTests : IDisposable
     [Fact]
     public void Morgue_ShouldSearchTheDesksRecords_AndOnlyMyContacts()
     {
-        var store = Store();
+        using var fixture = new WorldNewsTestStore();
+        fixture.SeedEvent("s1", "e1", "Crane falls", ["A", "B"], Now);
+        var store = fixture.Store;
         store.AddDeskNote("e1", "ana", "Harbour master says the crane fell at 06:10", Now);
         store.SaveSourceContact(new SourceContact("", "ana", "Harbour master", "Port of X", "", 4, "", Now));
         store.SaveSourceContact(new SourceContact("", "ben", "Harbour pilot", "Port of X", "", 3, "", Now));
@@ -468,6 +494,64 @@ public sealed class WorldNewsDeskTests : IDisposable
         Assert.Contains(hits, h => h.Kind == "contact" && h.Title == "Harbour master");
         Assert.DoesNotContain(hits, h => h.Kind == "contact" && h.Title == "Harbour pilot");
         Assert.Single(store.SearchDesk("06:40", "ana"));
+    }
+
+    [Fact]
+    public void Corrections_ShouldValidateBeforeAppending_AndKeepStablePublicHistoryAfterPruning()
+    {
+        using var fixture = new WorldNewsTestStore();
+        fixture.SeedEvent("s1", "e1", "Crane falls", ["A", "B"], Now);
+        var store = fixture.Store;
+        var articleId = Guid.NewGuid();
+        var first = store.AddCorrection("e1", new string('t', Corrections.MaxTitleLength), new string('x', Corrections.MaxLength), "private-editor", Now, articleId);
+        var second = store.AddCorrection("e1", "Corrected time", "The crane fell at 06:40.", "another-editor", Now);
+
+        Assert.Throws<ArgumentException>(() => store.AddCorrection("e1", " ", "Text", "ana", Now));
+        Assert.Throws<ArgumentException>(() => store.AddCorrection("e1", "Title", " ", "ana", Now));
+        Assert.Throws<ArgumentException>(() => store.AddCorrection("e1", new string('x', Corrections.MaxTitleLength + 1), "Text", "ana", Now));
+        Assert.Throws<ArgumentException>(() => store.AddCorrection("e1", "Title", new string('x', Corrections.MaxLength + 1), "ana", Now));
+        Assert.Throws<InvalidOperationException>(() => store.AddCorrection("missing", "Title", "Text", "ana", Now));
+        Assert.Equal(first.Id, Assert.Single(store.PublicCorrections(articleId: articleId)).Id);
+        Assert.Equal(second.Id, Assert.Single(store.PublicCorrections(id: second.Id)).Id);
+        var ordered = new[] { first.Id, second.Id }.OrderByDescending(id => id, StringComparer.Ordinal).ToArray();
+        Assert.Equal(ordered[0], Assert.Single(store.PublicCorrections(limit: 1)).Id);
+        Assert.Equal(ordered[1], Assert.Single(store.PublicCorrections(offset: 1, limit: 1)).Id);
+        Assert.Empty(store.PublicCorrections(eventId: "another-story"));
+
+        using (var connection = new SqliteConnection($"Data Source={fixture.Path}"))
+        {
+            connection.Open();
+            using var command = connection.CreateCommand();
+            command.CommandText = "DELETE FROM events WHERE id = 'e1'";
+            command.ExecuteNonQuery();
+        }
+
+        Assert.Equal(2, store.PublicCorrections(eventId: "e1").Count);
+        var json = System.Text.Json.JsonSerializer.Serialize(store.PublicCorrections());
+        Assert.DoesNotContain("private-editor", json);
+        Assert.DoesNotContain("another-editor", json);
+        Assert.DoesNotContain("Username", json);
+    }
+
+    [Fact]
+    public void Corrections_ShouldUpgradeLegacyRecordsWithoutLosingTheirPublicHistory()
+    {
+        var path = Path.Combine(_folder, "legacy-corrections.db");
+        using (var connection = new SqliteConnection($"Data Source={path}"))
+        {
+            connection.Open();
+            using var command = connection.CreateCommand();
+            command.CommandText = """
+                CREATE TABLE corrections (id TEXT PRIMARY KEY, event_id TEXT NOT NULL, title TEXT NOT NULL, text TEXT NOT NULL, username TEXT NOT NULL, at INTEGER NOT NULL);
+                INSERT INTO corrections VALUES ('old', 'pruned-story', 'Corrected time', 'The corrected account.', 'private-editor', 1);
+                """;
+            command.ExecuteNonQuery();
+        }
+
+        var store = new WorldNewsStore(path);
+        Assert.Null(Assert.Single(store.Corrections()).ArticleId);
+        Assert.Equal("old", Assert.Single(store.PublicCorrections(id: "old")).Id);
+        Assert.Equal("old", Assert.Single(new WorldNewsStore(path).PublicCorrections()).Id);
     }
 
     public void Dispose()

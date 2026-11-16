@@ -1,0 +1,155 @@
+@using GwsBusinessSuite.Application.Abstractions
+@using GwsBusinessSuite.Infrastructure.Services
+@using GwsBusinessSuite.WorldNewsKit
+@inject IServiceScopeFactory ScopeFactory
+@inject ICurrentUserAccessor CurrentUserAccessor
+@inject ILogger<WorldNewsCorrectionsEditor> Logger
+
+<section class="desk-corrections" aria-label="Published story corrections">
+    <h3 class="h6">Published corrections</h3>
+    <p class="small text-secondary">These are permanent public notices, not private desk notes or live-update edits.
+        Explain what was wrong and what is correct. Publishing does not rewrite the article or change its trust label.</p>
+    <div class="desk-corrections-actions">
+        <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@_busy" @onclick="RefreshAsync">Refresh corrections</button>
+        <a class="btn btn-sm btn-link" href="@($"world-news/corrections?story={Uri.EscapeDataString(EventId)}")" target="_blank" rel="noopener">Public corrections for this story</a>
+    </div>
+    @if (_error is { } error) { <p class="alert alert-warning" role="alert">@error</p> }
+    @if (_message is { } message) { <p class="small" role="status">@message</p> }
+    <form @onsubmit="Review" @onsubmit:preventDefault>
+        <fieldset class="desk-corrections-fields" disabled="@(_busy || !_loaded)">
+            <legend class="visually-hidden">Publish a correction notice</legend>
+            <label>Public correction title
+                <input class="form-control form-control-sm" maxlength="@Corrections.MaxTitleLength"
+                       @bind="_title" @bind:event="oninput" @bind:after="CancelReview" required />
+            </label>
+            <label>What was wrong, and what is correct
+                <textarea class="form-control form-control-sm" rows="4" maxlength="@Corrections.MaxLength"
+                          @bind="_text" @bind:event="oninput" @bind:after="CancelReview" required></textarea>
+            </label>
+            <label>Published CMS article slug (optional)
+                <input class="form-control form-control-sm" @bind="_articleSlug" @bind:event="oninput" @bind:after="CancelReview" />
+            </label>
+            <p class="small text-secondary">Use only the slug after /blog/, not a URL. An associated notice also appears beneath that article.
+                Notices remain public after a hold or story pruning. There is no edit or delete action; publish a follow-up to correct a notice.</p>
+            <button type="submit" class="btn btn-sm btn-outline-primary" disabled="@(string.IsNullOrWhiteSpace(_text) || string.IsNullOrWhiteSpace(_title))">Review public correction</button>
+            @if (_reviewing)
+            {
+                <div class="alert alert-warning">
+                    <strong>@_title</strong>
+                    <p class="desk-correction-text">@_text</p>
+                    <p class="small">Publish this wording for anyone to read? Do not include private notes or contact details.</p>
+                    <div class="desk-corrections-actions">
+                        <button type="button" class="btn btn-sm btn-danger" @onclick="PublishAsync">Confirm public publication</button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="CancelReview">Cancel</button>
+                    </div>
+                </div>
+            }
+        </fieldset>
+    </form>
+    @if (_busy) { <LoadingIndicator Message="Updating correction notices..." /> }
+    @if (_loaded)
+    {
+        @if (_corrections.Count == 0) { <p class="small text-secondary mt-2">No published corrections for this story.</p> }
+        <ol class="list-unstyled">
+            @foreach (var correction in _corrections)
+            {
+                <li class="mt-3" @key="correction.Id">
+                    <strong>@correction.Title</strong>
+                    <div class="small text-secondary">@correction.Username - @correction.At.ToLocalGwsDateTime()</div>
+                    <p class="desk-correction-text">@correction.Text</p>
+                    <a href="@($"world-news/corrections/{Uri.EscapeDataString(correction.Id)}")" target="_blank" rel="noopener">Public notice</a>
+                    @if (correction.ArticleId is { } articleId)
+                    {
+                        <a class="ms-2" href="@($"admin/article-editor/{articleId}")">Associated CMS article</a>
+                    }
+                </li>
+            }
+        </ol>
+        <nav class="desk-corrections-actions" aria-label="Correction notice pages">
+            <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@(_busy || _page == 0)" @onclick="() => ChangePageAsync(-1)">Newer notices</button>
+            <span class="small">Page @(_page + 1)</span>
+            <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@(_busy || !_hasMore)" @onclick="() => ChangePageAsync(1)">Older notices</button>
+        </nav>
+    }
+</section>
+
+@code {
+    [Parameter, EditorRequired] public string EventId { get; set; } = string.Empty;
+    [Parameter] public string Title { get; set; } = string.Empty;
+
+    private IReadOnlyList<Correction> _corrections = [];
+    private string _title = string.Empty, _text = string.Empty, _articleSlug = string.Empty;
+    private string? _loadedFor, _error, _message;
+    private int _page;
+    private bool _busy, _loaded, _hasMore, _reviewing;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_loadedFor == EventId) return;
+        _loadedFor = EventId;
+        _title = Title.Length > Corrections.MaxTitleLength ? Title[..Corrections.MaxTitleLength] : Title;
+        _text = _articleSlug = string.Empty;
+        _reviewing = false;
+        await RunAsync((desk, user) => LoadAsync(desk, user, 0));
+    }
+
+    private void CancelReview() => _reviewing = false;
+
+    private void Review()
+    {
+        _error = Corrections.Problem(_title, _text);
+        _reviewing = _error is null;
+    }
+
+    private async Task RunAsync(Func<WorldNewsDeskService, string, Task> action)
+    {
+        if (_busy) return;
+        _busy = true;
+        _error = _message = null;
+        try
+        {
+            var user = await CurrentUserAccessor.GetCurrentUsernameAsync();
+            await using var scope = ScopeFactory.CreateAsyncScope();
+            await action(scope.ServiceProvider.GetRequiredService<WorldNewsDeskService>(), user);
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or UnauthorizedAccessException or Microsoft.Data.Sqlite.SqliteException)
+        {
+            Logger.LogWarning(ex, "World News: correction notice operation failed for {EventId}", EventId);
+            _error = ex is Microsoft.Data.Sqlite.SqliteException
+                ? "Corrections could not be refreshed. A notice may already have been saved; check the public log before retrying. Remaining input has been kept."
+                : ex.Message;
+            _loaded = false;
+            _corrections = [];
+            _reviewing = false;
+        }
+        finally { _busy = false; }
+    }
+
+    private async Task LoadAsync(WorldNewsDeskService desk, string user, int page)
+    {
+        var notices = await desk.CorrectionsAsync(EventId, user, page);
+        _page = page;
+        _hasMore = notices.Count > Corrections.PageSize;
+        _corrections = notices.Take(Corrections.PageSize).ToList();
+        _loaded = true;
+    }
+
+    private Task RefreshAsync() => RunAsync((desk, user) => LoadAsync(desk, user, _page));
+    private Task ChangePageAsync(int direction) => RunAsync((desk, user) => LoadAsync(desk, user, _page + direction));
+
+    private Task PublishAsync()
+    {
+        if (!_reviewing) return Task.CompletedTask;
+        var title = _title;
+        var text = _text;
+        var articleSlug = _articleSlug;
+        return RunAsync(async (desk, user) =>
+        {
+            await desk.PublishCorrectionAsync(EventId, title, text, articleSlug, user);
+            _text = string.Empty;
+            _reviewing = false;
+            await LoadAsync(desk, user, 0);
+            _message = "Correction notice published publicly.";
+        });
+    }
+}

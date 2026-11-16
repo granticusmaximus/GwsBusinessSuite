@@ -1,17 +1,62 @@
 @using GwsBusinessSuite.Application.Abstractions
 @using GwsBusinessSuite.Infrastructure.Services
 @using GwsBusinessSuite.WorldNewsKit
+@using System.Globalization
 @inject IServiceScopeFactory ScopeFactory
 @inject ICurrentUserAccessor CurrentUserAccessor
 @inject ILogger<WorldNewsLiveEditor> Logger
 
-<section class="desk-live" aria-label="Public live updates">
-    <h3 class="h6">Public live updates</h3>
+<section class="desk-live" aria-label="Story hold and public live updates">
+    <h3 class="h6">Embargo / hold</h3>
+    <p class="small text-secondary">An active hold blocks World News draft creation, live posts and corrections, and alerts for this story's situation.
+        It hides existing public live coverage until expiry or release. It does not recall published CMS articles or block their CMS publication.</p>
+    @if (_loaded)
+    {
+        @if (_hold is { } currentHold)
+        {
+            <p class="small" role="status">@(Holds.IsHeld(currentHold, DateTimeOffset.UtcNow) ? "Active hold" : "Expired hold"):
+                @currentHold.Reason. Release: @UtcTime(currentHold.Until). Set by @currentHold.SetBy at @UtcTime(currentHold.SetAt).</p>
+        }
+        else
+        {
+            <p class="small" role="status">No hold is set.</p>
+        }
+    }
+    <form @onsubmit="SaveHoldAsync" @onsubmit:preventDefault>
+        <fieldset class="desk-live-fields" disabled="@(!_loaded || _busy)">
+            <legend class="visually-hidden">Set or replace a story hold</legend>
+            <label>Release date and time (UTC, not your local time)
+                <input type="datetime-local" class="form-control form-control-sm" value="@_untilUtc"
+                       @oninput="e => _untilUtc = e.Value?.ToString() ?? string.Empty" required />
+            </label>
+            <label>Private hold reason
+                <textarea class="form-control form-control-sm" rows="2" maxlength="@Holds.MaxReasonLength"
+                          @bind="_holdReason" @bind:event="oninput" required></textarea>
+            </label>
+            <p class="small text-secondary">Saving replaces any current hold. Refresh updates its status but keeps your input.</p>
+            <div class="desk-live-actions">
+                <button type="submit" class="btn btn-sm btn-outline-primary" disabled="@(string.IsNullOrWhiteSpace(_holdReason) || string.IsNullOrWhiteSpace(_untilUtc))">Save hold</button>
+                @if (_hold is not null)
+                {
+                    <button type="button" class="btn btn-sm btn-outline-danger" @onclick="() => _confirmRelease = true">Release / remove hold</button>
+                }
+            </div>
+            @if (_confirmRelease && _hold is not null)
+            {
+                <p class="small">Release now? Public live coverage becomes available again and this hold no longer blocks drafts or alerts.</p>
+                <div class="desk-live-actions">
+                    <button type="button" class="btn btn-sm btn-danger" @onclick="ReleaseHoldAsync">Confirm release</button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => _confirmRelease = false">Cancel</button>
+                </div>
+            }
+        </fieldset>
+    </form>
+    <h3 class="h6 mt-3">Public live updates</h3>
     <p class="small text-secondary">Publishing here makes this story's headline and your update readable by anyone on the public site.
         Do not include private desk notes, contact details or unapproved sensitive material.
         Confirmed/unconfirmed are manual labels; approval records are a separate workflow.</p>
     <div class="desk-live-actions">
-        <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@_busy" @onclick="RefreshAsync">Refresh live updates</button>
+        <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@_busy" @onclick="RefreshAsync">Refresh hold and live updates</button>
         <a class="btn btn-sm btn-link" href="@($"world-news/live/{Uri.EscapeDataString(EventId)}")" target="_blank" rel="noopener">Public live page</a>
     </div>
     <p class="small text-secondary">The public page becomes available after the first update, unless the story is on hold.</p>
@@ -19,7 +64,7 @@
     @if (_message is { } message) { <p class="small" role="status">@message</p> }
     @if (_hold is { } hold && Holds.IsHeld(hold, DateTimeOffset.UtcNow))
     {
-        <p class="alert alert-warning">@Holds.Describe(hold, at => at.ToLocalGwsDateTime()). Posting and corrections are blocked; existing updates are hidden from the public.</p>
+        <p class="alert alert-warning">@Holds.Describe(hold, UtcTime). Posting and corrections are blocked; existing updates are hidden from the public.</p>
     }
     <form @onsubmit="PublishAsync" @onsubmit:preventDefault>
         <fieldset class="desk-live-fields" disabled="@(!CanWrite)">
@@ -98,14 +143,16 @@
     private string? _loadedFor, _editingId, _error, _message;
     private string _text = string.Empty, _label = LiveUpdates.Unconfirmed;
     private string _correctionText = string.Empty, _correctionLabel = LiveUpdates.Unconfirmed;
+    private string _untilUtc = string.Empty, _holdReason = string.Empty;
     private int _page;
-    private bool _busy, _loaded, _hasMore;
+    private bool _busy, _loaded, _hasMore, _holdDraftLoaded, _confirmRelease;
     private bool CanWrite => _loaded && !_busy && !Holds.IsHeld(_hold, DateTimeOffset.UtcNow);
 
     protected override async Task OnParametersSetAsync()
     {
         if (_loadedFor == EventId) return;
         _loadedFor = EventId;
+        _holdDraftLoaded = _confirmRelease = false;
         await RefreshAsync();
     }
 
@@ -122,9 +169,9 @@
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or UnauthorizedAccessException or Microsoft.Data.Sqlite.SqliteException)
         {
-            Logger.LogWarning(ex, "World News: live update operation failed for {EventId}", EventId);
+            Logger.LogWarning(ex, "World News: hold or live update operation failed for {EventId}", EventId);
             _error = ex is Microsoft.Data.Sqlite.SqliteException
-                ? "Live coverage couldn't be refreshed. Check the public page before retrying; an update may already have been saved. Your remaining input has been kept."
+                ? "Hold or live coverage could not be refreshed. Refresh the status before retrying; a change may already have been saved. Your remaining input has been kept."
                 : ex.Message;
             _loaded = false;
             _updates = [];
@@ -137,6 +184,12 @@
         var result = await desk.LiveUpdatesAsync(EventId, user, page);
         _page = page;
         _hold = result.Hold;
+        if (!_holdDraftLoaded)
+        {
+            _holdReason = _hold?.Reason ?? string.Empty;
+            _untilUtc = (_hold?.Until ?? DateTimeOffset.UtcNow.AddHours(1)).UtcDateTime.ToString("yyyy-MM-ddTHH:mm", CultureInfo.InvariantCulture);
+            _holdDraftLoaded = true;
+        }
         _hasMore = result.Updates.Count > LiveUpdates.PageSize;
         _updates = result.Updates.Take(LiveUpdates.PageSize).ToList();
         _loaded = true;
@@ -144,6 +197,27 @@
 
     private Task RefreshAsync() => RunAsync((desk, user) => LoadAsync(desk, user, _page));
     private Task ChangePageAsync(int direction) => RunAsync((desk, user) => LoadAsync(desk, user, _page + direction));
+
+    private static string UtcTime(DateTimeOffset value) =>
+        value.ToUniversalTime().ToGwsDateTime() + " UTC";
+
+    private Task SaveHoldAsync() => RunAsync(async (desk, user) =>
+    {
+        if (!DateTime.TryParseExact(_untilUtc, "yyyy-MM-ddTHH:mm", CultureInfo.InvariantCulture, DateTimeStyles.None, out var until))
+            throw new ArgumentException("Enter a valid release date and time in UTC.");
+        await desk.SetHoldAsync(EventId, new DateTimeOffset(DateTime.SpecifyKind(until, DateTimeKind.Utc)), _holdReason, user);
+        _confirmRelease = false;
+        await LoadAsync(desk, user, _page);
+        _message = "Hold saved.";
+    });
+
+    private Task ReleaseHoldAsync() => RunAsync(async (desk, user) =>
+    {
+        await desk.ReleaseHoldAsync(EventId, user);
+        _confirmRelease = false;
+        await LoadAsync(desk, user, _page);
+        _message = "Hold released.";
+    });
 
     private Task PublishAsync()
     {

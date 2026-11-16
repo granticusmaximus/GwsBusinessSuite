@@ -78,8 +78,85 @@ public sealed class WorldNewsDeskServiceTests : IAsyncLifetime
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() => _desk.LiveUpdatesAsync("e1", username));
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() => _desk.PublishLiveUpdateAsync("e1", "Public update", LiveUpdates.Unconfirmed, username));
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() => _desk.CorrectLiveUpdateAsync("e1", "update", "Correction", LiveUpdates.Confirmed, username));
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => _desk.SetHoldAsync("e1", DateTimeOffset.UtcNow.AddHours(1), "Private embargo", username));
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => _desk.ReleaseHoldAsync("e1", username));
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => _desk.CorrectionsAsync("e1", username));
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => _desk.PublishCorrectionAsync("e1", "Correction", "Corrected fact", null, username));
 
         Assert.Empty(_news.Store.DeskNotes("e1"));
+    }
+
+    [Fact]
+    public async Task Holds_ShouldUseTheDeskIdentity_AndBlockLiveCoverageUntilAnotherAdminReleases()
+    {
+        var update = await _desk.PublishLiveUpdateAsync("e1", "Public update", LiveUpdates.Unconfirmed, "ana");
+        var before = DateTimeOffset.UtcNow;
+        await _desk.SetHoldAsync("e1", before.AddHours(1), "  Await briefing  ", "ana");
+        await _desk.SetHoldAsync("e1", before.AddHours(2), "  Revised release  ", "ben");
+
+        var state = await _desk.LiveUpdatesAsync("e1", "ana");
+        var hold = Assert.IsType<StoryHold>(state.Hold);
+        Assert.Equal(("ben", "Revised release"), (hold.SetBy, hold.Reason));
+        Assert.InRange(hold.SetAt, before.AddSeconds(-1), DateTimeOffset.UtcNow);
+        Assert.True(_news.Store.IsSituationHeld("s1", DateTimeOffset.UtcNow));
+        Assert.Null(_news.PublicLiveBlog("e1"));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => _desk.PublishLiveUpdateAsync("e1", "Blocked update", LiveUpdates.Confirmed, "ana"));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => _desk.CorrectLiveUpdateAsync("e1", update.Id, "Blocked correction", LiveUpdates.Confirmed, "ana"));
+
+        await _desk.ReleaseHoldAsync("e1", "ana");
+
+        Assert.Null((await _desk.LiveUpdatesAsync("e1", "ben")).Hold);
+        Assert.NotNull(_news.PublicLiveBlog("e1"));
+        await _desk.PublishLiveUpdateAsync("e1", "Released update", LiveUpdates.Confirmed, "ben");
+        await Assert.ThrowsAsync<InvalidOperationException>(() => _desk.ReleaseHoldAsync("e1", "ana"));
+    }
+
+    [Fact]
+    public async Task Holds_ShouldRejectPastTimesBlankReasonsAndMissingStories()
+    {
+        await Assert.ThrowsAsync<ArgumentException>(() => _desk.SetHoldAsync("e1", DateTimeOffset.UtcNow.AddMinutes(-1), "Too late", "ana"));
+        await Assert.ThrowsAsync<ArgumentException>(() => _desk.SetHoldAsync("e1", DateTimeOffset.UtcNow.AddHours(1), " ", "ana"));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => _desk.SetHoldAsync("missing", DateTimeOffset.UtcNow.AddHours(1), "Missing story", "ana"));
+        Assert.Null(_news.Store.Hold("e1"));
+    }
+
+    [Fact]
+    public async Task Corrections_ShouldAssociateOnlyAPublicArticle_WithoutRewritingIt()
+    {
+        var article = new Article { Slug = "public-report", Title = "Public report", BodyMarkdown = "Original body", Status = ArticleStatuses.Published, PublishedAt = DateTimeOffset.UtcNow.AddDays(-1) };
+        var draft = new Article { Slug = "private-draft", Title = "Private draft" };
+        var future = new Article { Slug = "scheduled-report", Title = "Scheduled report", Status = ArticleStatuses.Published, PublishedAt = DateTimeOffset.UtcNow.AddDays(1) };
+        var trashed = new Article { Slug = "trashed-report", Title = "Trashed report", Status = ArticleStatuses.Published, TrashedAt = DateTimeOffset.UtcNow };
+        _db.Articles.AddRange(article, draft, future, trashed);
+        await _db.SaveChangesAsync();
+
+        foreach (var slug in new[] { "missing", draft.Slug, future.Slug, trashed.Slug })
+            await Assert.ThrowsAsync<ArgumentException>(() => _desk.PublishCorrectionAsync("e1", "Correction", "The corrected fact.", slug, "ana"));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => _desk.PublishCorrectionAsync("missing", "Correction", "The corrected fact.", article.Slug, "ana"));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => _desk.CorrectionsAsync("missing", "ana"));
+        Assert.Empty(_news.PublicCorrections());
+
+        var saved = await _desk.PublishCorrectionAsync("e1", " Correction ", " The corrected fact. ", $" {article.Slug} ", "ben");
+        var publicNotice = Assert.Single(_news.PublicCorrections(articleId: article.Id));
+        Assert.Equal(article.Id, saved.ArticleId);
+        Assert.Equal(("ben", "Correction", "The corrected fact."), (saved.Username, publicNotice.Title, publicNotice.Text));
+        Assert.Equal(saved.Id, Assert.Single(await _desk.CorrectionsAsync("e1", "ana")).Id);
+        Assert.Equal("Original body", article.BodyMarkdown);
+        Assert.Equal(ArticleStatuses.Published, article.Status);
+    }
+
+    [Fact]
+    public async Task Corrections_ShouldBlockNewPublicationDuringAHold_WithoutRecallingAnExistingNotice()
+    {
+        var saved = await _desk.PublishCorrectionAsync("e1", "Correction", "Earlier report was incorrect.", null, "ana");
+        await _desk.SetHoldAsync("e1", DateTimeOffset.UtcNow.AddHours(1), "Private embargo details", "ben");
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => _desk.PublishCorrectionAsync("e1", "Another correction", "Updated facts.", null, "ana"));
+
+        Assert.Equal(saved.Id, Assert.Single(_news.PublicCorrections(id: saved.Id)).Id);
+        await _desk.ReleaseHoldAsync("e1", "ana");
+        await _desk.PublishCorrectionAsync("e1", "Follow-up correction", "The corrected account.", null, "ana");
+        Assert.Equal(2, (await _desk.CorrectionsAsync("e1", "ana")).Count);
     }
 
     [Fact]

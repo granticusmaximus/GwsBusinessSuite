@@ -995,6 +995,12 @@ public sealed partial class WorldNewsService : IDisposable
         return Store.PublicLiveStories(DateTimeOffset.UtcNow, checked(page * LiveUpdates.PageSize), LiveUpdates.PageSize + 1);
     }
 
+    public IReadOnlyList<PublicCorrection> PublicCorrections(int page = 0, string? eventId = null, string? id = null, Guid? articleId = null)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(page);
+        return Store.PublicCorrections(checked(page * Corrections.PageSize), Corrections.PageSize + 1, eventId, id, articleId);
+    }
+
     public (PublicLiveStory Story, IReadOnlyList<PublicLiveUpdate> Updates)? PublicLiveBlog(string eventId, int page = 0)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(page);
