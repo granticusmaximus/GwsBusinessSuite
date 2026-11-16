@@ -238,7 +238,7 @@ else
                 @foreach (var article in _mostRead)
                 {
                     <span class="story-most-read-item">
-                        <a href="@article.Url" target="_blank" rel="noopener noreferrer">@article.DisplayTitle</a>
+                        <a href="@article.Url" target="_blank" rel="noopener noreferrer">@article.Title</a>
                         <span class="story-most-read-rank">#@article.Rank, @article.Views.ToString("N0", System.Globalization.CultureInfo.InvariantCulture) views</span>
                     </span>
                 }

@@ -3231,8 +3231,8 @@ app.MapGet("/blog/{slug}", async (
         IAffiliateRotationService affiliateRotationService,
         IContentLocalizationService contentLocalizationService,
         IRelatedArticlesService relatedArticlesService,
-        WorldNewsService worldNews,
-        ILogger<WorldNewsService> newsLogger,
+        GwsBusinessSuite.Infrastructure.Services.WorldNewsService worldNews,
+        ILogger<GwsBusinessSuite.Infrastructure.Services.WorldNewsService> newsLogger,
         IConfiguration configuration) =>
     {
         await using var db = await dbFactory.CreateDbContextAsync();

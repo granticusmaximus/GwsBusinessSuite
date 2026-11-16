@@ -289,7 +289,7 @@ public sealed class WorldNewsDeskTests : IDisposable
 
         var results = await Task.WhenAll(Task.Run(() => Sign("ana")), Task.Run(() => Sign("ANA")));
 
-        Assert.Single(results.Where(saved => saved));
+        Assert.Single(results, saved => saved);
         Assert.Single(store.SignOffs("e1"));
         Assert.Null(SignOffs.FirstBroken(store.SignOffs()));
     }

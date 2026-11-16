@@ -438,10 +438,10 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
                 id: 's-1', title: 'Floods hit Valencia', latest: 'Floods hit Valencia', country: 'Spain', place: 'Valencia, Spain',
                 precision: 'city', kind: 'disaster', kindLabel: 'Disasters', status: null, statusMeaning: null, active: true, surge: null,
                 lat: 39.47, lon: -0.38, eventCount: 3, outletCount: 12, reportCount: 20, lastSeen: '12-11-26 09:00', summary: null,
-                href: '/admin/world-news?situation=s-1', sources: [ { outlet: 'El País', title: 'Inundaciones', url: 'https://elpais.com/x' } ] } })
+                href: '/admin/world-news?situation=s-1', sources: [ { outlet: 'El País', title: 'Inundaciones', language: 'Spanish', englishTitle: 'Flooding', url: 'https://elpais.com/x' } ] } })
             """);
         await page.WaitForSelectorAsync(".tg-incident-panel:has-text('Floods hit Valencia')", new PageWaitForSelectorOptions { Timeout = 5000 });
-        (await page.InnerTextAsync(".tg-incident-panel")).Should().Contain("REPORTED NEWS").And.Contain("El País: Inundaciones");
+        (await page.InnerTextAsync(".tg-incident-panel")).Should().Contain("REPORTED NEWS").And.Contain("El País: Flooding");
         await page.ClickAsync(".tg-incident-panel .tg-stream-panel-close");
 
         // News stories placed at the same city share a coordinate, so the native map can't split

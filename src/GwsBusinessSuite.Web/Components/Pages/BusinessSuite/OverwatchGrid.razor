@@ -2403,7 +2403,14 @@
         lastSeen = signal.LastSeen.ToLocalGwsDateTime(),
         summary = signal.Summary,
         href = $"/admin/world-news?situation={Uri.EscapeDataString(signal.SituationId)}",
-        sources = signal.Sources.Select(source => new { source.Outlet, source.Title, source.Url })
+        sources = signal.Sources.Select(source => new
+        {
+            source.Outlet,
+            source.Title,
+            source.Url,
+            source.Language,
+            source.EnglishTitle
+        })
     };
 
     // Plain client-side UI state (which panel is open) - no JS/server round-trip needed to
