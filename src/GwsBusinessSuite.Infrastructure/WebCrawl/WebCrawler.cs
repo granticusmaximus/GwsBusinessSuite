@@ -29,6 +29,11 @@ public sealed class WebCrawlOptions
     public int MaxDepth { get; set; } = 3;
     public int ParallelSites { get; set; } = 6;
     public int StartupDelaySeconds { get; set; } = 120;
+    // Search complements feed/sitemap traversal by finding fresh publisher pages that have not
+    // reached a feed yet. Results still enter the robots-aware crawler and only known news hosts
+    // are accepted.
+    public bool ActiveNewsDiscovery { get; set; } = true;
+    public int NewsDiscoveryIntervalMinutes { get; set; } = 15;
 }
 
 // Media Watch's web crawler (see IWebCrawlService). Polite by design: it reads each site's
@@ -40,7 +45,8 @@ public sealed class WebCrawler(
     IServiceScopeFactory scopeFactory,
     IOptions<WebCrawlOptions> options,
     TimeProvider time,
-    ILogger<WebCrawler> logger) : IWebCrawlService
+    ILogger<WebCrawler> logger,
+    IOllamaWebSearchService? webSearch = null) : IWebCrawlService
 {
     public const string HttpClientName = "webcrawl";
     public const string ProductToken = "GwsBusinessSuite-MediaWatch";
@@ -65,6 +71,17 @@ public sealed class WebCrawler(
     private long NowMs => time.GetUtcNow().ToUnixTimeMilliseconds();
     private DateOnly Today => DateOnly.FromDateTime(time.GetUtcNow().UtcDateTime);
     private int MinDelayMs => Math.Max(1, options.Value.MinDelaySeconds) * 1000;
+    private int _newsDiscoveryQuery;
+    private static readonly string[] NewsDiscoveryQueries =
+    [
+        "breaking world news today",
+        "latest Africa news today",
+        "latest Asia Pacific news today",
+        "latest Europe news today",
+        "latest Middle East news today",
+        "latest Latin America news today",
+        "latest North America news today"
+    ];
 
     // Where crawling starts: every feed Media Watch and World News already read (topics' trusted
     // feeds, the curated tech blogs, World News's outlets) and those sites' home pages.
@@ -100,6 +117,34 @@ public sealed class WebCrawler(
         var batch = await Store.TakeNextAsync(NowMs, (int)Math.Min(settings.ParallelSites, allowance - fetchedToday));
         await Task.WhenAll(batch.Select(entry => FetchEntryAsync(entry, ct)));
         return batch.Count;
+    }
+
+    // Active discovery searches for current reporting and prioritizes exact article URLs. It is
+    // intentionally not a general web importer: an answer is admitted only when its host belongs
+    // to one of World News's configured publishers. Fetching still happens through CrawlOnceAsync,
+    // so robots.txt, crawl delay, public-address validation and the daily allowance all apply.
+    public async Task<int> DiscoverWorldNewsAsync(CancellationToken ct = default)
+    {
+        if (!options.Value.ActiveNewsDiscovery || webSearch?.IsConfigured != true) return 0;
+
+        var query = NewsDiscoveryQueries[Interlocked.Increment(ref _newsDiscoveryQuery) % NewsDiscoveryQueries.Length];
+        var results = await webSearch.SearchAsync(query, maxResults: 10, ct);
+        var publisherHosts = OutletFeeds.Outlets
+            .Select(outlet => Uri.TryCreate(outlet.Url, UriKind.Absolute, out var uri) ? NormalizeHost(uri.Host) : null)
+            .OfType<string>()
+            .ToHashSet(StringComparer.Ordinal);
+        var entries = new List<(string, string, bool, int, int, int)>();
+        foreach (var result in results)
+        {
+            if (WebPageReader.Normalize(result.Url, new Uri("https://localhost/")) is not { } url || url.IsLoopback || IsSkipped(url.Host)) continue;
+            var host = NormalizeHost(url.Host);
+            if (!publisherHosts.Any(publisher => host == publisher || host.EndsWith("." + publisher, StringComparison.Ordinal)
+                    || publisher.EndsWith("." + host, StringComparison.Ordinal))) continue;
+            await Store.EnsureSiteAsync(url.Host, Home(url), NowMs, MinDelayMs);
+            entries.Add((url.AbsoluteUri, url.Host, false, 0, 1, 10));
+        }
+        await Store.EnqueueAsync(entries.DistinctBy(entry => entry.Item1, StringComparer.OrdinalIgnoreCase), NowMs);
+        return entries.Select(entry => entry.Item1).Distinct(StringComparer.OrdinalIgnoreCase).Count();
     }
 
     private async Task FetchEntryAsync(FrontierEntry entry, CancellationToken ct)
@@ -418,6 +463,7 @@ public sealed class WebCrawlBackgroundService(WebCrawler crawler, IOptions<WebCr
             return;
         }
         var lastSeed = DateTimeOffset.MinValue;
+        var lastNewsDiscovery = DateTimeOffset.MinValue;
         var lastMatch = DateTimeOffset.MinValue;
         var lastPrune = DateTimeOffset.MinValue;
         while (!stoppingToken.IsCancellationRequested)
@@ -429,6 +475,12 @@ public sealed class WebCrawlBackgroundService(WebCrawler crawler, IOptions<WebCr
                 {
                     await crawler.SeedAsync(stoppingToken);
                     lastSeed = now;
+                }
+                if (now - lastNewsDiscovery >= TimeSpan.FromMinutes(Math.Max(1, options.Value.NewsDiscoveryIntervalMinutes)))
+                {
+                    var discovered = await crawler.DiscoverWorldNewsAsync(stoppingToken);
+                    if (discovered > 0) logger.LogInformation("Web crawl actively discovered {Count} current World News pages", discovered);
+                    lastNewsDiscovery = now;
                 }
                 var taken = await crawler.CrawlOnceAsync(stoppingToken);
                 if (now - lastMatch > TimeSpan.FromMinutes(5))

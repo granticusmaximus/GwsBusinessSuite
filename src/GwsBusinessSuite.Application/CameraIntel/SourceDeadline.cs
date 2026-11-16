@@ -18,13 +18,16 @@ public static class SourceDeadline
         if (loads.Count == 0) return [];
         var all = Task.WhenAll(loads.Select(load => load.Load));
         var finished = await Task.WhenAny(all, Task.Delay(deadline, cancellationToken));
+        // The provider tasks and the deadline observe the same token. If every provider responds
+        // to cancellation first, `all` can win WhenAny and the old code returned an empty result
+        // instead of telling the superseded viewport that its load was cancelled.
+        cancellationToken.ThrowIfCancellationRequested();
         if (finished != all)
         {
             var late = loads.Where(load => !load.Load.IsCompleted).Select(load => load.Source).ToList();
             if (late.Count > 0)
                 logger.LogInformation("Overwatch {What}: {Late} still loading after {Seconds:0} s; showing the other sources now",
                     what, string.Join(", ", late), deadline.TotalSeconds);
-            cancellationToken.ThrowIfCancellationRequested();
         }
         return loads.Select(load => load.Load.IsCompletedSuccessfully ? load.Load.Result : []).ToList();
     }

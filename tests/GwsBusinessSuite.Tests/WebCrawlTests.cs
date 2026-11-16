@@ -302,6 +302,35 @@ public sealed class WebCrawlTests : IDisposable
         (await crawler.ImportWorldNewsPagesAsync(worldNews, 10)).Scanned.Should().Be(0, "the destination cursor survives reopening the database");
     }
 
+    [Fact]
+    public async Task ActiveDiscovery_ShouldPrioritizeOnlyConfiguredNewsPublishers()
+    {
+        var clock = new MovableClock(new DateTimeOffset(2026, 11, 16, 12, 0, 0, TimeSpan.Zero));
+        var web = new FakeWeb(clock);
+        web.Pages["https://www.nytimes.com/robots.txt"] = (HttpStatusCode.NotFound, "text/plain", "");
+        web.Pages["https://www.nytimes.com/world/fresh-story"] = (HttpStatusCode.OK, "text/html", ArticleHtml);
+        var search = new FakeSearch(
+        [
+            new("Fresh report", "https://www.nytimes.com/world/fresh-story?utm_source=search", "Current reporting"),
+            new("Unknown report", "https://unknown.example/world/story", "Not a configured publisher")
+        ]);
+        await using var app = await TestApp.CreateAsync();
+        var crawler = new WebCrawler(web, app.ScopeFactory, Options.Create(new WebCrawlOptions
+        {
+            DatabasePath = _dbPath,
+            MinDelaySeconds = 1,
+            DailyPageLimit = 100,
+            ParallelSites = 2
+        }), clock, NullLogger<WebCrawler>.Instance, search);
+
+        (await crawler.DiscoverWorldNewsAsync()).Should().Be(1);
+        await crawler.CrawlOnceAsync();
+
+        search.Queries.Should().ContainSingle();
+        web.Requested.Should().Contain("https://www.nytimes.com/robots.txt");
+        web.Requested.Should().NotContain(url => url.Contains("unknown.example", StringComparison.Ordinal));
+    }
+
     // A small web for the crawler: canned answers by address, and a log of what was asked when.
     private sealed class FakeWeb(TimeProvider clock) : HttpMessageHandler, IHttpClientFactory
     {
@@ -326,6 +355,21 @@ public sealed class WebCrawlTests : IDisposable
             response.Content.Headers.ContentType = System.Net.Http.Headers.MediaTypeHeaderValue.Parse(type);
             return Task.FromResult(response);
         }
+    }
+
+    private sealed class FakeSearch(IReadOnlyList<OllamaWebSearchResult> results) : IOllamaWebSearchService
+    {
+        public bool IsConfigured => true;
+        public List<string> Queries { get; } = [];
+
+        public Task<IReadOnlyList<OllamaWebSearchResult>> SearchAsync(string query, int? maxResults = null, CancellationToken ct = default)
+        {
+            Queries.Add(query);
+            return Task.FromResult(results);
+        }
+
+        public Task<OllamaWebSearchResult> FetchAsync(string url, CancellationToken ct = default) =>
+            throw new NotSupportedException();
     }
 
     private sealed class MovableClock(DateTimeOffset now) : TimeProvider
