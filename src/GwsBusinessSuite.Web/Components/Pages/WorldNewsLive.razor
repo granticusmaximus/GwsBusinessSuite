@@ -1,0 +1,158 @@
+@page "/world-news/live"
+@page "/world-news/live/{EventId}"
+@attribute [AllowAnonymous]
+@layout PublicShareLayout
+@using System.Globalization
+@using Microsoft.AspNetCore.Http
+@using GwsBusinessSuite.Infrastructure.Services
+@using GwsBusinessSuite.WorldNewsKit
+@inject WorldNewsService News
+@inject ILogger<WorldNewsLive> Logger
+
+<PageTitle>@(_blog is { } titled ? $"{titled.Story.Title} - World News live" : "World News live")</PageTitle>
+
+<main class="news-live-page">
+    <header class="mb-4">
+        <h1 class="h3">World News live updates</h1>
+        <p class="text-secondary">Timestamped updates from the desk. Confirmed and unconfirmed labels are the desk's assessments.
+            Open or refresh a page to see new updates; it does not refresh automatically.</p>
+        <nav class="news-live-actions" aria-label="Live coverage navigation">
+            <a class="btn btn-sm btn-outline-secondary" href="world-news/live" data-enhance-nav="false">All live coverage</a>
+            @if (_error is null)
+            {
+                <a class="btn btn-sm btn-outline-secondary" href="@PageUrl(_page)" data-enhance-nav="false">Refresh updates</a>
+            }
+        </nav>
+    </header>
+    @if (_loading)
+    {
+        <LoadingIndicator Message="Loading live coverage..." />
+    }
+    else if (_error is { } error)
+    {
+        <p class="alert alert-warning" role="alert">@error</p>
+    }
+    else if (_blog is { } blog)
+    {
+        <h2 class="h4">@blog.Story.Title</h2>
+        <p class="small text-secondary">Latest activity: @blog.Story.LastAt.ToLocalGwsDateTime().
+            @blog.Story.Updates update(s), newest posts first.</p>
+        <ol class="list-unstyled">
+            @foreach (var update in blog.Updates)
+            {
+                <li class="card mb-3" id="@($"update-{update.Id}")" @key="update.Id">
+                    <div class="card-body">
+                        <div class="news-live-actions small">
+                            <span class="badge @(update.Status == LiveUpdates.Confirmed ? "text-bg-success" : "text-bg-warning")">@update.Status</span>
+                            <time datetime="@update.CreatedAt.ToString("O")">@update.CreatedAt.ToLocalGwsDateTime()</time>
+                        </div>
+                        <p class="news-live-text">@(update.CorrectedText ?? update.Text)</p>
+                        @if (update.CorrectedText is not null)
+                        {
+                            <p class="small text-secondary mb-1">Corrected @update.CorrectedAt?.ToLocalGwsDateTime(). The wording above supersedes the original.</p>
+                            <details>
+                                <summary class="small">Original wording (superseded)</summary>
+                                <p class="news-live-text">@update.Text</p>
+                            </details>
+                        }
+                    </div>
+                </li>
+            }
+        </ol>
+    }
+    else if (_stories.Count == 0)
+    {
+        <p>No public live coverage is available right now.</p>
+    }
+    else
+    {
+        <ol class="list-unstyled">
+            @foreach (var story in _stories)
+            {
+                <li class="card mb-3" @key="story.EventId">
+                    <div class="card-body">
+                        <h2 class="h5"><a href="@($"world-news/live/{Uri.EscapeDataString(story.EventId)}")">@story.Title</a></h2>
+                        <p class="small text-secondary mb-0">@story.Updates update(s) - latest activity @story.LastAt.ToLocalGwsDateTime()</p>
+                    </div>
+                </li>
+            }
+        </ol>
+    }
+    @if (!_loading && _error is null && (_page > 1 || _hasMore))
+    {
+        <nav class="news-live-actions mt-3" aria-label="Coverage pages">
+            @if (_page > 1) { <a class="btn btn-sm btn-outline-secondary" href="@PageUrl(_page - 1)" data-enhance-nav="false">Previous page</a> }
+            <span class="small">Page @_page</span>
+            @if (_hasMore) { <a class="btn btn-sm btn-outline-secondary" href="@PageUrl(_page + 1)" data-enhance-nav="false">Next page</a> }
+        </nav>
+    }
+</main>
+
+@code {
+    [Parameter] public string? EventId { get; set; }
+    [SupplyParameterFromQuery(Name = "page")] public string? Page { get; set; }
+    [CascadingParameter] private HttpContext? RequestContext { get; set; }
+
+    private IReadOnlyList<PublicLiveStory> _stories = [];
+    private (PublicLiveStory Story, IReadOnlyList<PublicLiveUpdate> Updates)? _blog;
+    private string? _error;
+    private int _page = 1;
+    private bool _loading = true, _hasMore;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var eventId = EventId;
+        _loading = true;
+        _error = null;
+        _stories = [];
+        _blog = null;
+        _hasMore = false;
+        if (RequestContext is not null && !RequestContext.Response.HasStarted)
+            RequestContext.Response.Headers["Cache-Control"] = "no-store";
+        try
+        {
+            if (!int.TryParse(Page ?? "1", NumberStyles.None, CultureInfo.InvariantCulture, out var page)
+                || page < 1 || page > int.MaxValue / LiveUpdates.PageSize)
+            {
+                Fail(StatusCodes.Status400BadRequest, "That page number is invalid.");
+                return;
+            }
+            _page = page;
+            if (eventId is null)
+            {
+                var stories = await Task.Run(() => News.PublicLiveStories(page - 1));
+                _hasMore = stories.Count > LiveUpdates.PageSize;
+                _stories = stories.Take(LiveUpdates.PageSize).ToList();
+                if (_stories.Count == 0 && page > 1) Fail(StatusCodes.Status404NotFound, "That page of live coverage is not available.");
+            }
+            else
+            {
+                var blog = await Task.Run(() => News.PublicLiveBlog(eventId, page - 1));
+                if (blog is not { } found)
+                {
+                    Fail(StatusCodes.Status404NotFound, "Live coverage is not available at this address.");
+                    return;
+                }
+                _hasMore = found.Updates.Count > LiveUpdates.PageSize;
+                _blog = (found.Story, found.Updates.Take(LiveUpdates.PageSize).ToList());
+            }
+        }
+        catch (Microsoft.Data.Sqlite.SqliteException ex)
+        {
+            Logger.LogWarning(ex, "World News: public live coverage couldn't be loaded");
+            Fail(StatusCodes.Status503ServiceUnavailable, "Live coverage couldn't be loaded. Please try again later.");
+        }
+        finally { _loading = false; }
+    }
+
+    private void Fail(int status, string message)
+    {
+        _error = message;
+        _blog = null;
+        _stories = [];
+        if (RequestContext is not null && !RequestContext.Response.HasStarted) RequestContext.Response.StatusCode = status;
+    }
+
+    private string PageUrl(int page) =>
+        $"world-news/live{(EventId is null ? "" : "/" + Uri.EscapeDataString(EventId))}?page={page}";
+}

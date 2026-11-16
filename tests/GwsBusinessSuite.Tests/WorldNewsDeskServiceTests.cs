@@ -75,6 +75,9 @@ public sealed class WorldNewsDeskServiceTests : IAsyncLifetime
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() => _desk.RecordSourceUseAsync("source", "e1", "held", "", username));
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() => _desk.ApprovalsAsync("e1", username));
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() => _desk.SignAsync("e1", SignOffs.Verdict, username));
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => _desk.LiveUpdatesAsync("e1", username));
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => _desk.PublishLiveUpdateAsync("e1", "Public update", LiveUpdates.Unconfirmed, username));
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => _desk.CorrectLiveUpdateAsync("e1", "update", "Correction", LiveUpdates.Confirmed, username));
 
         Assert.Empty(_news.Store.DeskNotes("e1"));
     }
@@ -160,6 +163,43 @@ public sealed class WorldNewsDeskServiceTests : IAsyncLifetime
         Assert.Equal(4, state.Records.Count);
         Assert.Null(SignOffs.FirstBroken(_news.Store.SignOffs()));
         Assert.Empty(_db.Articles);
+    }
+
+    [Fact]
+    public async Task LiveUpdates_ShouldAllowTheActiveDeskToCorrect_OnlyTheSpecifiedStory()
+    {
+        var update = await _desk.PublishLiveUpdateAsync("e1", " Public update ", LiveUpdates.Unconfirmed, "ana");
+        _store.SeedEvent("s2", "e2", "Another story", ["A", "B"], WorldNewsTestStore.Now);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => _desk.CorrectLiveUpdateAsync("e2", update.Id, "Wrong story", LiveUpdates.Confirmed, "ben"));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => _desk.CorrectLiveUpdateAsync("e1", "missing", "Unknown update", LiveUpdates.Confirmed, "ben"));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => _desk.PublishLiveUpdateAsync("missing", "Unknown story", LiveUpdates.Unconfirmed, "ana"));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => _desk.LiveUpdatesAsync("missing", "ana"));
+        await _desk.CorrectLiveUpdateAsync("e1", update.Id, " Corrected publicly ", LiveUpdates.Confirmed, "ben");
+
+        var page = await _desk.LiveUpdatesAsync("e1", "ben");
+        var saved = Assert.Single(page.Updates);
+        Assert.Equal("Public update", saved.Text);
+        Assert.Equal("Corrected publicly", saved.CorrectedText);
+        var blog = _news.PublicLiveBlog("e1") ?? throw new InvalidOperationException("The published story must have public live coverage.");
+        Assert.Equal("Corrected publicly", Assert.Single(blog.Updates).CorrectedText);
+        Assert.Null(_news.PublicLiveBlog("missing"));
+        Assert.Null(_news.PublicLiveBlog("e2"));
+        Assert.Empty(_db.Articles);
+    }
+
+    [Fact]
+    public async Task Handover_ShouldIncludeAnOldLivePostCorrectedDuringTheShift()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var update = _news.Store.AddLiveUpdate("e1", "ana", "Superseded wording", LiveUpdates.Unconfirmed, now.AddDays(-2));
+        _news.Store.CorrectLiveUpdate(update.Id, "Corrected during this shift", LiveUpdates.Confirmed, now);
+
+        var handover = await _desk.HandoverAsync(8, "ana");
+
+        Assert.Contains("## Posted live", handover);
+        Assert.Contains("Corrected during this shift", handover);
+        Assert.Contains("; corrected ", handover);
+        Assert.DoesNotContain("Superseded wording", handover);
     }
 
     public async Task DisposeAsync()

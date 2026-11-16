@@ -1,4 +1,5 @@
 using GwsBusinessSuite.WorldNewsKit;
+using Microsoft.Data.Sqlite;
 
 namespace GwsBusinessSuite.Tests;
 
@@ -296,7 +297,9 @@ public sealed class WorldNewsDeskTests : IDisposable
     [Fact]
     public void LiveUpdates_ShouldKeepTheOriginal_WhenCorrected()
     {
-        var store = Store();
+        using var fixture = new WorldNewsTestStore();
+        fixture.SeedEvent("s1", "e1", "Bridge closure", ["A", "B"], Now);
+        var store = fixture.Store;
         var update = store.AddLiveUpdate("e1", "ana", "Bridge closed in both directions", LiveUpdates.Unconfirmed, Now);
         store.CorrectLiveUpdate(update.Id, "Bridge closed northbound only", LiveUpdates.Confirmed, Now.AddMinutes(10));
 
@@ -305,8 +308,74 @@ public sealed class WorldNewsDeskTests : IDisposable
         Assert.Equal("Bridge closed northbound only", shown.CorrectedText);
         Assert.Equal(LiveUpdates.Confirmed, shown.Status);
         Assert.Equal(("e1", 1), (store.LiveStories()[0].EventId, store.LiveStories()[0].Updates));
+        var published = Assert.Single(store.PublicLiveUpdates("e1", Now.AddMinutes(11)));
+        Assert.Equal("Bridge closed in both directions", published.Text);
+        Assert.Equal("Bridge closed northbound only", published.CorrectedText);
+        Assert.Equal(Now.AddMinutes(10), Assert.Single(store.PublicLiveStories(Now.AddMinutes(11))).LastAt);
         Assert.NotNull(LiveUpdates.Problem("", LiveUpdates.Confirmed));
         Assert.NotNull(LiveUpdates.Problem("x", "maybe"));
+    }
+
+    [Fact]
+    public void LiveUpdates_ShouldRejectInvalidInputAndMissingStories_WithoutSavingAnything()
+    {
+        using var fixture = new WorldNewsTestStore();
+        fixture.SeedEvent("s1", "e1", "Bridge closure", ["A", "B"], Now);
+        var store = fixture.Store;
+        Assert.Throws<ArgumentException>(() => store.AddLiveUpdate("e1", "ana", " ", LiveUpdates.Unconfirmed, Now));
+        Assert.Throws<ArgumentException>(() => store.AddLiveUpdate("e1", "ana", new string('x', LiveUpdates.MaxLength + 1), LiveUpdates.Unconfirmed, Now));
+        Assert.Throws<ArgumentException>(() => store.AddLiveUpdate("e1", "ana", "Update", "private", Now));
+        Assert.Throws<InvalidOperationException>(() => store.AddLiveUpdate("missing", "ana", "Update", LiveUpdates.Unconfirmed, Now));
+        Assert.Empty(store.LiveUpdates());
+    }
+
+    [Fact]
+    public void LiveUpdates_ShouldRespectHoldsOnWritesAndBothPublicReads_UntilRelease()
+    {
+        using var fixture = new WorldNewsTestStore();
+        fixture.SeedEvent("s1", "e1", "Held story", ["A", "B"], Now);
+        var store = fixture.Store;
+        var update = store.AddLiveUpdate("e1", "ana", "Original update", LiveUpdates.Unconfirmed, Now);
+        store.SetHold(new StoryHold("e1", Now.AddHours(2), "Private embargo reason", "ana", Now));
+
+        Assert.Throws<InvalidOperationException>(() => store.AddLiveUpdate("e1", "ana", "Another update", LiveUpdates.Confirmed, Now.AddMinutes(1)));
+        Assert.Throws<InvalidOperationException>(() => store.CorrectLiveUpdate(update.Id, "A correction", LiveUpdates.Confirmed, Now.AddMinutes(1), "e1"));
+        Assert.Empty(store.PublicLiveStories(Now.AddMinutes(1)));
+        Assert.Empty(store.PublicLiveUpdates("e1", Now.AddMinutes(1)));
+        Assert.Null(Assert.Single(store.LiveUpdates("e1")).CorrectedText);
+        Assert.Single(store.PublicLiveStories(Now.AddHours(2)));
+        Assert.Single(store.PublicLiveUpdates("e1", Now.AddHours(2)));
+        store.CorrectLiveUpdate(update.Id, "Released correction", LiveUpdates.Confirmed, Now.AddHours(2), "e1");
+        Assert.Equal("Released correction", Assert.Single(store.PublicLiveUpdates("e1", Now.AddHours(2))).CorrectedText);
+    }
+
+    [Fact]
+    public void PublicLiveCoverage_ShouldPageDeterministically_OrderByActivity_AndOmitPrunedStories()
+    {
+        using var fixture = new WorldNewsTestStore();
+        fixture.SeedEvent("s1", "e1", "First story", ["A", "B"], Now);
+        fixture.SeedEvent("s2", "e2", "Second story", ["A", "B"], Now);
+        var store = fixture.Store;
+        var oldest = store.AddLiveUpdate("e1", "ana", "First", LiveUpdates.Unconfirmed, Now);
+        store.AddLiveUpdate("e1", "ana", "Second", LiveUpdates.Unconfirmed, Now);
+        store.AddLiveUpdate("e1", "ana", "Third", LiveUpdates.Unconfirmed, Now);
+        store.AddLiveUpdate("e2", "ben", "Another story", LiveUpdates.Unconfirmed, Now.AddMinutes(1));
+        store.CorrectLiveUpdate(oldest.Id, "First, corrected", LiveUpdates.Confirmed, Now.AddMinutes(2));
+
+        Assert.Equal("Third", Assert.Single(store.PublicLiveUpdates("e1", Now.AddMinutes(3), limit: 1)).Text);
+        Assert.Equal("Second", Assert.Single(store.PublicLiveUpdates("e1", Now.AddMinutes(3), offset: 1, limit: 1)).Text);
+        Assert.Equal("e1", Assert.Single(store.PublicLiveStories(Now.AddMinutes(3), limit: 1)).EventId);
+        Assert.Equal("e2", Assert.Single(store.PublicLiveStories(Now.AddMinutes(3), offset: 1, limit: 1)).EventId);
+        Assert.Equal(oldest.Id, Assert.Single(store.LiveUpdates(limit: 1, orderByActivity: true)).Id);
+        Assert.Equal(3, store.PublicLiveStories(Now.AddMinutes(3), eventId: "e1")[0].Updates);
+
+        using var connection = new SqliteConnection($"Data Source={fixture.Path}");
+        connection.Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "DELETE FROM events WHERE id = 'e1'";
+        command.ExecuteNonQuery();
+        Assert.Single(store.PublicLiveStories(Now.AddMinutes(3)));
+        Assert.Empty(store.PublicLiveUpdates("e1", Now.AddMinutes(3)));
     }
 
     [Fact]

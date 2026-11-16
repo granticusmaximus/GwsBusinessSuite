@@ -12,6 +12,30 @@ public sealed partial class WorldNewsDeskService(IAppDbContext db, WorldNewsServ
 {
     public const int SourceBookPageSize = 25;
 
+    public async Task<(IReadOnlyList<LiveUpdate> Updates, StoryHold? Hold)> LiveUpdatesAsync(
+        string eventId, string username, int page = 0, CancellationToken cancellationToken = default)
+    {
+        await RequireDeskUserAsync(username, cancellationToken);
+        ArgumentOutOfRangeException.ThrowIfNegative(page);
+        return await Task.Run(() =>
+        {
+            if (!news.Store.HasEvent(eventId)) throw new InvalidOperationException("That story is no longer available.");
+            return (news.Store.LiveUpdates(eventId, LiveUpdates.PageSize + 1, checked(page * LiveUpdates.PageSize)), news.Store.Hold(eventId));
+        }, cancellationToken);
+    }
+
+    public async Task<LiveUpdate> PublishLiveUpdateAsync(string eventId, string text, string status, string username, CancellationToken cancellationToken = default)
+    {
+        await RequireDeskUserAsync(username, cancellationToken);
+        return await Task.Run(() => news.Store.AddLiveUpdate(eventId, username, text, status, DateTimeOffset.UtcNow), cancellationToken);
+    }
+
+    public async Task CorrectLiveUpdateAsync(string eventId, string id, string text, string status, string username, CancellationToken cancellationToken = default)
+    {
+        await RequireDeskUserAsync(username, cancellationToken);
+        await Task.Run(() => news.Store.CorrectLiveUpdate(id, text, status, DateTimeOffset.UtcNow, eventId), cancellationToken);
+    }
+
     public async Task<IReadOnlyList<SourceContact>> ContactsAsync(string username, int page = 0, CancellationToken cancellationToken = default)
     {
         await RequireDeskUserAsync(username, cancellationToken);

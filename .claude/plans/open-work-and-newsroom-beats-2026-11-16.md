@@ -10,7 +10,7 @@ reliable backlog: later progress entries and current code supersede several of t
 
 | Area | Remaining work / disposition |
 | --- | --- |
-| World News trust and newsroom | N5-N7 UI is now implemented (N6/N7 unvalidated). N8-N15 still need UI/endpoints. B10 reading features remain. Extend the existing backend, not a second desk/store. |
+| World News trust and newsroom | N5-N10 UI is implemented (N6 onward unvalidated); N9 is historical approval records, not a CMS gate. N11-N15 and B10 remain. Extend the existing backend, not a second desk/store. |
 | Logging and Resolve | Operational fixes and code-fix approval/audit flows, daily digest, agent log tools and per-job traces remain in the logging plan. Production-changing actions need the planned approval boundary. |
 | World News / Overwatch expansion | Unit 1 is still unchecked, but regional outlets and the two-outlet operational threshold already exist. Reconcile the remaining adaptive-threshold requirement before changing trust gates. Units 2-6 are recorded complete. |
 | Overwatch camera availability | Provider policy/capability persistence and the dependent UX are still unchecked. Source terms and capture permissions are prerequisites. |
@@ -101,11 +101,67 @@ Grant approved proceeding, then selected **desk approvals only; leave CMS publis
 N9 in this unit records historical approvals, not a publishing gate or signatures over an
 immutable article revision. Do not silently change CMS publishing behavior.
 
-- [ ] N8: owner-private source-book page with create/edit/remove, per-source use history,
+- [x] N8: owner-private source-book page with create/edit/remove, per-source use history,
   story/outcome recording and measured accuracy. Page through contacts and history; scope
   every query/mutation to the authenticated owner, including guessed contact ids.
-- [ ] N9: story approval controls showing both people, times, trust label and record hashes.
+- [x] N9: story approval controls showing both people, times, trust label and record hashes.
   Require a complete checklist, two verdict approvals before publication approvals, and
   distinct signers. Validate inside the existing ledger write transaction.
-- [ ] Add regression sources and update guides/parent plan without executing tests or builds.
+- [x] Add regression sources and update guides/parent plan without executing tests or builds.
 - [ ] Compile, browser-check and run the release gate later in an authorized environment.
+
+Implementation handoff:
+
+- Contacts/history are paged at 25 entries. Accuracy uses owner-scoped aggregate counts across
+  the entire history. Owner is derived from the caller, not a submitted contact's owner.
+- Contact edits preserve creation time, reject invalid ratings rather than clamping, and report
+  foreign-id conflicts instead of returning false success. Removal and use-history deletion
+  are transactional.
+- Approval prerequisites, duplicate prevention and global-chain append share one immediate
+  SQLite write transaction. Reads use that same connection/transaction.
+- Story children have distinct keys; the approval panel refreshes when checklist completeness
+  changes and handles a change arriving during an in-flight request.
+- Regression sources cover ownership, pagination/accuracy, authorization, duplicate/concurrent
+  signatures, missing stories and interleaved global ledger records. They have not been run.
+- No tests, builds, browser execution or release gate have run for N8/N9.
+
+## World News continuation: public live updates (N10)
+
+- [x] Reuse existing live-update models/store, adding active-admin posting/correction operations.
+  Keep original wording visible as superseded; show confirmed/unconfirmed explicitly.
+- [x] Add an isolated story editor and anonymous, read-only public index/story pages. Publish
+  buttons must explicitly warn that their content becomes public; never copy private desk data.
+- [x] Enforce existing holds on writes and public reads, and omit pruned/missing stories.
+  Bound/paginate reads, include corrections in latest-activity ordering, and disable caching.
+- [x] Add focused regression sources and update both the guide and parent plan.
+- [ ] Compile, run focused/browser tests and the release gate only when Grant permits it.
+
+This unit adds no AI calls, automatic posting, CMS approval gate, dependencies or remote Git writes.
+Public pages load on opening/refresh; no background polling is planned.
+
+Implementation handoff:
+
+- The keyed editor uses a fresh authenticated service scope for each operation. Explicit public
+  actions publish the headline and typed wording only; confirmation labels are manual.
+- Live writes validate text/status and story existence and check the hold inside an immediate
+  SQLite write transaction. Corrections are constrained to the requested story, preserve the
+  original text, and fail explicitly for missing ids. Original plus latest correction is the
+  existing storage contract, not a complete amendment audit trail.
+- Anonymous static SSR pages use the bare public layout and narrow public records without
+  usernames. Their SQL joins retained events, filters holds/unknown statuses, and pages results
+  at 25 plus one lookahead. No private desk tables are read by public queries.
+- The public index includes correction activity; individual story posts retain deterministic
+  creation order. Handover now reads the latest 200 activities and includes older posts
+  corrected during the selected shift, with the corrected wording and timestamp.
+- Public requests set `Cache-Control: no-store`; malformed paging is 400, unavailable coverage
+  is 404, and database failure is 503. Previously viewed material cannot be recalled.
+- Regression sources cover validation, active-admin access, story-scoped correction, exact
+  hold expiry, pagination/tied timestamps, pruned stories and corrections in handovers.
+- Source/call-site and patch-whitespace review only. **No build, tests, browser execution or
+  release gate run**, per Grant's restriction. No dependencies/schema changes, AI calls,
+  commit, push or deployment performed by this assistant.
+- Before shipping on an equipped environment: compile with zero warnings, run the focused
+  newsroom/service regressions, check anonymous/held/error routes and editor interaction in a
+  browser, then run `scripts/verify-release.sh`.
+
+Next planned World News unit: N11 embargo/hold management UI. N12-N15 and B10 remain.

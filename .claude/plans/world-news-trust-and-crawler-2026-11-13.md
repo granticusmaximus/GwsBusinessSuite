@@ -215,3 +215,20 @@ and the write-up both draw on the evidence; then B3-B9 and N5-N15; B10 (reading)
   sources updated. No tests, builds or release gate run for this continuation, per Grant's
   instruction; compilation, browser behavior and release readiness remain unverified.
   N8-N15 and B10 remain open.
+- 16-11-26 continuation: N8 private source-book management/use history and N9 story approval
+  records implemented. Owner-scoped operations have no admin bypass; ratings and measured
+  accuracy are separate, contacts/history are paged, and contact creation timestamps survive
+  edits. Approval validation and global-chain appending share one write transaction.
+  Grant explicitly selected historical desk approvals only: no CMS publication gate or
+  immutable article revision signatures. Guide and regression sources updated; no tests,
+  builds, browser execution or release gate run, per Grant's restriction. N10 live updates
+  is next; N11-N15 and B10 remain open. Handoff: `open-work-and-newsroom-beats-2026-11-16.md`.
+- 16-11-26 next unit: N10 public live updates implemented with an active-admin story editor
+  and anonymous static index/story pages. Explicit posting/correction actions use existing
+  storage; original wording and the latest correction remain visible with manual verification
+  labels. Holds are checked atomically on writes and filtered on public reads; pruned stories
+  are omitted. Narrow public records exclude usernames/private desk material. Paging,
+  no-store responses and explicit 400/404/503 outcomes added. Corrected old live posts now
+  appear in handovers. Guide and regression sources updated. No tests/builds/browser/release
+  gate run, per Grant's restriction; release readiness remains unverified. N11-N15 and B10
+  remain, with embargo/hold management UI next.

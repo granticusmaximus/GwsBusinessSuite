@@ -325,6 +325,7 @@ else
             @if (_deskError is not null) { <p class="text-danger small" role="alert">@_deskError</p> }
             <WorldNewsDeskNotes @key="e.Id" EventId="@e.Id" />
             <WorldNewsSignOffs @key="(e.Id, typeof(WorldNewsSignOffs))" EventId="@e.Id" ChecklistComplete="@DeskChecklist.IsComplete(_checks)" />
+            <WorldNewsLiveEditor @key="(e.Id, typeof(WorldNewsLiveEditor))" EventId="@e.Id" />
         </section>
 
         @* 1. What happened. *@

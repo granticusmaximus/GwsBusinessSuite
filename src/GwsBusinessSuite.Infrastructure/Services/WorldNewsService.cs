@@ -983,6 +983,22 @@ public sealed partial class WorldNewsService : IDisposable
         return note;
     }
 
+    public IReadOnlyList<PublicLiveStory> PublicLiveStories(int page = 0)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(page);
+        return Store.PublicLiveStories(DateTimeOffset.UtcNow, checked(page * LiveUpdates.PageSize), LiveUpdates.PageSize + 1);
+    }
+
+    public (PublicLiveStory Story, IReadOnlyList<PublicLiveUpdate> Updates)? PublicLiveBlog(string eventId, int page = 0)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(page);
+        var now = DateTimeOffset.UtcNow;
+        var story = Store.PublicLiveStories(now, limit: 1, eventId: eventId).SingleOrDefault();
+        if (story is null) return null;
+        var updates = Store.PublicLiveUpdates(eventId, now, checked(page * LiveUpdates.PageSize), LiveUpdates.PageSize + 1);
+        return updates.Count == 0 ? null : (story, updates);
+    }
+
     // N6: the handover note for the last `hours`.
     public string HandoverMarkdown(int hours)
     {
@@ -998,7 +1014,7 @@ public sealed partial class WorldNewsService : IDisposable
             Store.LabelSnapshots(since: since, limit: 1000),
             Store.Challenges().Where(c => c.Status == "open").ToList(),
             Store.Tips().Where(t => t.CreatedAt >= since).ToList(),
-            Store.DeskNotes(limit: 200), Store.LiveUpdates(limit: 200), TitleOf, at => at.ToLocalGwsDateTime(),
+            Store.DeskNotes(limit: 200), Store.LiveUpdates(limit: 200, orderByActivity: true), TitleOf, at => at.ToLocalGwsDateTime(),
             Store.BudgetLabelLevels());
     }
 

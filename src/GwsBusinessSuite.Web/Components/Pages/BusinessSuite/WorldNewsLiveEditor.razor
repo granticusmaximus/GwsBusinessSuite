@@ -1,0 +1,184 @@
+@using GwsBusinessSuite.Application.Abstractions
+@using GwsBusinessSuite.Infrastructure.Services
+@using GwsBusinessSuite.WorldNewsKit
+@inject IServiceScopeFactory ScopeFactory
+@inject ICurrentUserAccessor CurrentUserAccessor
+@inject ILogger<WorldNewsLiveEditor> Logger
+
+<section class="desk-live" aria-label="Public live updates">
+    <h3 class="h6">Public live updates</h3>
+    <p class="small text-secondary">Publishing here makes this story's headline and your update readable by anyone on the public site.
+        Do not include private desk notes, contact details or unapproved sensitive material.
+        Confirmed/unconfirmed are manual labels; approval records are a separate workflow.</p>
+    <div class="desk-live-actions">
+        <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@_busy" @onclick="RefreshAsync">Refresh live updates</button>
+        <a class="btn btn-sm btn-link" href="@($"world-news/live/{Uri.EscapeDataString(EventId)}")" target="_blank" rel="noopener">Public live page</a>
+    </div>
+    <p class="small text-secondary">The public page becomes available after the first update, unless the story is on hold.</p>
+    @if (_error is { } error) { <p class="alert alert-warning" role="alert">@error</p> }
+    @if (_message is { } message) { <p class="small" role="status">@message</p> }
+    @if (_hold is { } hold && Holds.IsHeld(hold, DateTimeOffset.UtcNow))
+    {
+        <p class="alert alert-warning">@Holds.Describe(hold, at => at.ToLocalGwsDateTime()). Posting and corrections are blocked; existing updates are hidden from the public.</p>
+    }
+    <form @onsubmit="PublishAsync" @onsubmit:preventDefault>
+        <fieldset class="desk-live-fields" disabled="@(!CanWrite)">
+            <legend class="visually-hidden">Publish an update</legend>
+            <label>Public update
+                <textarea class="form-control form-control-sm" rows="3" maxlength="@LiveUpdates.MaxLength"
+                          @bind="_text" @bind:event="oninput"></textarea>
+            </label>
+            <label>Verification label
+                <select class="form-select form-select-sm" @bind="_label">
+                    <option value="@LiveUpdates.Unconfirmed">Unconfirmed</option>
+                    <option value="@LiveUpdates.Confirmed">Confirmed</option>
+                </select>
+            </label>
+            <div class="desk-live-actions">
+                <button type="submit" class="btn btn-sm btn-primary" disabled="@(string.IsNullOrWhiteSpace(_text))">Publish update publicly</button>
+                <span class="small text-secondary">@_text.Length / @LiveUpdates.MaxLength</span>
+            </div>
+        </fieldset>
+    </form>
+    @if (_busy) { <LoadingIndicator Message="Updating live coverage..." /> }
+    @if (_loaded)
+    {
+        @if (_updates.Count == 0) { <p class="small text-secondary mt-2">No live updates on this story yet.</p> }
+        <ol class="list-unstyled desk-live-list">
+            @foreach (var update in _updates)
+            {
+                <li @key="update.Id">
+                    <div class="small text-secondary">Posted by @update.Username - @update.CreatedAt.ToLocalGwsDateTime() - @update.Status</div>
+                    <p class="desk-live-text">@(update.CorrectedText ?? update.Text)</p>
+                    @if (update.CorrectedText is not null)
+                    {
+                        <div class="small text-secondary">Corrected @update.CorrectedAt?.ToLocalGwsDateTime()</div>
+                        <details><summary class="small">Original wording (superseded)</summary><p class="desk-live-text">@update.Text</p></details>
+                    }
+                    <button type="button" class="btn btn-sm btn-outline-secondary mt-1" disabled="@(!CanWrite)" @onclick="() => Edit(update)">Correct this update</button>
+                </li>
+            }
+        </ol>
+        <nav class="desk-live-actions" aria-label="Live update pages">
+            <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@(_busy || _page == 0)" @onclick="() => ChangePageAsync(-1)">Newer updates</button>
+            <span class="small">Page @(_page + 1)</span>
+            <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@(_busy || !_hasMore)" @onclick="() => ChangePageAsync(1)">Older updates</button>
+        </nav>
+    }
+    @if (_editingId is not null)
+    {
+        <form class="mt-3" @onsubmit="CorrectAsync" @onsubmit:preventDefault>
+            <fieldset class="desk-live-fields" disabled="@(!CanWrite)">
+                <legend class="h6">Publish a correction</legend>
+                <p class="small text-secondary">The original wording is retained. The latest correction replaces any previous correction, not the original post.</p>
+                <label>Corrected public wording
+                    <textarea class="form-control form-control-sm" rows="3" maxlength="@LiveUpdates.MaxLength"
+                              @bind="_correctionText" @bind:event="oninput"></textarea>
+                </label>
+                <label>Verification label
+                    <select class="form-select form-select-sm" @bind="_correctionLabel">
+                        <option value="@LiveUpdates.Unconfirmed">Unconfirmed</option>
+                        <option value="@LiveUpdates.Confirmed">Confirmed</option>
+                    </select>
+                </label>
+                <div class="desk-live-actions">
+                    <button type="submit" class="btn btn-sm btn-primary" disabled="@(string.IsNullOrWhiteSpace(_correctionText))">Publish correction publicly</button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => _editingId = null">Cancel correction</button>
+                </div>
+            </fieldset>
+        </form>
+    }
+</section>
+
+@code {
+    [Parameter, EditorRequired] public string EventId { get; set; } = string.Empty;
+
+    private IReadOnlyList<LiveUpdate> _updates = [];
+    private StoryHold? _hold;
+    private string? _loadedFor, _editingId, _error, _message;
+    private string _text = string.Empty, _label = LiveUpdates.Unconfirmed;
+    private string _correctionText = string.Empty, _correctionLabel = LiveUpdates.Unconfirmed;
+    private int _page;
+    private bool _busy, _loaded, _hasMore;
+    private bool CanWrite => _loaded && !_busy && !Holds.IsHeld(_hold, DateTimeOffset.UtcNow);
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_loadedFor == EventId) return;
+        _loadedFor = EventId;
+        await RefreshAsync();
+    }
+
+    private async Task RunAsync(Func<WorldNewsDeskService, string, Task> action)
+    {
+        if (_busy) return;
+        _busy = true;
+        _error = _message = null;
+        try
+        {
+            var user = await CurrentUserAccessor.GetCurrentUsernameAsync();
+            await using var scope = ScopeFactory.CreateAsyncScope();
+            await action(scope.ServiceProvider.GetRequiredService<WorldNewsDeskService>(), user);
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or UnauthorizedAccessException or Microsoft.Data.Sqlite.SqliteException)
+        {
+            Logger.LogWarning(ex, "World News: live update operation failed for {EventId}", EventId);
+            _error = ex is Microsoft.Data.Sqlite.SqliteException
+                ? "Live coverage couldn't be refreshed. Check the public page before retrying; an update may already have been saved. Your remaining input has been kept."
+                : ex.Message;
+            _loaded = false;
+            _updates = [];
+        }
+        finally { _busy = false; }
+    }
+
+    private async Task LoadAsync(WorldNewsDeskService desk, string user, int page)
+    {
+        var result = await desk.LiveUpdatesAsync(EventId, user, page);
+        _page = page;
+        _hold = result.Hold;
+        _hasMore = result.Updates.Count > LiveUpdates.PageSize;
+        _updates = result.Updates.Take(LiveUpdates.PageSize).ToList();
+        _loaded = true;
+    }
+
+    private Task RefreshAsync() => RunAsync((desk, user) => LoadAsync(desk, user, _page));
+    private Task ChangePageAsync(int direction) => RunAsync((desk, user) => LoadAsync(desk, user, _page + direction));
+
+    private Task PublishAsync()
+    {
+        var text = _text;
+        var label = _label;
+        return RunAsync(async (desk, user) =>
+        {
+            await desk.PublishLiveUpdateAsync(EventId, text, label, user);
+            _text = string.Empty;
+            _label = LiveUpdates.Unconfirmed;
+            _message = "Live update published.";
+            await LoadAsync(desk, user, 0);
+        });
+    }
+
+    private void Edit(LiveUpdate update)
+    {
+        _editingId = update.Id;
+        _correctionText = update.CorrectedText ?? update.Text;
+        _correctionLabel = update.Status;
+    }
+
+    private Task CorrectAsync()
+    {
+        var id = _editingId;
+        var text = _correctionText;
+        var label = _correctionLabel;
+        return RunAsync(async (desk, user) =>
+        {
+            if (id is null) throw new InvalidOperationException("Choose the update to correct.");
+            await desk.CorrectLiveUpdateAsync(EventId, id, text, label, user);
+            _editingId = null;
+            _correctionText = string.Empty;
+            _message = "Public correction saved.";
+            await LoadAsync(desk, user, _page);
+        });
+    }
+}

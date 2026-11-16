@@ -124,11 +124,15 @@ public static class SignOffs
 // confirmed or unconfirmed; a correction is shown in place, with the original kept.
 public sealed record LiveUpdate(string Id, string EventId, string Username, string Text, string Status, DateTimeOffset CreatedAt, string? CorrectedText, DateTimeOffset? CorrectedAt);
 
+public sealed record PublicLiveUpdate(string Id, string Text, string Status, DateTimeOffset CreatedAt, string? CorrectedText, DateTimeOffset? CorrectedAt);
+public sealed record PublicLiveStory(string EventId, string Title, DateTimeOffset LastAt, int Updates);
+
 public static class LiveUpdates
 {
     public const string Confirmed = "confirmed";
     public const string Unconfirmed = "unconfirmed";
     public const int MaxLength = 2000;
+    public const int PageSize = 25;
 
     public static string? Problem(string text, string status) =>
         string.IsNullOrWhiteSpace(text) ? "Write the update first."
@@ -281,11 +285,13 @@ public static class ShiftHandover
             md.AppendLine();
         }
 
-        var posted = liveUpdates.Where(u => u.CreatedAt >= since).ToList();
+        var posted = liveUpdates.Where(u => u.CreatedAt >= since || u.CorrectedAt >= since).ToList();
         if (posted.Count > 0)
         {
             md.AppendLine("## Posted live").AppendLine();
-            foreach (var u in posted) md.AppendLine($"- {titleOf(u.EventId) ?? u.EventId}: [{u.Status}] {u.CorrectedText ?? u.Text} ({u.Username}, {formatTime(u.CreatedAt)})");
+            foreach (var u in posted)
+                md.AppendLine($"- {titleOf(u.EventId) ?? u.EventId}: [{u.Status}] {u.CorrectedText ?? u.Text} ({u.Username}, {formatTime(u.CreatedAt)}"
+                    + (u.CorrectedAt is { } correctedAt ? $"; corrected {formatTime(correctedAt)}" : string.Empty) + ")");
             md.AppendLine();
         }
         return md.ToString().TrimEnd() + "\n";

@@ -403,14 +403,19 @@ public sealed partial class WorldNewsStore
 
     // ---- N10 live updates ----
 
-    public IReadOnlyList<LiveUpdate> LiveUpdates(string? eventId = null, int limit = 200)
+    public IReadOnlyList<LiveUpdate> LiveUpdates(string? eventId = null, int limit = 200, int offset = 0, bool orderByActivity = false)
     {
+        ArgumentOutOfRangeException.ThrowIfNegative(offset);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(limit);
         using var connection = Open();
         using var command = connection.CreateCommand();
         command.CommandText = "SELECT id, event_id, username, text, status, created_at, corrected_text, corrected_at FROM live_updates"
-            + (eventId is null ? "" : " WHERE event_id = $event") + " ORDER BY created_at DESC LIMIT $limit";
+            + (eventId is null ? "" : " WHERE event_id = $event")
+            + (orderByActivity ? " ORDER BY COALESCE(corrected_at, created_at) DESC, rowid DESC" : " ORDER BY created_at DESC, rowid DESC")
+            + " LIMIT $limit OFFSET $offset";
         if (eventId is not null) command.Parameters.AddWithValue("$event", eventId);
         command.Parameters.AddWithValue("$limit", limit);
+        command.Parameters.AddWithValue("$offset", offset);
         using var reader = command.ExecuteReader();
         var updates = new List<LiveUpdate>();
         while (reader.Read())
@@ -421,9 +426,14 @@ public sealed partial class WorldNewsStore
 
     public LiveUpdate AddLiveUpdate(string eventId, string username, string text, string status, DateTimeOffset now)
     {
+        if (global::GwsBusinessSuite.WorldNewsKit.LiveUpdates.Problem(text, status) is { } problem) throw new ArgumentException(problem, nameof(text));
+        if (string.IsNullOrWhiteSpace(username)) throw new ArgumentException("Sign in before publishing an update.", nameof(username));
         var update = new LiveUpdate(NewId(), eventId, username, text.Trim(), status, now, null, null);
         using var connection = Open();
+        using var transaction = connection.BeginTransaction(deferred: false);
+        EnsureLiveStoryWritable(connection, transaction, eventId, now);
         using var command = connection.CreateCommand();
+        command.Transaction = transaction;
         command.CommandText = "INSERT INTO live_updates (id, event_id, username, text, status, created_at) VALUES ($id, $event, $user, $text, $status, $at)";
         command.Parameters.AddWithValue("$id", update.Id);
         command.Parameters.AddWithValue("$event", eventId);
@@ -432,34 +442,101 @@ public sealed partial class WorldNewsStore
         command.Parameters.AddWithValue("$status", status);
         command.Parameters.AddWithValue("$at", Unix(now));
         command.ExecuteNonQuery();
+        transaction.Commit();
         return update;
     }
 
     // A correction keeps the original text and shows the new one in its place.
-    public void CorrectLiveUpdate(string id, string correctedText, string status, DateTimeOffset now)
+    public void CorrectLiveUpdate(string id, string correctedText, string status, DateTimeOffset now, string? eventId = null)
     {
+        if (global::GwsBusinessSuite.WorldNewsKit.LiveUpdates.Problem(correctedText, status) is { } problem) throw new ArgumentException(problem, nameof(correctedText));
         using var connection = Open();
+        using var transaction = connection.BeginTransaction(deferred: false);
+        using (var find = connection.CreateCommand())
+        {
+            find.Transaction = transaction;
+            find.CommandText = "SELECT event_id FROM live_updates WHERE id = $id" + (eventId is null ? "" : " AND event_id = $event");
+            find.Parameters.AddWithValue("$id", id);
+            if (eventId is not null) find.Parameters.AddWithValue("$event", eventId);
+            if (find.ExecuteScalar() is not string savedEventId)
+                throw new InvalidOperationException("That live update is no longer available on this story.");
+            EnsureLiveStoryWritable(connection, transaction, savedEventId, now);
+        }
         using var command = connection.CreateCommand();
+        command.Transaction = transaction;
         command.CommandText = "UPDATE live_updates SET corrected_text = $text, corrected_at = $at, status = $status WHERE id = $id";
         command.Parameters.AddWithValue("$id", id);
         command.Parameters.AddWithValue("$text", correctedText.Trim());
         command.Parameters.AddWithValue("$status", status);
         command.Parameters.AddWithValue("$at", Unix(now));
-        command.ExecuteNonQuery();
+        if (command.ExecuteNonQuery() != 1) throw new InvalidOperationException("That live update couldn't be corrected.");
+        transaction.Commit();
+    }
+
+    private static void EnsureLiveStoryWritable(SqliteConnection connection, SqliteTransaction transaction, string eventId, DateTimeOffset now)
+    {
+        using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = "SELECT h.until FROM events e LEFT JOIN holds h ON h.event_id = e.id WHERE e.id = $event";
+        command.Parameters.AddWithValue("$event", eventId);
+        using var reader = command.ExecuteReader();
+        if (!reader.Read()) throw new InvalidOperationException("That story is no longer available. Open a current World News story.");
+        if (!reader.IsDBNull(0) && At(reader, 0) > now)
+            throw new InvalidOperationException("This story is on hold. Wait for its release time or release the hold before posting live.");
+    }
+
+    public IReadOnlyList<PublicLiveStory> PublicLiveStories(DateTimeOffset now, int offset = 0, int limit = 50, string? eventId = null)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(offset);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(limit);
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT e.id, COALESCE((SELECT NULLIF(headline, '') FROM summaries WHERE event_id = e.id ORDER BY version DESC LIMIT 1), e.title),
+                MAX(COALESCE(u.corrected_at, u.created_at)), COUNT(*)
+            FROM live_updates u JOIN events e ON e.id = u.event_id
+            WHERE u.status IN ('confirmed', 'unconfirmed')
+                AND NOT EXISTS (SELECT 1 FROM holds h WHERE h.event_id = e.id AND h.until > $now)
+            """ + (eventId is null ? "" : " AND e.id = $event")
+            + " GROUP BY e.id ORDER BY MAX(COALESCE(u.corrected_at, u.created_at)) DESC, e.id LIMIT $limit OFFSET $offset";
+        command.Parameters.AddWithValue("$now", Unix(now));
+        command.Parameters.AddWithValue("$limit", limit);
+        command.Parameters.AddWithValue("$offset", offset);
+        if (eventId is not null) command.Parameters.AddWithValue("$event", eventId);
+        using var reader = command.ExecuteReader();
+        var stories = new List<PublicLiveStory>();
+        while (reader.Read()) stories.Add(new PublicLiveStory(reader.GetString(0), reader.GetString(1), At(reader, 2), reader.GetInt32(3)));
+        return stories;
+    }
+
+    public IReadOnlyList<PublicLiveUpdate> PublicLiveUpdates(string eventId, DateTimeOffset now, int offset = 0, int limit = 200)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(offset);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(limit);
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT u.id, u.text, u.status, u.created_at, u.corrected_text, u.corrected_at
+            FROM live_updates u JOIN events e ON e.id = u.event_id
+            WHERE u.event_id = $event AND u.status IN ('confirmed', 'unconfirmed')
+                AND NOT EXISTS (SELECT 1 FROM holds h WHERE h.event_id = e.id AND h.until > $now)
+            ORDER BY u.created_at DESC, u.rowid DESC LIMIT $limit OFFSET $offset
+            """;
+        command.Parameters.AddWithValue("$event", eventId);
+        command.Parameters.AddWithValue("$now", Unix(now));
+        command.Parameters.AddWithValue("$limit", limit);
+        command.Parameters.AddWithValue("$offset", offset);
+        using var reader = command.ExecuteReader();
+        var updates = new List<PublicLiveUpdate>();
+        while (reader.Read())
+            updates.Add(new PublicLiveUpdate(reader.GetString(0), reader.GetString(1), reader.GetString(2), At(reader, 3),
+                reader.IsDBNull(4) ? null : reader.GetString(4), reader.IsDBNull(5) ? null : At(reader, 5)));
+        return updates;
     }
 
     // Stories with at least one live update, newest activity first (for the public live index).
-    public IReadOnlyList<(string EventId, DateTimeOffset LastAt, int Updates)> LiveStories(int limit = 50)
-    {
-        using var connection = Open();
-        using var command = connection.CreateCommand();
-        command.CommandText = "SELECT event_id, MAX(created_at), COUNT(*) FROM live_updates GROUP BY event_id ORDER BY MAX(created_at) DESC LIMIT $limit";
-        command.Parameters.AddWithValue("$limit", limit);
-        using var reader = command.ExecuteReader();
-        var list = new List<(string, DateTimeOffset, int)>();
-        while (reader.Read()) list.Add((reader.GetString(0), At(reader, 1), reader.GetInt32(2)));
-        return list;
-    }
+    public IReadOnlyList<(string EventId, DateTimeOffset LastAt, int Updates)> LiveStories(int limit = 50) =>
+        PublicLiveStories(DateTimeOffset.UtcNow, limit: limit).Select(story => (story.EventId, story.LastAt, story.Updates)).ToList();
 
     // ---- N11 holds ----
 

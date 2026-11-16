@@ -1,0 +1,4 @@
+.news-live-page { max-width: 60rem; margin: 0 auto; padding: 2rem 1rem; }
+.news-live-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; }
+.news-live-text { white-space: pre-wrap; overflow-wrap: anywhere; margin: .75rem 0; }
+.news-live-page h2 { overflow-wrap: anywhere; }
