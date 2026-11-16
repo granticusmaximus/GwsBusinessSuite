@@ -13,17 +13,21 @@ public enum OllamaComputeRoute
 public static class OllamaComputeRouting
 {
     private static readonly AsyncLocal<OllamaComputeRoute?> CurrentValue = new();
+    private static readonly AsyncLocal<TimeSpan?> PreferredAttemptTimeoutValue = new();
 
     public static OllamaComputeRoute Current => CurrentValue.Value ?? OllamaComputeRoute.Auto;
+    public static TimeSpan? PreferredAttemptTimeout => PreferredAttemptTimeoutValue.Value;
 
-    public static IDisposable Use(OllamaComputeRoute route)
+    public static IDisposable Use(OllamaComputeRoute route, TimeSpan? preferredAttemptTimeout = null)
     {
         var previous = CurrentValue.Value;
+        var previousTimeout = PreferredAttemptTimeoutValue.Value;
         CurrentValue.Value = route;
-        return new Scope(previous);
+        PreferredAttemptTimeoutValue.Value = preferredAttemptTimeout;
+        return new Scope(previous, previousTimeout);
     }
 
-    private sealed class Scope(OllamaComputeRoute? previous) : IDisposable
+    private sealed class Scope(OllamaComputeRoute? previous, TimeSpan? previousTimeout) : IDisposable
     {
         private bool _disposed;
 
@@ -32,6 +36,7 @@ public static class OllamaComputeRouting
             if (_disposed) return;
             _disposed = true;
             CurrentValue.Value = previous;
+            PreferredAttemptTimeoutValue.Value = previousTimeout;
         }
     }
 }

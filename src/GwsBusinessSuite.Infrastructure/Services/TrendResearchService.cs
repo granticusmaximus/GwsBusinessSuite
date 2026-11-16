@@ -26,9 +26,14 @@ public sealed class TrendResearchService(
     ILogger<TrendResearchService> logger) : ITrendResearchService
 {
     private static readonly TimeSpan CacheDuration = TimeSpan.FromHours(4);
+    private static readonly TimeSpan PreferredModelTimeout = TimeSpan.FromSeconds(45);
+    private static readonly TimeSpan TotalResearchTimeout = TimeSpan.FromMinutes(3);
 
     public async Task<TrendResearchResult> ResearchTrendsAsync(TrendResearchRequest request, CancellationToken cancellationToken = default)
     {
+        using var totalTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        totalTimeout.CancelAfter(TotalResearchTimeout);
+        var requestToken = totalTimeout.Token;
         var focusArea = request.FocusArea.Trim();
         var cacheKey = $"trend-research:{(string.IsNullOrWhiteSpace(focusArea) ? "general" : focusArea.ToLowerInvariant())}";
 
@@ -37,14 +42,18 @@ public sealed class TrendResearchService(
             return cached with { FromCache = true };
         }
 
-        var signals = await GatherSignalsAsync(focusArea, cancellationToken);
+        var signals = await GatherSignalsAsync(focusArea, requestToken);
 
         if (signals.Count == 0)
         {
             logger.LogWarning("Trend research found no signals from Hacker News or dev.to for focus area '{FocusArea}'.", focusArea);
         }
 
-        var (summary, suggestions) = await SynthesizeWithOllamaAsync(focusArea, signals, cancellationToken);
+        // Trend synthesis is a short interactive request: start on the droplet, but do not let a
+        // healthy-yet-stuck Ollama hold the page for its two-hour transport timeout. After 45
+        // seconds the shared failover service retries on the Mac, within the three-minute total.
+        using var computeRoute = OllamaComputeRouting.Use(OllamaComputeRoute.PreferDroplet, PreferredModelTimeout);
+        var (summary, suggestions) = await SynthesizeWithOllamaAsync(focusArea, signals, requestToken);
 
         var result = new TrendResearchResult
         {

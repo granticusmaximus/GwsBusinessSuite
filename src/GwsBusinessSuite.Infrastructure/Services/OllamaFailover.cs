@@ -324,9 +324,11 @@ public sealed class FailoverOllamaService(
 
     private async Task<T> DropletFirstAsync<T>(Func<IOllamaService, CancellationToken, Task<T>> call, CancellationToken ct)
     {
+        using var preferredAttempt = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        if (OllamaComputeRouting.PreferredAttemptTimeout is { } timeout) preferredAttempt.CancelAfter(timeout);
         try
         {
-            return await call(secondary, ct);
+            return await call(secondary, preferredAttempt.Token);
         }
         catch (Exception ex) when (!ct.IsCancellationRequested && ex is not NotSupportedException && monitor.PrimaryUp)
         {
@@ -340,7 +342,9 @@ public sealed class FailoverOllamaService(
         Func<IOllamaService, CancellationToken, IAsyncEnumerable<string>> call,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
-        var stream = call(secondary, ct).GetAsyncEnumerator(ct);
+        using var preferredAttempt = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        if (OllamaComputeRouting.PreferredAttemptTimeout is { } timeout) preferredAttempt.CancelAfter(timeout);
+        var stream = call(secondary, preferredAttempt.Token).GetAsyncEnumerator(preferredAttempt.Token);
         var yielded = false;
         var fellBack = false;
         try

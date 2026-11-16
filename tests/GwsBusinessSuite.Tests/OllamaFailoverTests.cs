@@ -114,6 +114,21 @@ public sealed class OllamaFailoverTests
     }
 
     [Fact]
+    public async Task AStuckPreferredDroplet_ShouldTimeOutAndFallBackToTheMac()
+    {
+        using var monitor = Monitor();
+        var mac = new Fake("mac");
+        var droplet = new Fake("droplet", waitUntilCancelled: true);
+        var service = Service(mac, droplet, monitor);
+
+        using (OllamaComputeRouting.Use(OllamaComputeRoute.PreferDroplet, TimeSpan.FromMilliseconds(25)))
+            (await service.GenerateAsync("sentinelgpt", "short", "question")).Should().Be("mac");
+
+        droplet.Calls.Should().Be(1);
+        mac.Calls.Should().Be(1);
+    }
+
+    [Fact]
     public async Task Embeddings_ShouldStayOnTheDroplet_AndOnlyMoveToAMacWithTheSameModel()
     {
         using var monitor = Monitor();
@@ -167,14 +182,16 @@ public sealed class OllamaFailoverTests
             Task.FromResult(respond(request));
     }
 
-    private sealed class Fake(string name, Exception? fail = null, bool failAfterFirstWord = false) : IOllamaService
+    private sealed class Fake(string name, Exception? fail = null, bool failAfterFirstWord = false, bool waitUntilCancelled = false) : IOllamaService
     {
         public int Calls { get; private set; }
 
-        public Task<string> GenerateAsync(string model, string systemPrompt, string userPrompt, CancellationToken ct = default)
+        public async Task<string> GenerateAsync(string model, string systemPrompt, string userPrompt, CancellationToken ct = default)
         {
             Calls++;
-            return fail is null ? Task.FromResult(name) : Task.FromException<string>(fail);
+            if (waitUntilCancelled) await Task.Delay(Timeout.InfiniteTimeSpan, ct);
+            if (fail is not null) throw fail;
+            return name;
         }
 
         public async IAsyncEnumerable<string> GenerateStreamAsync(string model, string systemPrompt, string userPrompt, [EnumeratorCancellation] CancellationToken ct = default)
