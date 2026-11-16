@@ -8,3 +8,10 @@
 .desk-tip-closed { color: var(--bs-secondary-color); }
 .desk-tip-actions { display: flex; gap: .5rem; flex-wrap: wrap; margin-top: .5rem; }
 .desk-tip-actions input { flex: 1 1 14rem; }
+.desk-beat-form { display: flex; align-items: end; flex-wrap: wrap; gap: .75rem; }
+.desk-beat-form label { display: grid; gap: .25rem; flex: 1 1 12rem; min-width: 0; }
+.desk-beat-list { display: flex; flex-wrap: wrap; gap: .5rem 1rem; margin: 1rem 0 0; }
+.desk-beat-list li { display: flex; align-items: center; gap: .5rem; }
+.desk-beat-queue { margin-bottom: 0; padding-left: 1.5rem; }
+.desk-beat-queue li { margin-bottom: .75rem; overflow-wrap: anywhere; }
+.desk-beat-queue span { display: block; }

@@ -37,6 +37,84 @@ public sealed class WorldNewsDeskTests : IDisposable
         Assert.Empty(store.Beats("ana"));
     }
 
+    [Theory]
+    [InlineData("colour", "red")]
+    [InlineData(BeatRules.Region, "Narnia")]
+    [InlineData(BeatRules.Topic, "made-up")]
+    public void Beats_ShouldRejectInvalidSubscriptions(string kind, string value)
+    {
+        var store = Store();
+
+        Assert.Throws<ArgumentException>(() => store.AddBeat("ana", kind, value, Now));
+        Assert.Empty(store.Beats("ana"));
+    }
+
+    [Fact]
+    public void BeatQueue_ShouldMatchOnlyMyBeats_OrderByCoverage_AndRespectTheLimit()
+    {
+        using var test = new WorldNewsTestStore();
+        var store = test.Store;
+        var now = WorldNewsTestStore.Now;
+        test.SeedEvent("s1", "e1", "Airport shuts after ransomware attack", ["A", "B", "C"], now.AddHours(-3));
+        test.SeedEvent("s2", "e2", "Company confirms data breach", ["A", "B"], now.AddHours(-2));
+        test.SeedEvent("s3", "e3", "Parliament passes budget", ["A", "B", "C", "D"], now.AddHours(-2));
+        store.SaveKinds([("s1", SituationKinds.Cyber), ("s2", SituationKinds.Cyber),
+            ("s3", SituationKinds.Politics)]);
+        store.AddBeat("ana", BeatRules.Topic, SituationKinds.Cyber, now);
+        store.AddBeat("ben", BeatRules.Topic, SituationKinds.Politics, now);
+        var since = now.AddHours(-24);
+
+        Assert.Equal(["e1", "e2"], store.BeatQueue("Ana", since).Select(story => story.Id));
+        Assert.Equal("e1", Assert.Single(store.BeatQueue("ana", since, limit: 1)).Id);
+        Assert.Equal("e3", Assert.Single(store.BeatQueue("ben", since)).Id);
+        Assert.Empty(store.BeatQueue("cat", since));
+    }
+
+    [Fact]
+    public void BeatAlerts_ShouldRetryAfterCorroboration_AndSendOnlyOnce()
+    {
+        using var test = new WorldNewsTestStore();
+        var store = test.Store;
+        test.SeedEvent("s1", "e1", "Quake hits Tokyo", ["A", "B"], Now);
+        store.AddBeat("ana", BeatRules.Region, WorldRegions.Europe, Now);
+
+        Assert.Empty(store.CreateBeatAlerts(Now, Now.AddDays(-1), mayAlert: _ => false));
+        var alert = Assert.Single(store.CreateBeatAlerts(Now.AddMinutes(5), Now.AddDays(-1), mayAlert: _ => true));
+        Assert.Equal(("ana", "s1"), (alert.Username, alert.SituationId));
+        Assert.Empty(store.CreateBeatAlerts(Now.AddMinutes(10), Now.AddDays(-1), mayAlert: _ => true));
+    }
+
+    [Fact]
+    public void BeatAlerts_ShouldWaitForAHoldToBeReleased()
+    {
+        using var test = new WorldNewsTestStore();
+        var store = test.Store;
+        test.SeedEvent("s1", "e1", "Quake hits Tokyo", ["A", "B"], Now);
+        store.AddBeat("ana", BeatRules.Region, WorldRegions.Europe, Now);
+        store.SetHold(new StoryHold("e1", Now.AddHours(1), "Await the briefing", "ana", Now));
+
+        Assert.Empty(store.CreateBeatAlerts(Now, Now.AddDays(-1)));
+        store.ReleaseHold("e1");
+        Assert.Single(store.CreateBeatAlerts(Now.AddMinutes(5), Now.AddDays(-1)));
+    }
+
+    [Fact]
+    public void RemovingAnotherPersonsBeat_ShouldNotResetTheirAlertHistory()
+    {
+        using var test = new WorldNewsTestStore();
+        var store = test.Store;
+        test.SeedEvent("s1", "e1", "Quake hits Tokyo", ["A", "B"], Now);
+        var beat = store.AddBeat("ana", BeatRules.Region, WorldRegions.Europe, Now)!;
+        Assert.Single(store.CreateBeatAlerts(Now, Now.AddDays(-1)));
+
+        store.RemoveBeat("ben", beat.Id);
+
+        Assert.Single(store.Beats("ana"));
+        Assert.Empty(store.CreateBeatAlerts(Now.AddMinutes(5), Now.AddDays(-1)));
+        store.RemoveBeat("ANA", beat.Id);
+        Assert.Empty(store.Beats("ana"));
+    }
+
     [Fact]
     public void DeskNotes_ShouldFindMentions_AndAlertOnlyRealOtherUsers()
     {

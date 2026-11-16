@@ -7,6 +7,7 @@
 @using GwsBusinessSuite.WorldNewsKit
 @inject WorldNewsService News
 @inject ICurrentUserAccessor CurrentUserAccessor
+@inject ILogger<WorldNewsDesk> Logger
 
 @* World News trust plan N3/N4 (13-11-26): the story budget (what the desk is following, who owns
    it, where it stands, what's next) and the tips sent from /tip. *@
@@ -21,6 +22,80 @@
 </PageHeader>
 
 @if (!string.IsNullOrEmpty(_error)) { <p class="alert alert-warning" role="alert">@_error</p> }
+
+<section class="card border-0 shadow-sm mb-3" aria-labelledby="desk-beats">
+    <div class="card-header"><strong id="desk-beats">My beats</strong> <small class="text-secondary">your regions and kinds of story</small></div>
+    <div class="card-body">
+        <p class="small text-secondary">Regions follow reports' source countries, not verified event locations. New matching stories reach your bell once they pass the news alert checks; held stories wait.</p>
+        @if (_beatError is { } beatError) { <p class="alert alert-warning" role="alert">@beatError</p> }
+        <fieldset disabled="@_beatsBusy">
+            <legend class="visually-hidden">Manage my beats</legend>
+            <form class="desk-beat-form" @onsubmit="AddBeatAsync" @onsubmit:preventDefault>
+                <label>Follow
+                    <select class="form-select form-select-sm" @bind="_beatKind" @bind:after="BeatKindChanged">
+                        <option value="@BeatRules.Region">Region</option>
+                        <option value="@BeatRules.Topic">Kind of story</option>
+                    </select>
+                </label>
+                <label>Beat
+                    <select class="form-select form-select-sm" @bind="_beatValue">
+                        @foreach (var value in BeatValues)
+                        {
+                            <option value="@value">@(_beatKind == BeatRules.Topic ? SituationKinds.Label(value) : value)</option>
+                        }
+                    </select>
+                </label>
+                <button type="submit" class="btn btn-sm btn-primary" disabled="@(_beats.Count >= BeatRules.MaxPerPerson)">Follow beat</button>
+                <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="LoadBeatsAsync">Refresh queue</button>
+            </form>
+            @if (_beats.Count > 0)
+            {
+                <ul class="list-unstyled desk-beat-list">
+                    @foreach (var beat in _beats)
+                    {
+                        <li @key="beat.Id">
+                            <span>@BeatRules.Label(beat)</span>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => RemoveBeatAsync(beat)"
+                                    aria-label="@($"Stop following {BeatRules.Label(beat)}")">Unfollow</button>
+                        </li>
+                    }
+                </ul>
+            }
+        </fieldset>
+        @if (_beatsBusy)
+        {
+            <LoadingIndicator Message="Loading your beats..." />
+        }
+        else if (_beatError is null)
+        {
+            @if (_beats.Count == 0)
+            {
+                <p class="text-secondary mb-0">Follow a region or kind of story to build your personal queue.</p>
+            }
+            else
+            {
+                <h2 class="h6 mt-3">My queue</h2>
+                <p class="small text-secondary">Up to 40 matching stories seen in the last 24 hours, most widely covered first. The queue includes stories still awaiting verification; an alert is not a desk verdict.</p>
+                @if (_beatQueue.Count == 0)
+                {
+                    <p class="text-secondary mb-0">No recent stories match your beats yet.</p>
+                }
+                else
+                {
+                    <ol class="desk-beat-queue">
+                        @foreach (var story in _beatQueue)
+                        {
+                            <li @key="story.Id">
+                                <a href="@($"admin/world-news?event={Uri.EscapeDataString(story.Id)}")">@(story.Headline ?? story.Title)</a>
+                                <span class="small text-secondary">@story.OutletCount outlets · @story.LastSeen.ToLocalGwsDateTime()</span>
+                            </li>
+                        }
+                    </ol>
+                }
+            }
+        }
+    </div>
+</section>
 
 <section class="card border-0 shadow-sm mb-3" aria-labelledby="desk-budget">
     <div class="card-header"><strong id="desk-budget">The budget</strong> <small class="text-secondary">add a story from its page</small></div>
@@ -102,8 +177,83 @@
     private readonly Dictionary<string, BudgetEdit> _edits = new();
     private readonly Dictionary<string, string> _tipStory = new();
     private string? _error;
+    private IReadOnlyList<Beat> _beats = [];
+    private IReadOnlyList<EventOverview> _beatQueue = [];
+    private string _beatKind = BeatRules.Region;
+    private string _beatValue = WorldRegions.All[0];
+    private string? _beatError;
+    private bool _beatsBusy = true;
+    private IReadOnlyList<string> BeatValues => _beatKind == BeatRules.Region ? WorldRegions.All : SituationKinds.All;
 
-    protected override async Task OnInitializedAsync() => await LoadAsync();
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+        await LoadBeatsAsync();
+    }
+
+    private void BeatKindChanged() => _beatValue = BeatValues[0];
+
+    private async Task LoadBeatsAsync()
+    {
+        _beatsBusy = true;
+        _beatError = null;
+        try
+        {
+            var username = await CurrentUserAccessor.GetCurrentUsernameAsync();
+            (_beats, _beatQueue) = await Task.Run(() =>
+                (News.Store.Beats(username), News.Store.BeatQueue(username, DateTimeOffset.UtcNow.AddHours(-24))));
+        }
+        catch (Microsoft.Data.Sqlite.SqliteException ex)
+        {
+            Logger.LogWarning(ex, "World News: couldn't load personal beats");
+            _beatError = "Your beats couldn't be loaded. Try refreshing the queue.";
+        }
+        finally { _beatsBusy = false; }
+    }
+
+    private async Task AddBeatAsync()
+    {
+        _beatError = BeatRules.Problem(_beatKind, _beatValue);
+        if (_beatError is not null) return;
+        _beatsBusy = true;
+        try
+        {
+            var username = await CurrentUserAccessor.GetCurrentUsernameAsync();
+            var kind = _beatKind;
+            var value = _beatValue;
+            var added = await Task.Run(() => News.Store.AddBeat(username, kind, value, DateTimeOffset.UtcNow));
+            if (added is null)
+            {
+                _beatError = $"You're already following that beat, or you've reached the limit of {BeatRules.MaxPerPerson} beats.";
+                return;
+            }
+            await LoadBeatsAsync();
+        }
+        catch (Microsoft.Data.Sqlite.SqliteException ex)
+        {
+            Logger.LogWarning(ex, "World News: couldn't follow a personal beat");
+            _beatError = "That beat couldn't be followed. Refresh the queue before trying again.";
+        }
+        finally { _beatsBusy = false; }
+    }
+
+    private async Task RemoveBeatAsync(Beat beat)
+    {
+        _beatsBusy = true;
+        _beatError = null;
+        try
+        {
+            var username = await CurrentUserAccessor.GetCurrentUsernameAsync();
+            await Task.Run(() => News.Store.RemoveBeat(username, beat.Id));
+            await LoadBeatsAsync();
+        }
+        catch (Microsoft.Data.Sqlite.SqliteException ex)
+        {
+            Logger.LogWarning(ex, "World News: couldn't unfollow a personal beat");
+            _beatError = "That beat couldn't be unfollowed. Refresh the queue before trying again.";
+        }
+        finally { _beatsBusy = false; }
+    }
 
     private async Task LoadAsync()
     {

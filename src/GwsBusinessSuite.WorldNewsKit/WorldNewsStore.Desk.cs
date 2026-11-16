@@ -53,6 +53,7 @@ public sealed partial class WorldNewsStore
 
     public Beat? AddBeat(string username, string kind, string value, DateTimeOffset now)
     {
+        if (BeatRules.Problem(kind, value) is { } problem) throw new ArgumentException(problem, nameof(value));
         var mine = Beats(username);
         if (mine.Count >= BeatRules.MaxPerPerson || mine.Any(b => b.Kind == kind && string.Equals(b.Value, value, StringComparison.OrdinalIgnoreCase))) return null;
         var beat = new Beat(NewId(), NormalizeUsername(username), kind, value, now);
@@ -71,11 +72,17 @@ public sealed partial class WorldNewsStore
     public void RemoveBeat(string username, string id)
     {
         using var connection = Open();
+        using var transaction = connection.BeginTransaction();
         using var command = connection.CreateCommand();
-        command.CommandText = "DELETE FROM beats WHERE id = $id AND username = $user; DELETE FROM beat_hits WHERE beat_id = $id";
+        command.Transaction = transaction;
+        command.CommandText = """
+            DELETE FROM beat_hits WHERE beat_id = $id AND EXISTS (SELECT 1 FROM beats WHERE id = $id AND username = $user);
+            DELETE FROM beats WHERE id = $id AND username = $user;
+            """;
         command.Parameters.AddWithValue("$id", id);
         command.Parameters.AddWithValue("$user", NormalizeUsername(username));
         command.ExecuteNonQuery();
+        transaction.Commit();
     }
 
     // The stories on a person's beats since a time, most covered first: their queue.
@@ -114,13 +121,13 @@ public sealed partial class WorldNewsStore
                 seen.Parameters.AddWithValue("$beat", beat.Id);
                 seen.Parameters.AddWithValue("$event", e.Id);
                 if (seen.ExecuteScalar() is not null) continue;
+                var situationId = SituationOf(e.Id);
+                if (situationId is null || (mayAlert is not null && !mayAlert(situationId))) continue;
                 using var hit = connection.CreateCommand();
                 hit.CommandText = "INSERT OR IGNORE INTO beat_hits (beat_id, event_id) VALUES ($beat, $event)";
                 hit.Parameters.AddWithValue("$beat", beat.Id);
                 hit.Parameters.AddWithValue("$event", e.Id);
                 hit.ExecuteNonQuery();
-                var situationId = SituationOf(e.Id);
-                if (situationId is null || (mayAlert is not null && !mayAlert(situationId))) continue;
                 var alert = new WorldNewsAlert(Guid.NewGuid(), person.Key, situationId, e.Headline ?? e.Title, $"On your beat: {BeatRules.Label(beat)}", now, false);
                 InsertAlert(connection, alert);
                 alerts.Add(alert);

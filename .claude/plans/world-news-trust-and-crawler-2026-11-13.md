@@ -200,3 +200,6 @@ and the write-up both draw on the evidence; then B3-B9 and N5-N15; B10 (reading)
     tests. Its changes to those three files were reversed in the working tree without rewriting history.
   - Remaining product work is still the N5-N15 UI/endpoints and B10 reading features. The N5-N15
     backend from 04d4f0f should be extended, not rebuilt in parallel.
+- 16-11-26: N5 personal beat UI/queue implementation started after confirming the existing
+  `Beats`/`BeatQueue`/`CreateBeatAlerts` backend and pipeline. This unit is tracked in
+  `open-work-and-newsroom-beats-2026-11-16.md`; it does not close N6-N15 or B10.
