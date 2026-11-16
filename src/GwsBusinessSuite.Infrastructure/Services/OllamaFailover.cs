@@ -261,19 +261,24 @@ public sealed class FailoverOllamaService(
         "SentinelGPT's Mac stopped answering part-way through that answer. Ask again: the backup answers now.";
 
     public Task<string> GenerateAsync(string model, string systemPrompt, string userPrompt, CancellationToken ct = default) =>
-        MacFirstAsync((ollama, token) => ollama.GenerateAsync(model, systemPrompt, userPrompt, token), ct);
+        RoutedAsync(PreferMac(systemPrompt.Length + userPrompt.Length),
+            (ollama, token) => ollama.GenerateAsync(model, systemPrompt, userPrompt, token), ct);
 
     public Task<string> GenerateAsync(string model, string systemPrompt, string userPrompt, int numCtx, CancellationToken ct = default) =>
-        MacFirstAsync((ollama, token) => ollama.GenerateAsync(model, systemPrompt, userPrompt, numCtx, token), ct);
+        RoutedAsync(PreferMac(systemPrompt.Length + userPrompt.Length, contextSize: numCtx),
+            (ollama, token) => ollama.GenerateAsync(model, systemPrompt, userPrompt, numCtx, token), ct);
 
     public Task WarmModelAsync(string model, CancellationToken ct = default) =>
-        MacFirstAsync(async (ollama, token) => { await ollama.WarmModelAsync(model, token); return true; }, ct);
+        RoutedAsync(OllamaComputeRouting.Current != OllamaComputeRoute.PreferDroplet,
+            async (ollama, token) => { await ollama.WarmModelAsync(model, token); return true; }, ct);
 
     public IAsyncEnumerable<string> GenerateStreamAsync(string model, string systemPrompt, string userPrompt, CancellationToken ct = default) =>
-        MacFirstStreamAsync((ollama, token) => ollama.GenerateStreamAsync(model, systemPrompt, userPrompt, token), ct);
+        RoutedStreamAsync(PreferMac(systemPrompt.Length + userPrompt.Length),
+            (ollama, token) => ollama.GenerateStreamAsync(model, systemPrompt, userPrompt, token), ct);
 
     public IAsyncEnumerable<string> GenerateStreamAsync(string model, string systemPrompt, string userPrompt, int maxOutputTokens, CancellationToken ct = default) =>
-        MacFirstStreamAsync((ollama, token) => ollama.GenerateStreamAsync(model, systemPrompt, userPrompt, maxOutputTokens, token), ct);
+        RoutedStreamAsync(PreferMac(systemPrompt.Length + userPrompt.Length, outputTokens: maxOutputTokens),
+            (ollama, token) => ollama.GenerateStreamAsync(model, systemPrompt, userPrompt, maxOutputTokens, token), ct);
 
     public Task<IReadOnlyCollection<string>> ListModelsAsync(CancellationToken ct = default) =>
         MacFirstAsync((ollama, token) => ollama.ListModelsAsync(token), ct);
@@ -300,7 +305,71 @@ public sealed class FailoverOllamaService(
 
     public Task<OllamaChatResponse> ChatAsync(string model, IReadOnlyList<OllamaChatMessage> messages,
         IReadOnlyList<OllamaToolDefinition>? tools = null, CancellationToken ct = default) =>
-        MacFirstAsync((ollama, token) => ollama.ChatAsync(model, messages, tools, token), ct);
+        RoutedAsync(PreferMac(messages.Sum(message => message.Content?.Length ?? 0), toolCount: tools?.Count ?? 0),
+            (ollama, token) => ollama.ChatAsync(model, messages, tools, token), ct);
+
+    private static bool PreferMac(int inputSize, int outputTokens = 0, int contextSize = 0, int toolCount = 0) => OllamaComputeRouting.Current switch
+    {
+        OllamaComputeRoute.PreferMac => true,
+        OllamaComputeRoute.PreferDroplet => false,
+        _ => inputSize >= 12_000 || outputTokens >= 2_048 || contextSize >= 16_000 || toolCount >= 8,
+    };
+
+    private Task<T> RoutedAsync<T>(bool preferMac, Func<IOllamaService, CancellationToken, Task<T>> call, CancellationToken ct) =>
+        preferMac ? MacFirstAsync(call, ct) : DropletFirstAsync(call, ct);
+
+    private IAsyncEnumerable<string> RoutedStreamAsync(bool preferMac,
+        Func<IOllamaService, CancellationToken, IAsyncEnumerable<string>> call, CancellationToken ct) =>
+        preferMac ? MacFirstStreamAsync(call, ct) : DropletFirstStreamAsync(call, ct);
+
+    private async Task<T> DropletFirstAsync<T>(Func<IOllamaService, CancellationToken, Task<T>> call, CancellationToken ct)
+    {
+        try
+        {
+            return await call(secondary, ct);
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested && ex is not NotSupportedException && monitor.PrimaryUp)
+        {
+            logger.LogInformation(ex, "The AI droplet couldn't answer that request; SentinelGPT's Mac answers it");
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, monitor.PrimaryLostToken);
+            return await call(primary, linked.Token);
+        }
+    }
+
+    private async IAsyncEnumerable<string> DropletFirstStreamAsync(
+        Func<IOllamaService, CancellationToken, IAsyncEnumerable<string>> call,
+        [EnumeratorCancellation] CancellationToken ct = default)
+    {
+        var stream = call(secondary, ct).GetAsyncEnumerator(ct);
+        var yielded = false;
+        var fellBack = false;
+        try
+        {
+            while (true)
+            {
+                bool more;
+                try { more = await stream.MoveNextAsync(); }
+                catch (Exception ex) when (!ct.IsCancellationRequested && ex is not NotSupportedException && monitor.PrimaryUp)
+                {
+                    logger.LogInformation(ex, "The AI droplet couldn't answer that request; SentinelGPT's Mac answers it");
+                    if (yielded) throw new InvalidOperationException("The AI droplet stopped part-way through that answer. Ask again: the Mac answers now.", ex);
+                    fellBack = true;
+                    break;
+                }
+                if (!more) break;
+                yielded = true;
+                yield return stream.Current;
+            }
+        }
+        finally
+        {
+            try { await stream.DisposeAsync(); }
+            catch (Exception ex) when (ex is HttpRequestException or IOException or OperationCanceledException) { }
+        }
+        if (!fellBack) yield break;
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, monitor.PrimaryLostToken);
+        await foreach (var piece in call(primary, linked.Token).WithCancellation(linked.Token)) yield return piece;
+    }
 
     private async Task<T> MacFirstAsync<T>(Func<IOllamaService, CancellationToken, Task<T>> call, CancellationToken ct)
     {

@@ -19,6 +19,7 @@
 @inject IJSRuntime JS
 @inject GwsBusinessSuite.Infrastructure.Services.SentinelModelLoader ModelLoader
 @inject Microsoft.Extensions.Options.IOptions<GwsBusinessSuite.Application.Abstractions.ServerAiOptions> ServerAi
+@inject IOllamaService ServerModel
 
 @* One SentinelGPT panel for every admin page. Since 30-10-26 it's an agent: asked to do
    something, it researches, then acts through the app's own services as this user (only what
@@ -54,7 +55,7 @@
         <div class="gws-assistant-thread" @ref="_thread" aria-live="polite">
             @if (_turns.Count == 0)
             {
-                <p class="gws-assistant-intro">Ask about this page, or tell me what to do: make a to-do list, add a card to a board, draft a site page. I look things up first, then do it. Changes come with Undo; deleting and publishing wait for your Confirm. Doing things uses your Mac's model, in the Mac app; elsewhere I answer questions.</p>
+                <p class="gws-assistant-intro">Ask about this page, or tell me what to do: make a to-do list, add a card to a board, draft a site page. I look things up first, then do it. Changes come with Undo; deleting and publishing wait for your Confirm. Short answers use the AI droplet; tool-based and substantial jobs prefer the larger Mac model.</p>
             }
             @foreach (var turn in _turns)
             {
@@ -412,11 +413,13 @@
         var user = await AgentUserAsync();
         foreach (var model in await LocalCandidatesAsync(stop))
         {
-            turn.Activity = $"Thinking on your local {model}…";
+            var automaticRouting = ServerAi.Value.ServerModelOnly;
+            turn.Activity = automaticRouting ? "Choosing the best available model…" : $"Thinking on your local {model}…";
             StateHasChanged();
             try
             {
-                await RunTurnAsync(turn, user, context, _local!, model, SentinelAgentRunner.LocalRounds, $"Local · {model}", stop);
+                await RunTurnAsync(turn, user, context, _local!, model, null,
+                    automaticRouting ? $"Automatic · {model}" : $"Local · {model}", stop);
                 _localModel = model;
                 return;
             }
@@ -484,7 +487,7 @@
     }
 
     private async Task RunTurnAsync(
-        Turn turn, SentinelAgentUser user, string context, IOllamaService model, string modelName, int rounds, string source, CancellationToken stop)
+        Turn turn, SentinelAgentUser user, string context, IOllamaService model, string modelName, int? rounds, string source, CancellationToken stop)
     {
         string? advice = null;
         if (turn.DeepAnalysis)
@@ -581,7 +584,7 @@
     private async Task<IReadOnlyList<string>> LocalCandidatesAsync(CancellationToken stop)
     {
         if (DateTimeOffset.UtcNow < _localUnavailableUntil) return [];
-        _local ??= BrowserLocalOllamaService.For(JS, ServerAi.Value);
+        _local ??= BrowserLocalOllamaService.For(JS, ServerAi.Value, ServerModel);
         LocalOllamaStatus status;
         try
         {

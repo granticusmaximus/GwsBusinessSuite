@@ -21,7 +21,7 @@ public sealed record SentinelAgentRequest(
     string? PageContext,
     IOllamaService Model,
     string ModelName,
-    int MaxRounds = SentinelAgentRunner.LocalRounds,
+    int? MaxRounds = null,
     // Deep Analysis (06-11-26): other models' opinions on the request, sent by the Mac app. Read
     // as advice to weigh, never as facts or instructions, and not kept with the conversation.
     string? Advice = null,
@@ -57,7 +57,9 @@ public sealed partial class SentinelAgentRunner(IServiceScopeFactory scopes, Tim
     // Room for a real multi-step job (find, read, then change). Only a local model runs the agent:
     // in the 30-10-26 live check the droplet's llama3.2 claimed a list it never made and wrote a
     // site page from nothing, so without one the panel answers on the server instead.
-    public const int LocalRounds = 8;
+    private const int EmergencyRoundCeiling = 64;
+    private const int RepeatedRoundLimit = 2;
+    private static readonly TimeSpan DirectTurnBudget = TimeSpan.FromMinutes(30);
     public const string UndoToolName = "undo_change";
     // A plan the person approves (Go) before a bigger job starts; it pauses the turn.
     public const string PlanToolName = "show_plan";
@@ -104,8 +106,20 @@ public sealed partial class SentinelAgentRunner(IServiceScopeFactory scopes, Tim
         var planRequired = false;
         var jobAsked = false;
         string? answer = null;
-        for (var round = 0; round < Math.Max(1, request.MaxRounds) && answer is null; round++)
+        var directStarted = time.GetUtcNow();
+        var previousCalls = string.Empty;
+        var repeatedRounds = 0;
+        var roundLimit = request.MaxRounds is { } requestedRounds
+            ? Math.Max(1, requestedRounds)
+            : EmergencyRoundCeiling;
+        for (var round = 0; round < roundLimit && time.GetUtcNow() - directStarted < DirectTurnBudget && answer is null; round++)
         {
+            // A direct answer starts on the smaller droplet. Once the model has needed a tool
+            // round, the request is real agent work and the Mac's larger model takes over.
+            using var computeRoute = OllamaComputeRouting.Use(
+                round == 0 && string.IsNullOrWhiteSpace(request.Advice) && string.IsNullOrWhiteSpace(request.Attachments)
+                    ? OllamaComputeRoute.PreferDroplet
+                    : OllamaComputeRoute.PreferMac);
             var response = await request.Model.ChatAsync(request.ModelName, messages, definitions, cancellationToken);
             if (response.ToolCalls.Count == 0)
             {
@@ -114,6 +128,9 @@ public sealed partial class SentinelAgentRunner(IServiceScopeFactory scopes, Tim
             }
 
             messages.Add(new OllamaChatMessage("assistant", response.Content, ToolCalls: response.ToolCalls));
+            var callSignature = string.Join('\n', response.ToolCalls.Select(call => $"{call.Name}:{call.ArgumentsJson}"));
+            repeatedRounds = string.Equals(callSignature, previousCalls, StringComparison.Ordinal) ? repeatedRounds + 1 : 0;
+            previousCalls = callSignature;
             foreach (var call in response.ToolCalls)
             {
                 var changes = actions.Count(action => action.Tool != PlanToolName && action.Status == SentinelAgentActionStatuses.Done
@@ -153,6 +170,10 @@ public sealed partial class SentinelAgentRunner(IServiceScopeFactory scopes, Tim
 
             // A bigger job: think it through, plan it in sections and carry it out (Jobs.cs).
             if (jobAsked) break;
+
+            // Repeating the same calls is not progress. Move into the saved-job pathway rather
+            // than burning compute or pretending that a round count means the task is finished.
+            if (repeatedRounds >= RepeatedRoundLimit) break;
 
             // A plan waits for Go: nothing more happens this turn.
             if (actions.Any(action => action.Tool == PlanToolName && action.AwaitingConfirm))

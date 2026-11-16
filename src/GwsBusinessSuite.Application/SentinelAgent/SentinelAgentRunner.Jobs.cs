@@ -21,14 +21,15 @@ namespace GwsBusinessSuite.Application.SentinelAgent;
 // 2. The plan is a show_plan action whose ArgumentsJson keeps the whole job (the ledger), so the
 //    job outlives the turn. Go (a plan over RoutineChangePlanThreshold steps waits for it) and
 //    "carry on" resume it from there.
-// 3. Each section runs as its own leg of up to MaxRounds rounds, with a fresh context: the goal,
+// 3. Each section runs in fresh-context legs, while each leg keeps making measurable progress:
+//    the goal,
 //    the approach, the plan with each step's state, and what earlier sections changed. That way a
 //    small local model never holds the whole job in its head. complete_step and skip_step move the
 //    ledger. An unfinished section gets another leg.
 // 4. A checking leg with only the read tools compares what was made with each step's check.
 //    Problems get one repair leg and one more check. Only then is it "Done and checked".
-// Budget: MaxLegs legs and JobBudget a turn. Past that the job stops as "Partly done" with exactly
-// what's left, and "carry on" continues it.
+// Budget: a 30-minute turn, a hard leg ceiling, and two consecutive no-progress legs. Past a
+// guard the job stops as "Partly done" with exactly what's left, and "carry on" continues it.
 public sealed partial class SentinelAgentRunner
 {
     public const string PlanJobToolName = "plan_job";
@@ -37,9 +38,9 @@ public sealed partial class SentinelAgentRunner
     public const string ContinueMessage = "Carry on with the job.";
     private const int MaxSections = 8;
     private const int MaxStepsPerSection = 10;
-    private const int MaxJobSteps = 40;
-    private const int LegsPerSection = 2;
-    private const int MaxLegs = 16;
+    private const int MaxJobSteps = 80;
+    private const int MaxNoProgressLegs = 2;
+    private const int MaxLegs = 24;
     private static readonly TimeSpan JobBudget = TimeSpan.FromMinutes(30);
     private static readonly string[] CarryOnPhrases =
         ["carry on", "continue", "keep going", "go on", "finish it", "finish the job", "carry on with the job"];
@@ -175,14 +176,19 @@ public sealed partial class SentinelAgentRunner
         var started = time.GetUtcNow();
         bool WithinBudget() => time.GetUtcNow() - started < JobBudget;
         var legs = 0;
+        var consecutiveNoProgress = 0;
         for (var index = 0; index < job.Sections.Count; index++)
         {
             var section = job.Sections[index];
-            for (var leg = 0; leg < LegsPerSection && legs < MaxLegs && WithinBudget()
-                 && section.Steps.Any(step => step.State == JobStates.Pending); leg++, legs++)
+            while (legs < MaxLegs && WithinBudget() && consecutiveNoProgress < MaxNoProgressLegs
+                   && section.Steps.Any(step => step.State == JobStates.Pending))
             {
+                var pendingBefore = section.Steps.Count(step => step.State == JobStates.Pending);
                 await onEvent(new SentinelAgentStep($"Section {index + 1} of {job.Sections.Count}: {section.Title}"));
                 await RunLegAsync(start, plan, job, LegMode.Do, index, onEvent, cancellationToken);
+                legs++;
+                var pendingAfter = section.Steps.Count(step => step.State == JobStates.Pending);
+                consecutiveNoProgress = pendingAfter < pendingBefore ? 0 : consecutiveNoProgress + 1;
             }
         }
 
@@ -235,6 +241,7 @@ public sealed partial class SentinelAgentRunner
         var messages = new List<OllamaChatMessage> { new("system", system), new("user", user.ToString()) };
         for (var attempt = 0; attempt < 2; attempt++)
         {
+            using var computeRoute = OllamaComputeRouting.Use(OllamaComputeRoute.PreferMac);
             var reply = await request.Model.ChatAsync(request.ModelName, messages, null, cancellationToken);
             if (ParseJob(reply.Content, request.Message.Trim()) is { } job) return job;
             messages.Add(new OllamaChatMessage("assistant", reply.Content));
@@ -250,8 +257,8 @@ public sealed partial class SentinelAgentRunner
         };
     }
 
-    // A leg: up to MaxRounds rounds on one section (Do), the failed steps (Repair) or the checks
-    // (Check, read tools only). Returns the model's closing words, or null when the rounds ran out.
+    // A leg continues while it makes progress on one section (Do), the failed steps (Repair) or
+    // the checks (Check, read tools only). MaxRounds is only an explicit test/diagnostic override.
     private async Task<string?> RunLegAsync(
         JobStart start, SentinelAgentAction plan, AgentJob job, LegMode mode, int? sectionIndex,
         Func<SentinelAgentEvent, Task> onEvent, CancellationToken cancellationToken)
@@ -270,12 +277,21 @@ public sealed partial class SentinelAgentRunner
         // Every change this chat has made counts as done, so a leg can't make it again (that same run
         // re-created all five lists in each leg).
         var done = await DoneChangeKeysAsync(start, cancellationToken);
-        for (var round = 0; round < Math.Max(1, request.MaxRounds); round++)
+        var roundLimit = request.MaxRounds is { } requestedRounds
+            ? Math.Max(1, requestedRounds)
+            : EmergencyRoundCeiling;
+        var previousCalls = string.Empty;
+        var repeatedRounds = 0;
+        for (var round = 0; round < roundLimit; round++)
         {
+            using var computeRoute = OllamaComputeRouting.Use(OllamaComputeRoute.PreferMac);
             var response = await request.Model.ChatAsync(request.ModelName, messages, definitions, cancellationToken);
             if (response.ToolCalls.Count == 0) return response.Content.Trim();
 
             messages.Add(new OllamaChatMessage("assistant", response.Content, ToolCalls: response.ToolCalls));
+            var callSignature = string.Join('\n', response.ToolCalls.Select(call => $"{call.Name}:{call.ArgumentsJson}"));
+            repeatedRounds = string.Equals(callSignature, previousCalls, StringComparison.Ordinal) ? repeatedRounds + 1 : 0;
+            previousCalls = callSignature;
             foreach (var call in response.ToolCalls)
             {
                 string result;
@@ -310,6 +326,7 @@ public sealed partial class SentinelAgentRunner
             // The section (or the repair) is finished: no need for more rounds.
             if (mode == LegMode.Do && sectionIndex is { } index && job.Sections[index].Steps.All(step => step.State != JobStates.Pending)) return null;
             if (mode == LegMode.Repair && job.Steps.All(step => step.State != JobStates.Failed)) return null;
+            if (repeatedRounds >= RepeatedRoundLimit) return null;
         }
         return null;
     }

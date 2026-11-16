@@ -84,6 +84,12 @@ without the app, based on the user's role, and get the entirety of the task comp
 - Carry on automatically between legs (proposed), or ask after each one?
 
 ## Progress
+- [x] **Adaptive continuation, 15-11-26.** The ordinary eight-round completion boundary is gone.
+  The direct path and section legs continue while work progresses. Repeated identical calls move
+  the request into the saved-job path; two no-progress legs save an honest partial result. A
+  30-minute budget, 24-leg job guard, and high 64-round emergency circuit breaker prevent runaway
+  model loops without defining normal completion. Small `MaxRounds` values remain only as explicit
+  test/diagnostic overrides. Plans may now contain up to 80 steps.
 - [x] **1+2 built 05-11-26.** Grant asked SentinelGPT to "think about what the task is asking for,
   deliberate, consider an appropriate plan, execute the steps ... break it into sections ... build
   the pathway". `SentinelAgentRunner.Jobs.cs`:

@@ -20,6 +20,7 @@
 @inject ILogger<ArticleEditorDetail> Logger
 @inject IJSRuntime JS
 @inject Microsoft.Extensions.Options.IOptions<ServerAiOptions> ServerAi
+@inject IOllamaService ServerModel
 
 <PageTitle>@(CurrentArticle?.Title ?? "Article Editor")</PageTitle>
 
@@ -764,17 +765,9 @@ else
                 RequestedModifications = ReviseWithAiNotes,
                 PerformedBy = "article-editor-ui"
             };
-            // Resource-constrained server modes: the revision is written by this computer's Ollama.
-            if (ServerAi.Value.UsesLocalCompute)
-            {
-                _localModels ??= BrowserLocalOllamaService.For(JS, ServerAi.Value);
-                await _localModels.EnsureReachableAsync();
-                await ContentStudioService.RequestRevisionAsync(revision, _localModels);
-            }
-            else
-            {
-                await ContentStudioService.RequestRevisionAsync(revision);
-            }
+            _localModels ??= BrowserLocalOllamaService.For(JS, ServerAi.Value, ServerModel);
+            await _localModels.EnsureReachableAsync();
+            await ContentStudioService.RequestRevisionAsync(revision, _localModels);
 
             await ContentStudioService.PublishDraftToSiteAsync(new DraftPublishRequest
             {

@@ -1141,6 +1141,7 @@ public sealed class SentinelAgentTests
             _ => Say(PlanJson(("Lists", ["Make list X", "Make list Y"]))),
             _ => Calls(("create_todo_list", new { title = "X" }), (SentinelAgentRunner.CompleteStepToolName, new { step = 1, result = "made X" })),
             _ => Say("I'll stop there."),
+            _ => Say("I still can't continue."),
             _ => Say(AllRight));
         var partly = await harness.Runner.RunAsync(new SentinelAgentRequest(chat, Admin, "Make lists X and Y", null, first, "test", MaxRounds: 1),
             _ => Task.CompletedTask, default);

@@ -17,6 +17,7 @@
 @inject NavigationManager Navigation
 @inject ILogger<ContentStudioDraft> Logger
 @inject Microsoft.Extensions.Options.IOptions<ServerAiOptions> ServerAi
+@inject IOllamaService ServerModel
 
 <PageTitle>Content Studio Draft</PageTitle>
 
@@ -333,7 +334,7 @@ else
 
         try
         {
-            _localModels ??= BrowserLocalOllamaService.For(JS, ServerAi.Value);
+            _localModels ??= BrowserLocalOllamaService.For(JS, ServerAi.Value, ServerModel);
             var status = await _localModels.ProbeAsync();
             if (status.IsReachable)
             {
@@ -508,7 +509,7 @@ else
         await RunWorkflowAction(
             async () =>
             {
-                _localModels ??= BrowserLocalOllamaService.For(JS, ServerAi.Value);
+                _localModels ??= BrowserLocalOllamaService.For(JS, ServerAi.Value, ServerModel);
                 await _localModels.EnsureReachableAsync();
                 return await ContentStudioService.RequestRevisionAsync(request, _localModels);
             },
