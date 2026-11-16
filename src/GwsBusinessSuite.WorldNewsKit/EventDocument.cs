@@ -40,6 +40,10 @@ public static class EventDocument
         IReadOnlyDictionary<string, string>? english = null, IReadOnlySet<string>? readInFull = null, StoryChanges? changes = null,
         IReadOnlyList<ArticleEdit>? edits = null, string? primarySource = null, string? factCheckVerdict = null, DateTimeOffset? now = null)
     {
+        if (english is { Count: > 0 })
+            articles = articles.Select(article => article.English is null && english.TryGetValue(article.Id, out var headline)
+                ? article with { English = new ReportTranslation(article.Id, article.Title, article.Snippet, headline, null, null) }
+                : article).ToList();
         var outlets = articles.GroupBy(a => a.Outlet)
             .Select(outlet => new StoryOutlet(outlet.Key,
                 outlet.GroupBy(a => a.Language).OrderByDescending(language => language.Count()).First().Key,
@@ -90,6 +94,8 @@ public static class EventDocument
         md.AppendLine(analysis is { Claim.Length: > 0 } ? $"**The claim:** {Inline(analysis.Claim)}" : waiting).AppendLine();
         if (analysis is { Summary.Length: > 0 }) md.AppendLine(Inline(analysis.Summary)).AppendLine();
         else if (summary is not null) md.AppendLine(Inline(summary.Text)).AppendLine().AppendLine("_A short summary from the headlines alone._").AppendLine();
+        else if (story.EnglishReportSummary is { Summary: { } reportSummary })
+            md.AppendLine(Inline(reportSummary)).AppendLine().AppendLine("_English summary of one feed report, not a multi-outlet assessment._").AppendLine();
         else md.AppendLine("_No summary yet._").AppendLine();
 
         // 2. How solid it is: what they agree on, the figures, and where they differ.
@@ -195,10 +201,17 @@ public static class EventDocument
         foreach (var report in coverage.Reports)
         {
             var a = report.Report;
-            md.AppendLine($"[{Inline(a.Title)}]({a.Url}) · {formatTime(a.SeenAt)}" +
+            md.AppendLine($"[{Inline(a.DisplayTitle)}]({a.Url}) · {formatTime(a.SeenAt)}" +
                 (report.FirstPublishedBy is { } firstBy ? $" · first published by {Inline(firstBy)}" : string.Empty)).AppendLine();
-            if (story.English.TryGetValue(a.Id, out var english)) md.AppendLine($"_In English: {Inline(english)}_").AppendLine();
-            if (a.Snippet is not null && report.FirstPublishedBy is null) md.AppendLine($"> {Inline(a.Snippet)}").AppendLine();
+            if (a.DisplayDescription is { } description) md.AppendLine($"> {Inline(description)}").AppendLine();
+            if (a.English?.Summary is { } englishSummary)
+                md.AppendLine($"**English report summary (AI-written, not independent verification):** {Inline(englishSummary)}").AppendLine();
+            else md.AppendLine("_English translation or summary pending._").AppendLine();
+            if (!HeadlineTranslator.IsEnglish(a.Language) || a.DisplayTitle != a.Title || a.DisplayDescription != a.Snippet)
+            {
+                md.AppendLine($"Original headline ({Inline(a.Language)}): {Inline(a.Title)}").AppendLine();
+                if (a.Snippet is not null) md.AppendLine($"Original feed description: {Inline(a.Snippet)}").AppendLine();
+            }
             if (report.AlsoCarriedBy.Count > 0) md.AppendLine($"Also carried by: {string.Join(", ", report.AlsoCarriedBy)}").AppendLine();
         }
     }

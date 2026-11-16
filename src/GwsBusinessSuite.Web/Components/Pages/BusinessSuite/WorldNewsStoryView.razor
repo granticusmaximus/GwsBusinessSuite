@@ -78,7 +78,10 @@ else
     <article class="story-document">
         @if (e.Headline is not null)
         {
-            <p class="story-original">Original headline: @e.Title</p>
+            <details class="story-original">
+                <summary>Original headline</summary>
+                <p>@e.Title</p>
+            </details>
         }
         <p class="story-numbers">@EventDocument.KeyNumbers(e, at => at.ToLocalGwsDateTime())</p>
         @if (_story.Trust is { } trust)
@@ -121,7 +124,7 @@ else
                             {
                                 <li>
                                     <strong>@edit.Report.Outlet</strong>, noticed @edit.At.ToLocalGwsDateTime():
-                                    <a href="@edit.Report.Url" target="_blank" rel="noopener noreferrer">@edit.Report.Title</a>
+                                    <a href="@edit.Report.Url" target="_blank" rel="noopener noreferrer">@edit.Report.DisplayTitle</a>
                                     <div class="small text-secondary">First read: @Clip(edit.First)</div>
                                     <div class="small">Now: @Clip(edit.Latest)</div>
                                 </li>
@@ -175,7 +178,7 @@ else
                         {
                             <li>
                                 Official statement from <strong>@statement.Outlet</strong>:
-                                <a href="@statement.Url" target="_blank" rel="noopener noreferrer">@statement.Title</a>
+                                <a href="@statement.Url" target="_blank" rel="noopener noreferrer">@SourceHeadline(statement.Url, statement.Title)</a>
                             </li>
                         }
                     </ul>
@@ -187,7 +190,7 @@ else
                         {
                             <li>
                                 Fact-checked by <strong>@check.Outlet</strong>@(check.Verdict is null ? "" : $" ({check.Verdict})"):
-                                <a href="@check.Url" target="_blank" rel="noopener noreferrer">@check.Title</a>
+                                <a href="@check.Url" target="_blank" rel="noopener noreferrer">@SourceHeadline(check.Url, check.Title)</a>
                             </li>
                         }
                     </ul>
@@ -235,7 +238,7 @@ else
                 @foreach (var article in _mostRead)
                 {
                     <span class="story-most-read-item">
-                        <a href="@article.Url" target="_blank" rel="noopener noreferrer">@article.Title</a>
+                        <a href="@article.Url" target="_blank" rel="noopener noreferrer">@article.DisplayTitle</a>
                         <span class="story-most-read-rank">#@article.Rank, @article.Views.ToString("N0", System.Globalization.CultureInfo.InvariantCulture) views</span>
                     </span>
                 }
@@ -360,9 +363,14 @@ else
                 <p>@summary.Text</p>
                 <p class="story-quiet">A short summary from the headlines alone.</p>
             }
+            else if (_story.EnglishReportSummary is { } reportSummary)
+            {
+                <p>@reportSummary.Summary</p>
+                <p class="story-quiet">English summary of one feed report, not a multi-outlet assessment.</p>
+            }
             else
             {
-                <p class="story-quiet">No summary yet.</p>
+                <p class="story-quiet">English summaries are pending. They are prepared in the background; reload for updates.</p>
             }
         </section>
 
@@ -651,25 +659,10 @@ else
                                     var a = report.Report;
                                     <li>
                                         <span class="story-report-time">@a.SeenAt.ToLocalGwsDateTime()</span>
-                                        @if (WebLink(a.Url) is { } href)
-                                        {
-                                            <a href="@href" target="_blank" rel="noopener noreferrer">@a.Title</a>
-                                        }
-                                        else
-                                        {
-                                            <span>@a.Title</span>
-                                        }
-                                        @if (_story.English.TryGetValue(a.Id, out var english))
-                                        {
-                                            <div class="story-english">In English: @english</div>
-                                        }
+                                        <WorldNewsReportText Report="@a" Href="@WebLink(a.Url)" />
                                         @if (report.FirstPublishedBy is { } firstBy)
                                         {
                                             <div class="story-quiet">A wire copy, first published by @firstBy.</div>
-                                        }
-                                        else if (a.Snippet is not null)
-                                        {
-                                            <blockquote>@a.Snippet</blockquote>
                                         }
                                         @if (report.AlsoCarriedBy.Count > 0)
                                         {
@@ -784,9 +777,13 @@ else
 
     private static string Clip(string text) => text.Length <= 400 ? text : text[..400] + "…";
 
+    private string SourceHeadline(string url, string original) =>
+        _story?.Sources.FirstOrDefault(source => source.Report.Url == url)?.Report.DisplayTitle ?? original;
+
     private IReadOnlyList<SummarySentence> CheckSummary(string summary) =>
         SummaryCheck.Check(summary, _story is null ? [] : _story.Sources.SelectMany(source =>
-            new[] { source.Report.Title, source.Report.Snippet, _story.English.GetValueOrDefault(source.Report.Id) }));
+            new[] { source.Report.Title, source.Report.Snippet, source.Report.English?.Headline,
+                source.Report.English?.Description, _story.English.GetValueOrDefault(source.Report.Id) }));
 
     private async Task AddToBudgetAsync()
     {

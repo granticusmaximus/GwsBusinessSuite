@@ -38,6 +38,9 @@ public sealed record StoryDocument(
     WorldArticle? LatestReport = null,
     StoryTrustSummary? Trust = null)
 {
+    public ReportTranslation? EnglishReportSummary => Sources.Select(source => source.Report)
+        .OrderByDescending(report => report.SeenAt).Select(report => report.English).FirstOrDefault(english => english?.Summary is not null);
+
     public IReadOnlyList<OutletComparison> Comparisons => Analysis is null ? [] : EventAnalyzer.Compare(Analysis);
 
     // The grid's columns: the agreed facts that name the outlets stating them.

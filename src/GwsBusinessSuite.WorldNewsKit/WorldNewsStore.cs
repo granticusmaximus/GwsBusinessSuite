@@ -144,6 +144,7 @@ public sealed partial class WorldNewsStore
         // "written before comparisons", so a current event is asked once more; '' means none was given.
         columns.CommandText = "SELECT COUNT(*) FROM pragma_table_info('summaries') WHERE name = 'comparison'";
         if ((long)columns.ExecuteScalar()! == 0) Execute(connection, "ALTER TABLE summaries ADD COLUMN comparison TEXT");
+        EnsureEnglishSchema(connection);
         // A new or small database gets the covering index straight away; building it over a big one
         // takes minutes, so that's EnsureCoveringIndex's job, off the startup path.
         columns.CommandText = $"SELECT COUNT(*) FROM (SELECT 1 FROM articles LIMIT {SmallArticleTable + 1})";
@@ -153,6 +154,7 @@ public sealed partial class WorldNewsStore
         // EnsureFullTextIndex, off the startup path, and a small one's straight away.
         Execute(connection, FullTextSchema);
         if (!IsFullTextBuilt(connection) && (long)columns.ExecuteScalar()! <= SmallArticleTable) BuildFullText(connection);
+        EnsureEnglishFullText(connection);
     }
 
     private const string FullTextSchema = """
@@ -182,9 +184,13 @@ public sealed partial class WorldNewsStore
     public bool EnsureFullTextIndex()
     {
         using var connection = Open();
-        if (IsFullTextBuilt(connection)) return false;
-        BuildFullText(connection);
-        return true;
+        var built = false;
+        if (!IsFullTextBuilt(connection))
+        {
+            BuildFullText(connection);
+            built = true;
+        }
+        return EnsureEnglishFullText(connection) || built;
     }
 
     public bool FullTextReady()
@@ -910,11 +916,15 @@ public sealed partial class WorldNewsStore
         {
             if (FullTextQuery.From(text) is { } fullText)
             {
-                conditions.Add("rowid IN (SELECT rowid FROM articles_fts WHERE articles_fts MATCH $fts)");
+                conditions.Add($"(rowid IN (SELECT rowid FROM articles_fts WHERE articles_fts MATCH $fts) OR {EnglishTextMatch("articles", "$fts", true)})");
                 parameters.Add(("$fts", fullText));
             }
         }
-        else AddTextFilter("title || ' ' || COALESCE(snippet, '')", text, "$text");
+        else if (!string.IsNullOrWhiteSpace(text))
+        {
+            conditions.Add($"(instr(lower(title || ' ' || COALESCE(snippet, '')), lower($text)) > 0 OR {EnglishTextMatch("articles", "$text", false)})");
+            parameters.Add(("$text", text.Trim()));
+        }
         AddTextFilter("country", country, "$country");
         AddTextFilter("language", language, "$language");
         AddTextFilter("outlet", outlet, "$outlet");
@@ -1254,8 +1264,7 @@ public sealed partial class WorldNewsStore
         {
             var names = rows.Select((_, i) => $"$s{i}").ToList();
             command.CommandText = $"""
-                SELECT situation_id, COALESCE((SELECT headline FROM summaries WHERE event_id = e.id AND headline IS NOT NULL
-                       ORDER BY version DESC LIMIT 1), title), title_language, article_count, last_seen
+                SELECT situation_id, COALESCE({EnglishEventHeadline}, title), title_language, article_count, last_seen
                 FROM events e WHERE situation_id IN ({string.Join(", ", names)}){(at is null ? "" : " AND first_seen <= $at")}
                 """;
             for (var i = 0; i < rows.Count; i++) command.Parameters.AddWithValue(names[i], rows[i].Id);
@@ -1304,12 +1313,12 @@ public sealed partial class WorldNewsStore
         string match;
         if (FullTextReady() && FullTextQuery.From(text) is { } fullText)
         {
-            match = "rowid IN (SELECT rowid FROM articles_fts WHERE articles_fts MATCH $q)";
+            match = $"(rowid IN (SELECT rowid FROM articles_fts WHERE articles_fts MATCH $q) OR {EnglishTextMatch("articles", "$q", true)})";
             command.Parameters.AddWithValue("$q", fullText);
         }
         else
         {
-            match = "instr(lower(title || ' ' || COALESCE(snippet, '')), lower($q)) > 0";
+            match = $"(instr(lower(title || ' ' || COALESCE(snippet, '')), lower($q)) > 0 OR {EnglishTextMatch("articles", "$q", false)})";
             command.Parameters.AddWithValue("$q", text.Trim());
         }
         command.CommandText = $"""
@@ -1701,11 +1710,11 @@ public sealed partial class WorldNewsStore
     private static Dictionary<string, (EventOverview Overview, string? SituationId)> ReadWorldEvents(SqliteConnection connection, DateTimeOffset since)
     {
         using var command = connection.CreateCommand();
-        command.CommandText = """
-            WITH chosen AS MATERIALIZED (SELECT id, title, article_count, first_seen, last_seen, situation_id FROM events WHERE last_seen >= $since)
+        command.CommandText = $"""
+            WITH chosen AS MATERIALIZED (SELECT id, title, title_language, english_article_id, article_count, first_seen, last_seen, situation_id FROM events WHERE last_seen >= $since)
             SELECT e.id, e.title, e.article_count, GROUP_CONCAT(DISTINCT a.country), GROUP_CONCAT(DISTINCT a.language),
                    e.first_seen, e.last_seen,
-                   (SELECT headline FROM summaries WHERE event_id = e.id AND headline IS NOT NULL ORDER BY version DESC LIMIT 1),
+                   {EnglishEventHeadline},
                    e.situation_id
             FROM chosen e JOIN articles a ON a.event_id = e.id
             GROUP BY e.id
@@ -1909,7 +1918,11 @@ public sealed partial class WorldNewsStore
         {
             using var connection = Open();
             using var command = connection.CreateCommand();
-            command.CommandText = $"SELECT article_id, english FROM article_translations WHERE article_id IN ({string.Join(',', batch.Select((_, i) => $"$id{i}"))})";
+            command.CommandText = $"""
+                SELECT t.article_id, t.english FROM article_translations t LEFT JOIN articles a ON a.id = t.article_id
+                WHERE t.english <> '' AND (t.source_title IS NULL OR ({CurrentEnglish}))
+                  AND t.article_id IN ({string.Join(',', batch.Select((_, i) => $"$id{i}"))})
+                """;
             for (var i = 0; i < batch.Length; i++) command.Parameters.AddWithValue($"$id{i}", batch[i]);
             using var reader = command.ExecuteReader();
             while (reader.Read()) found[reader.GetString(0)] = reader.GetString(1);
@@ -1922,7 +1935,7 @@ public sealed partial class WorldNewsStore
     {
         using var connection = Open();
         using var command = connection.CreateCommand();
-        command.CommandText = "SELECT t.article_id, t.english FROM article_translations t JOIN articles a ON a.id = t.article_id WHERE a.event_id = $event";
+        command.CommandText = $"SELECT t.article_id, t.english FROM article_translations t JOIN articles a ON a.id = t.article_id WHERE a.event_id = $event AND t.english <> '' AND (t.source_title IS NULL OR ({CurrentEnglish}))";
         command.Parameters.AddWithValue("$event", eventId);
         using var reader = command.ExecuteReader();
         var found = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -1952,11 +1965,15 @@ public sealed partial class WorldNewsStore
         {
             using var command = connection.CreateCommand();
             command.Transaction = transaction;
-            command.CommandText = "INSERT OR REPLACE INTO article_translations (article_id, english, created_at) VALUES ($id, $text, $at)";
+            command.CommandText = """
+                INSERT INTO article_translations (article_id, english, created_at) VALUES ($id, $text, $at)
+                ON CONFLICT(article_id) DO UPDATE SET english = excluded.english, created_at = excluded.created_at
+                """;
             command.Parameters.AddWithValue("$id", id);
             command.Parameters.AddWithValue("$text", text);
             command.Parameters.AddWithValue("$at", at.ToUnixTimeSeconds());
             command.ExecuteNonQuery();
+            UpdateEnglishEvent(connection, transaction, id);
         }
         transaction.Commit();
     }
@@ -2262,10 +2279,10 @@ public sealed partial class WorldNewsStore
         // The events are picked first, so `where` uses their index (last_seen, situation_id). Joined
         // straight to articles, SQLite walked every event by id to group them.
         command.CommandText = $"""
-            WITH chosen AS MATERIALIZED (SELECT e.id, e.title, e.article_count, e.first_seen, e.last_seen FROM events e {where})
+            WITH chosen AS MATERIALIZED (SELECT e.id, e.title, e.title_language, e.english_article_id, e.article_count, e.first_seen, e.last_seen FROM events e {where})
             SELECT e.id, e.title, e.article_count, COUNT(DISTINCT a.outlet),
                    GROUP_CONCAT(DISTINCT a.country), GROUP_CONCAT(DISTINCT a.language), e.first_seen, e.last_seen,
-                   (SELECT headline FROM summaries WHERE event_id = e.id AND headline IS NOT NULL ORDER BY version DESC LIMIT 1)
+                   {EnglishEventHeadline}
             FROM chosen e JOIN articles a ON a.event_id = e.id
             GROUP BY e.id {having}
             ORDER BY COUNT(DISTINCT a.outlet) DESC, e.last_seen DESC LIMIT $limit
@@ -2292,7 +2309,7 @@ public sealed partial class WorldNewsStore
         using var reader = command.ExecuteReader();
         var articles = new List<WorldArticle>();
         while (reader.Read()) articles.Add(ReadArticle(reader));
-        return articles;
+        return WithEnglish(articles);
     }
 
     private static WorldArticle ReadArticle(SqliteDataReader r) => new(

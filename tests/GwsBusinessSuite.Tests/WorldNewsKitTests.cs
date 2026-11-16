@@ -905,7 +905,8 @@ public sealed class WorldNewsKitTests : IDisposable
         md.Should().Contain("## What changed since you last read (20-10-26 13:00)\n\n- 2 new outlets: NHK, Reuters")
             .And.Contain("- The claim changed. It was: Floods killed 64 in Istanbul.")
             .And.Contain("- Now agreed: Officials blame a dam breach.")
-            .And.Contain("_In English: Floods in Istanbul_");
+            .And.Contain($"[Floods in Istanbul]({nhk.Url})")
+            .And.Contain("Original headline (Japanese): イスタンブールで洪水");
         md.IndexOf("## What changed", StringComparison.Ordinal).Should().BeLessThan(md.IndexOf("## The story", StringComparison.Ordinal));
     }
 
@@ -1004,6 +1005,137 @@ public sealed class WorldNewsKitTests : IDisposable
         HeadlineTranslator.Parse("<think>hm</think>1. Flood update\n2) \"Floods in Istanbul\"\n3. イスタンブールで洪水\n9. Out of range", pending)
             .Should().BeEquivalentTo(new Dictionary<string, string> { ["ja2"] = "Flood update", ["es"] = "Floods in Istanbul" },
                 "an untranslated line and a number out of range are left out");
+    }
+
+    [Fact]
+    public void ReportTranslator_ShouldKeepReportIdentityAndOriginals_WithEnglishDescriptionsAndSummaries()
+    {
+        var foreign = Article("de", "Hochwasser in Berlin", "German", Now) with { Snippet = "Schulen bleiben geschlossen." };
+        var native = Article("en", "Roads reopen", "English", Now);
+        var parsed = HeadlineTranslator.ParseReports("""
+            ```json
+            [
+              {"number":2,"headline":"Roads reopen","description":null,"summary":"The headline reports that roads have reopened."},
+              {"number":1,"headline":"Flooding in Berlin","description":"Schools remain closed.","summary":"Flooding affects Berlin and schools remain closed."}
+            ]
+            ```
+            """, [foreign, native]);
+
+        parsed.Select(report => report.ArticleId).Should().Equal("de", "en");
+        parsed[0].SourceTitle.Should().Be(foreign.Title);
+        parsed[0].SourceSnippet.Should().Be(foreign.Snippet);
+        parsed[0].Description.Should().Be("Schools remain closed.");
+        (foreign with { English = parsed[0] }).DisplayTitle.Should().Be("Flooding in Berlin");
+        foreign.Title.Should().Be("Hochwasser in Berlin");
+        foreign.DisplayTitle.Should().Be("English translation pending");
+        foreign.DisplayDescription.Should().BeNull();
+        native.DisplayTitle.Should().Be("Roads reopen");
+    }
+
+    [Theory]
+    [InlineData("[]")]
+    [InlineData("""[{"number":"1","headline":"Flood","summary":"Flooding affects the city."}]""")]
+    [InlineData("""[{"number":2,"headline":"Flood","summary":"Flooding affects the city."}]""")]
+    [InlineData("""[{"number":1,"headline":"Flood","summary":"Flooding affects the city."}]""")]
+    [InlineData("""[{"number":1,"headline":"Flood","description":"Schools close.","summary":"Flooding affects the city."},{"number":1,"headline":"Flood","description":"Schools close.","summary":"Flooding affects the city."}]""")]
+    public void ReportTranslator_ShouldRejectMissingDescriptionsAndUnreliableNumbering(string response)
+    {
+        var report = Article("de", "Hochwasser in Berlin", "German", Now) with { Snippet = "Schulen bleiben geschlossen." };
+        var parse = () => HeadlineTranslator.ParseReports(response, [report]);
+        parse.Should().Throw<JsonException>();
+    }
+
+    [Fact]
+    public void EnglishBacklog_ShouldIncludeUngroupedEnglishAndArchivedReports_AndPersistRetries()
+    {
+        var store = new WorldNewsStore(_dbPath);
+        var old = Article("old", "Hochwasser in Berlin", "German", Now.AddDays(-20));
+        var recent = Article("recent", "Roads reopen", "English", Now);
+        store.AddArticles([old, recent]);
+        store.ReportsDueEnglish(Now, 8).Select(report => report.Id).Should().Equal("recent", "old");
+        store.ReportsDueEnglish(Now, 1, oldestFirst: true).Single().Id.Should().Be("old");
+        store.DeferEnglishReports(["recent"], Now.AddMinutes(15));
+
+        var reopened = new WorldNewsStore(_dbPath);
+        reopened.ReportsDueEnglish(Now, 8).Single().Id.Should().Be("old");
+        reopened.ReportsDueEnglish(Now.AddMinutes(15), 8).Select(report => report.Id).Should().Contain("recent");
+        reopened.Translations(["recent"]).Should().BeEmpty("retry placeholders are not English headlines");
+    }
+
+    [Fact]
+    public void EnglishCache_ShouldPreserveOriginalsAndLegacyWrites_AndSearchEnglishWithoutReplacingOriginalFts()
+    {
+        var store = new WorldNewsStore(_dbPath);
+        var report = Article("de", "Hochwasser in Berlin", "German", Now) with { Snippet = "Schulen bleiben geschlossen." };
+        var seed = Event("event", report.Title, [1f, 0f], 1);
+        seed.TitleLanguage = "German";
+        store.AddArticles([report]);
+        store.SaveClustering(new ClusterResult([(report.Id, seed.Id)], [seed], 1));
+        var english = new ReportTranslation(report.Id, report.Title, report.Snippet, "Flooding in Berlin",
+            "Schools remain closed.", "Evacuation centres have opened as flooding affects Berlin.");
+        store.SaveTranslations(new Dictionary<string, string> { [report.Id] = english.Headline }, Now);
+        store.RecentReports(Now.AddDays(-1)).Single().DisplayTitle.Should().Be(english.Headline);
+        store.ReportsDueEnglish(Now, 8).Single().Id.Should().Be(report.Id, "legacy headline-only translations still need descriptions and summaries");
+        store.SaveEnglishReports([english], Now).Should().Be(1);
+        store.SaveTranslations(new Dictionary<string, string> { [report.Id] = english.Headline }, Now.AddSeconds(1));
+
+        var reopened = new WorldNewsStore(_dbPath);
+        var saved = reopened.RecentReports(Now.AddDays(-1)).Single();
+        saved.Title.Should().Be(report.Title);
+        saved.Snippet.Should().Be(report.Snippet);
+        saved.English.Should().Be(english);
+        reopened.ReportsDueEnglish(Now, 8).Should().BeEmpty();
+        reopened.Event(seed.Id)!.Headline.Should().Be(english.Headline);
+        reopened.World(Now.AddDays(-1)).BiggestStories.Single().Event.Headline.Should().Be(english.Headline);
+        reopened.RecentReports(Now.AddDays(-1), text: "evacuation").Single().Id.Should().Be(report.Id);
+        reopened.RecentReports(Now.AddDays(-1), text: "Hochwasser").Single().Id.Should().Be(report.Id);
+        reopened.EventsMatchingText("evacuation", Now.AddDays(-1), 10).Single().EventId.Should().Be(seed.Id);
+    }
+
+    [Fact]
+    public void EnglishHeadlines_ShouldFollowLaterGrouping_IntoSituationsAndPublicLiveCoverage()
+    {
+        var store = new WorldNewsStore(_dbPath);
+        var first = Article("first", "Hochwasser in Berlin", "German", Now);
+        var second = Article("second", "Flusspegel steigen in Berlin", "German", Now);
+        store.AddArticles([first, second]);
+        store.SaveEnglishReports([
+            new(first.Id, first.Title, null, "Flooding in Berlin", null, "The report describes flooding in Berlin."),
+            new(second.Id, second.Title, null, "River levels rise in Berlin", null, "The report describes rising river levels in Berlin.")
+        ], Now);
+        var events = new[] { Event("first-event", first.Title, [1f, 0f], 1), Event("second-event", second.Title, [1f, 0f], 1) };
+        foreach (var e in events) e.TitleLanguage = "German";
+        store.SaveClustering(new ClusterResult([(first.Id, events[0].Id), (second.Id, events[1].Id)], events, 2));
+        var situation = new NewsSituation { Id = "berlin", Sum = [2f, 0f], LastSeen = Now };
+        store.SaveLinks(events.Select(e => new SituationLink(e.Id, situation)).ToList());
+        store.AddLiveUpdate(events[0].Id, "editor", "Public coverage has started.", "unconfirmed", Now);
+
+        store.Event(events[0].Id)!.Headline.Should().Be("Flooding in Berlin");
+        store.Situation(situation.Id)!.Title.Should().BeOneOf("Flooding in Berlin", "River levels rise in Berlin");
+        store.PublicLiveStories(Now).Single().Title.Should().Be("Flooding in Berlin");
+    }
+
+    [Fact]
+    public void EnglishCache_ShouldRejectChangedSourceVersions_AndNeverSearchStaleEnglish()
+    {
+        var store = new WorldNewsStore(_dbPath);
+        var report = Article("de", "Hochwasser in Berlin", "German", Now);
+        store.AddArticles([report]);
+        var english = new ReportTranslation(report.Id, report.Title, null, "Flooding in Berlin", null,
+            "Evacuation centres have opened in Berlin.");
+        store.SaveEnglishReports([english], Now).Should().Be(1);
+        using (var connection = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={_dbPath}"))
+        {
+            connection.Open();
+            using var command = connection.CreateCommand();
+            command.CommandText = "UPDATE articles SET title = 'Wasserstand sinkt' WHERE id = $id";
+            command.Parameters.AddWithValue("$id", report.Id);
+            command.ExecuteNonQuery();
+        }
+        store.SaveEnglishReports([english], Now.AddMinutes(1)).Should().Be(0);
+        store.RecentReports(Now.AddDays(-1)).Single().English.Should().BeNull();
+        store.ReportsDueEnglish(Now, 8).Single().Id.Should().Be(report.Id);
+        store.RecentReports(Now.AddDays(-1), text: "evacuation").Should().BeEmpty();
     }
 
     [Fact]

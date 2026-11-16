@@ -1,0 +1,36 @@
+@using GwsBusinessSuite.WorldNewsKit
+
+@if (Href is { } href)
+{
+    <a class="news-report-title" href="@href" target="_blank" rel="noopener noreferrer">@Report.DisplayTitle</a>
+}
+else
+{
+    <span class="news-report-title">@Report.DisplayTitle</span>
+}
+@if (Report.DisplayDescription is { Length: > 0 } description)
+{
+    <p class="news-report-description">@description</p>
+}
+@if (Report.English?.Summary is { } summary)
+{
+    <p class="news-report-summary"><strong>English summary:</strong> @summary</p>
+    <p class="news-report-note">AI-written from this report's headline and any feed description, not independent verification.</p>
+}
+else
+{
+    <p class="news-report-note">English translation or summary pending. Processing continues in the background; reload for updates.</p>
+}
+<details class="news-report-original">
+    <summary>Original (@Report.Language)</summary>
+    <p>@Report.Title</p>
+    @if (Report.Snippet is { Length: > 0 } original)
+    {
+        <p>@original</p>
+    }
+</details>
+
+@code {
+    [Parameter, EditorRequired] public WorldArticle Report { get; set; } = default!;
+    [Parameter] public string? Href { get; set; }
+}

@@ -1,0 +1,26 @@
+.news-report-title {
+    display: block;
+    font-weight: 650;
+    overflow-wrap: anywhere;
+}
+
+.news-report-description,
+.news-report-summary {
+    margin: .5rem 0 0;
+}
+
+.news-report-note,
+.news-report-original {
+    margin-top: .5rem;
+    color: var(--bs-secondary-color);
+    font-size: .85rem;
+}
+
+.news-report-original summary {
+    cursor: pointer;
+}
+
+.news-report-original p {
+    margin: .5rem 0 0;
+    overflow-wrap: anywhere;
+}

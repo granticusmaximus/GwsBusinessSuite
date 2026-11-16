@@ -164,4 +164,59 @@ Implementation handoff:
   newsroom/service regressions, check anonymous/held/error routes and editor interaction in a
   browser, then run `scripts/verify-release.sh`.
 
-Next planned World News unit: N11 embargo/hold management UI. N12-N15 and B10 remain.
+N11 embargo/hold management UI is paused for the English-first priority below. N12-N15 and
+the other B10 reading items remain.
+
+## Priority change: English-first collected news
+
+Grant paused N11 before any hold-management edits and requested English for incoming and
+retained news: headlines, feed descriptions and English summaries. Preserve original source
+text; external publisher pages are outside the app's control.
+
+- [x] Extend the existing translation cache/translator to keep English headlines, short feed
+  descriptions and a concise report summary, tied to the source version.
+- [x] Process bounded batches automatically, including ungrouped reports and retained backlog.
+  Use the existing AI service/background workload scheduling, with retry delays and an
+  explicit waiting/failure status. Never send private desk material to the model.
+- [x] Make collected reports English-first across browsing, story coverage and exports;
+  preserve originals behind an explicit Original control. Reuse English report headlines for
+  grouped views while broader English story summaries catch up.
+- [x] Extend existing English story summaries to retained/single-outlet events without
+  changing trust labels, alert corroboration or grouping inputs.
+- [x] Add regression sources and update guides. No tests/builds/browser/release gate here.
+- [ ] Validate on an approved Docker-capable machine. Source implementation is complete;
+  compilation, model behavior, browser layout, query timing and release readiness are unverified.
+
+Translations and summaries are generated asynchronously, not guaranteed immediately.
+Pending/failed work must be visible rather than mislabeled as translated.
+
+### Progress / handoff
+
+- Extended the existing `article_translations` cache rather than introducing a provider or
+  parallel translation service. Added source-version checks, durable retry times and a
+  separate external-content FTS index; original source text and its FTS index are unchanged.
+- Added an event-to-English-report reference, populated for legacy cache entries and on
+  later grouping, so world/event projections use indexed single-report lookups. A partial
+  pending-article index is built off web startup by the English worker, so completed archives
+  are not repeatedly scanned. Source edits requeue their report.
+- The existing hosted news worker now has an independent English loop: at most eight reports
+  per call, six newest/two oldest, three-minute timeout, 15-minute retry deferral, background
+  AI priority and cooperative interactive cancellation. No model means quiet waiting.
+- English source text appears in Reports, story coverage, story documents, grouped views,
+  search-source titles and the Overwatch source panel. Originals remain explicit secondary
+  content. External non-collected search previews, publisher pages and historical edit
+  evidence are not translated; private/manual desk records are not sent to AI.
+- A single-report English summary is labeled as such when used before a full story summary.
+  Existing story summaries now consider 30 retained days and one-outlet events, still within
+  their existing per-read budget. Trust/corroboration/publication rules are unchanged.
+- Added parser/store/worker regression sources for identity, missing fields, legacy cache,
+  retries/restart persistence, old/new fairness, FTS, stale responses, later grouping, world
+  projections and public live headlines. None executed.
+- Updated the ignored local user guide, including capacity/storage monitoring and rollback:
+  older headline-only writers require removal of the derived English FTS objects before use.
+- Source/call-site and Git patch-whitespace inspection only. No build, test, browser,
+  release gate, live AI generation, commit, push or deployment performed by this assistant.
+- Before release: zero-warning compile; focused World News parser/store/worker regressions;
+  model output checks with several source languages and missing descriptions; a large-store
+  query/catch-up measurement; original-text/pending/mobile/Overwatch browser checks; and the
+  required release verification. Check upgrade and rollback on a copied database first.

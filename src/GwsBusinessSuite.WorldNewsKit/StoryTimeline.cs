@@ -28,7 +28,7 @@ public static class StoryTimeline
         var ordered = reports.OrderBy(r => r.SeenAt).ToList();
         var news = ordered.Where(r => !OfficialStatements.IsOfficial(r.Outlet) && !FactChecks.IsFactChecker(r.Outlet)).ToList();
         if (news.FirstOrDefault() is { } first)
-            entries.Add(new(first.SeenAt, Report, $"First report: {first.Outlet}, \"{first.Title}\"", first.Url));
+            entries.Add(new(first.SeenAt, Report, $"First report: {first.Outlet}, \"{first.DisplayTitle}\"", first.Url));
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         if (news.FirstOrDefault() is { } f) seen.Add(f.Outlet);
         foreach (var hour in news.Skip(1).GroupBy(r => new DateTimeOffset(r.SeenAt.UtcDateTime.Date.AddHours(r.SeenAt.UtcDateTime.Hour), TimeSpan.Zero)))
@@ -39,9 +39,9 @@ public static class StoryTimeline
             entries.Add(new(hour.Min(r => r.SeenAt), Outlets, joined.Count == 1 ? $"{names} reported it" : $"{joined.Count} more outlets: {names}"));
         }
         foreach (var r in ordered.Where(r => OfficialStatements.IsOfficial(r.Outlet)))
-            entries.Add(new(r.SeenAt, Official, $"Official statement, {r.Outlet}: \"{r.Title}\"", r.Url));
+            entries.Add(new(r.SeenAt, Official, $"Official statement, {r.Outlet}: \"{r.DisplayTitle}\"", r.Url));
         foreach (var r in ordered.Where(r => FactChecks.IsFactChecker(r.Outlet)))
-            entries.Add(new(r.SeenAt, FactCheck, $"Fact-check, {r.Outlet}" + (FactChecks.VerdictOf(r.Title) is { } verdict ? $" ({verdict})" : string.Empty) + $": \"{r.Title}\"", r.Url));
+            entries.Add(new(r.SeenAt, FactCheck, $"Fact-check, {r.Outlet}" + (FactChecks.VerdictOf(r.Title) is { } verdict ? $" ({verdict})" : string.Empty) + $": \"{r.DisplayTitle}\"", r.Url));
         string? level = null;
         foreach (var snapshot in (labels ?? []).OrderBy(s => s.TakenAt))
         {
@@ -59,7 +59,7 @@ public static class StoryTimeline
             entries.Add(new(edit.SeenAt, Edit, $"{outlet} {what}: \"{edit.Before}\" → \"{edit.After}\"", article?.Url));
         }
         foreach (var (report, at) in bodyEdits ?? [])
-            entries.Add(new(at, Edit, $"{report.Outlet} changed its article after publication: \"{report.Title}\"", report.Url));
+            entries.Add(new(at, Edit, $"{report.Outlet} changed its article after publication: \"{report.DisplayTitle}\"", report.Url));
         foreach (var (at, source, title, url) in records ?? [])
             entries.Add(new(at, Record, $"{source}: {title}", url.StartsWith("http", StringComparison.Ordinal) ? url : null));
         return entries.OrderBy(e => e.At).ThenBy(e => e.Kind == Report ? 0 : 1).ToList();

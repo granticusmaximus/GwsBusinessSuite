@@ -1,4 +1,6 @@
+using System.Text.Json;
 using FluentAssertions;
+using GwsBusinessSuite.Application.Abstractions;
 using GwsBusinessSuite.Application.ContentStudio;
 using GwsBusinessSuite.Infrastructure.Services;
 using GwsBusinessSuite.WorldNewsKit;
@@ -87,14 +89,51 @@ public sealed class WorldNewsEmbedRelayTests : IDisposable
         news.RelayActive(DateTimeOffset.UtcNow).Should().BeFalse();
     }
 
-    private WorldNewsService NewService(Dictionary<string, string?>? settings = null)
+    [Fact]
+    public async Task EnglishPass_ShouldProcessBoundedUngroupedReports_WithoutOpeningAnAnalysis()
+    {
+        var model = new EnglishAi();
+        using var news = NewService(ollama: model);
+        var reports = Enumerable.Range(0, 12).Select(i =>
+            Article($"report-{i}", $"City roads reopen after flooding {i}") with
+            { SeenAt = DateTimeOffset.UtcNow.AddDays(-i) }).ToArray();
+        news.Store.AddArticles(reports);
+
+        (await news.ProcessEnglishAsync(CancellationToken.None)).Should().BeTrue();
+
+        var processed = news.Store.RecentReports(DateTimeOffset.UtcNow.AddDays(-30))
+            .Where(report => report.English?.Summary is not null).ToList();
+        processed.Should().HaveCount(HeadlineTranslator.ReportsPerCall);
+        processed.Select(report => report.Id).Should().Contain(["report-0", "report-1", "report-10", "report-11"],
+            "each pass serves incoming reports and the retained backlog");
+        news.Store.TopEvents(DateTimeOffset.UtcNow.AddDays(-30), 10).Should().BeEmpty("translation does not require or fabricate a grouped event");
+    }
+
+    [Fact]
+    public async Task EnglishPass_ShouldWaitForUnavailableAi_WithoutMarkingReportsTranslatedOrHotLooping()
+    {
+        var model = new EnglishAi { Available = false };
+        using var news = NewService(ollama: model);
+        news.Store.AddArticles([Article("waiting", "City roads reopen after flooding")]);
+
+        (await news.ProcessEnglishAsync(CancellationToken.None)).Should().BeFalse();
+        news.EnglishStatus.Should().Contain("waiting");
+        news.Store.RecentReports(DateTimeOffset.UtcNow.AddDays(-1)).Single().English.Should().BeNull();
+        (await news.ProcessEnglishAsync(CancellationToken.None)).Should().BeFalse();
+        model.Calls.Should().Be(1, "failed reports have a durable retry delay");
+        news.Store.ReportsDueEnglish(DateTimeOffset.UtcNow.AddMinutes(16), 8).Single().Id.Should().Be("waiting");
+    }
+
+    private WorldNewsService NewService(Dictionary<string, string?>? settings = null, IOllamaService? ollama = null)
     {
         var values = new Dictionary<string, string?>(settings ?? []) { ["WorldNews:DatabasePath"] = Path.Combine(_folder, "worldnews.db") };
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(values)
             .Build();
+        var services = new ServiceCollection();
+        if (ollama is not null) services.AddSingleton(ollama);
         return new WorldNewsService(configuration, Options.Create(new ContentStudioOptions()), new PlainHttp(),
-            new ServiceCollection().BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(), NullLogger<WorldNewsService>.Instance);
+            services.BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(), NullLogger<WorldNewsService>.Instance);
     }
 
     private static WorldArticle Article(string id, string title) =>
@@ -110,5 +149,33 @@ public sealed class WorldNewsEmbedRelayTests : IDisposable
     private sealed class PlainHttp : IHttpClientFactory
     {
         public HttpClient CreateClient(string name) => new();
+    }
+
+    private sealed class EnglishAi : IOllamaService
+    {
+        public bool Available { get; init; } = true;
+        public int Calls { get; private set; }
+
+        public Task<string> GenerateAsync(string model, string systemPrompt, string userPrompt, CancellationToken ct = default)
+        {
+            ct.ThrowIfCancellationRequested();
+            Calls++;
+            if (!Available) throw new ServerAiUnavailableException("Test AI", "Wait for a model.");
+            using var input = JsonDocument.Parse(userPrompt);
+            return Task.FromResult(JsonSerializer.Serialize(input.RootElement.EnumerateArray().Select(report => new
+            {
+                number = report.GetProperty("number").GetInt32(),
+                headline = report.GetProperty("headline").GetString(),
+                description = report.GetProperty("description").GetString(),
+                summary = "English feed report summary based on the supplied headline."
+            })));
+        }
+
+        public IAsyncEnumerable<string> GenerateStreamAsync(string model, string systemPrompt, string userPrompt, CancellationToken ct = default) =>
+            throw new NotSupportedException();
+        public Task<IReadOnlyCollection<string>> ListModelsAsync(CancellationToken ct = default) => throw new NotSupportedException();
+        public Task PullModelAsync(string model, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task DeleteModelAsync(string model, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<string> GenerateImageAsync(string model, string prompt, CancellationToken ct = default) => throw new NotSupportedException();
     }
 }

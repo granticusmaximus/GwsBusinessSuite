@@ -2826,8 +2826,12 @@ window.tacticalGlobe = (function () {
     function openWorldNewsPanel(signal) {
         closeIncidentPanel();
         const sources = (signal.sources || []).map(function (source) {
+            const headline = source.englishTitle || (String(source.language).toLowerCase() === 'english'
+                ? source.title : 'English translation pending');
             return '<li><a target="_blank" rel="noopener" href="' + escapeHtml(source.url) + '">' +
-                escapeHtml(source.outlet + ': ' + source.title) + '</a></li>';
+                escapeHtml(source.outlet + ': ' + headline) + '</a>' +
+                '<details><summary>Original (' + escapeHtml(source.language) + ')</summary>' +
+                escapeHtml(source.title) + '</details></li>';
         }).join('');
         const panel = document.createElement('div');
         panel.className = 'tg-stream-panel tg-incident-panel';

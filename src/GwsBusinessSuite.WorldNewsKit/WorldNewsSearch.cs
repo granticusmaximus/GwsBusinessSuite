@@ -91,6 +91,6 @@ public static class WorldNewsSearch
             .GroupBy(a => a.Language)
             .SelectMany(group => group.Take(group.Key == "English" ? 2 : 1))
             .Take(count)
-            .Select(a => new WorldNewsSearchSource(a.Outlet, a.Title, a.Url, a.Language))
+            .Select(a => new WorldNewsSearchSource(a.Outlet, a.DisplayTitle, a.Url, a.Language))
             .ToList();
 }

@@ -73,6 +73,10 @@
     </Filters>
 </PageHeader>
 
+<p class="small text-secondary">
+    <strong>English news:</strong> @News.EnglishStatus Originals remain available under each report.
+</p>
+
 @if (_silences.Count > 0)
 {
     @* Unusual silence (World News trust plan 1.12, 13-11-26): quiet can be an internet shutdown or a blackout. *@
@@ -207,24 +211,10 @@
             @foreach (var report in _reports)
             {
                 <li>
-                    @if (ArticleHref(report) is { } href)
-                    {
-                        <a class="world-news-archive-report" href="@href" target="_blank" rel="noopener noreferrer">
-                            <span class="world-news-report-title">@report.Title</span>
-                            <span class="world-news-report-meta">@report.Outlet · @report.Country · @report.Language · <time>@Time(report.SeenAt)</time></span>
-                            @if (!string.IsNullOrWhiteSpace(report.Snippet))
-                            {
-                                <span class="world-news-report-snippet">@report.Snippet</span>
-                            }
-                        </a>
-                    }
-                    else
-                    {
-                        <div class="world-news-archive-report">
-                            <span class="world-news-report-title">@report.Title</span>
-                            <span class="world-news-report-meta">@report.Outlet · @report.Country · @report.Language · <time>@Time(report.SeenAt)</time></span>
-                        </div>
-                    }
+                    <div class="world-news-archive-report">
+                        <WorldNewsReportText Report="@report" Href="@ArticleHref(report)" />
+                        <span class="world-news-report-meta">@report.Outlet · @report.Country · @report.Language · <time>@Time(report.SeenAt)</time></span>
+                    </div>
                 </li>
             }
         </ol>
@@ -266,6 +256,11 @@ else if (_view == WorldNewsTab.Today)
             @if (_leadSummary is { EventId: var summaryId } && summaryId == lead.Event.Id)
             {
                 <p class="world-news-lead-summary">@_leadSummary.Text</p>
+            }
+            else if (_leadReportSummary is { } reportSummary)
+            {
+                <p class="world-news-lead-summary">@reportSummary.Summary</p>
+                <p class="small text-secondary">English summary of one feed report, not a multi-outlet assessment.</p>
             }
             <p class="world-news-lead-meta">
                 @WorldNewsBrowse.Seen(lead.RecentOutlets, lead.Event.Languages.Count) · from @WorldNewsBrowse.Count(lead.Event.Countries.Count, "country", "countries") in the last @WorldNewsBrowse.Count(_rangeHours, "hour")
@@ -569,7 +564,10 @@ else
                 <h2 class="world-news-detail-title">@(_selected.Headline ?? _selected.Title)</h2>
                 @if (_selected.Headline is not null)
                 {
-                    <p class="world-news-original">Original headline: @_selected.Title</p>
+                    <details class="world-news-original">
+                        <summary>Original headline</summary>
+                        <p>@_selected.Title</p>
+                    </details>
                 }
                 <p class="world-news-detail-meta">
                     @WorldNewsBrowse.Seen(_selected.OutletCount, _selected.Languages.Count) · @WorldNewsBrowse.Count(_selected.ArticleCount, "report") ·
@@ -605,6 +603,11 @@ else
                                 }
                             </ul>
                         }
+                    }
+                    else if (_articles.Select(article => article.English).FirstOrDefault(english => english?.Summary is not null) is { } reportSummary)
+                    {
+                        <p class="world-news-summary-text">@reportSummary.Summary</p>
+                        <p class="world-news-summary-meta">English summary of one feed report, not a multi-outlet assessment.</p>
                     }
                     <p class="world-news-summary-meta">@SummaryNote</p>
                 </section>
@@ -672,10 +675,10 @@ else
                         @foreach (var a in language.OrderByDescending(a => a.SeenAt))
                         {
                             <li>
-                                <a class="world-news-report" href="@a.Url" target="_blank" rel="noopener noreferrer">
-                                    <span class="world-news-report-title">@a.Title</span>
+                                <div class="world-news-report">
+                                    <WorldNewsReportText Report="@a" Href="@ArticleHref(a)" />
                                     <span class="world-news-report-meta">@a.Outlet · @a.Country · <time>@Time(a.SeenAt)</time></span>
-                                </a>
+                                </div>
                             </li>
                         }
                     </ul>
@@ -734,6 +737,7 @@ else
     private string _where = string.Empty;
     private EventSummary? _summary;
     private EventSummary? _leadSummary;
+    private ReportTranslation? _leadReportSummary;
     private IReadOnlyList<CoverageClaim> _claims = [];
     private WorldSnapshot? _world;
     private string _filter = string.Empty;
@@ -891,7 +895,7 @@ else
         }</text>;
 
     private string SummaryNote => _summary is null
-        ? "No summary yet. After each read, the busiest events covered by 3 or more outlets are summarized in English."
+        ? "No story summary yet. English report summaries appear with the sources; retained stories, including single-outlet coverage, are summarized after news reads."
         : $"Summary by {_summary.Model} from {WorldNewsBrowse.Count(_summary.ArticleCount, "report")}, {_summary.CreatedAt.ToLocalGwsDateTime()}"
           + (_summary.Version > 1 ? $" (version {_summary.Version}; rewritten as coverage grows)." : ".")
           + " Written by AI from headlines and outlets' descriptions"
@@ -954,6 +958,7 @@ else
             _world = await Task.Run(() => News.World(_rangeHours));
             var lead = TodayStories.FirstOrDefault();
             _leadSummary = lead is null ? null : await Task.Run(() => News.Store.LatestSummary(lead.Event.Id));
+            _leadReportSummary = lead is null ? null : await Task.Run(() => News.Store.LatestEnglishReport(lead.Event.Id));
             return;
         }
         if (_view == WorldNewsTab.Developing)
@@ -966,7 +971,11 @@ else
         }
         _events = await Task.Run(() => News.TopEvents(_rangeHours));
         if (_selected is not null) _selected = _events.FirstOrDefault(e => e.Id == _selected.Id);
-        if (_selected is not null) _summary = await Task.Run(() => News.Store.LatestSummary(_selected.Id));
+        if (_selected is not null)
+        {
+            _summary = await Task.Run(() => News.Store.LatestSummary(_selected.Id));
+            _articles = await Task.Run(() => News.Store.ArticlesForEvent(_selected.Id));
+        }
     }
 
     private async Task ShowAsync(WorldNewsTab view)

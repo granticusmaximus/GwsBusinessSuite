@@ -232,3 +232,16 @@ and the write-up both draw on the evidence; then B3-B9 and N5-N15; B10 (reading)
   appear in handovers. Guide and regression sources updated. No tests/builds/browser/release
   gate run, per Grant's restriction; release readiness remains unverified. N11-N15 and B10
   remain, with embargo/hold management UI next.
+- English-first priority (Grant paused N11): source implementation now covers collected
+  incoming/retained report headlines, feed descriptions and English summaries, including
+  ungrouped reports. The existing worker processes bounded old/new batches at background AI
+  priority with durable retries, source-version validation and clear pending/waiting status.
+  Original text remains intact; English gets a separate FTS index and event-reference cache.
+  Browse/story/PDF/grouped/search/map/public headline presentations use English when ready.
+  Private desk material, non-collected external search previews and full publisher articles
+  are outside this pipeline. Retained single-outlet events now qualify for existing bounded
+  English story summarization; trust and publication rules are unchanged. Regression
+  sources/guide/handoff updated, but no build/tests/browser/release gate run, per the current
+  restriction. Upgrade, capacity, query timing and rollback still require validation on an
+  equipped machine. This is not completion of the other B10 reading items. Details:
+  `open-work-and-newsroom-beats-2026-11-16.md`.

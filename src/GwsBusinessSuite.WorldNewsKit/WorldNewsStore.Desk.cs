@@ -491,8 +491,8 @@ public sealed partial class WorldNewsStore
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(limit);
         using var connection = Open();
         using var command = connection.CreateCommand();
-        command.CommandText = """
-            SELECT e.id, COALESCE((SELECT NULLIF(headline, '') FROM summaries WHERE event_id = e.id ORDER BY version DESC LIMIT 1), e.title),
+        command.CommandText = $"""
+            SELECT e.id, COALESCE({EnglishEventHeadline}, e.title),
                 MAX(COALESCE(u.corrected_at, u.created_at)), COUNT(*)
             FROM live_updates u JOIN events e ON e.id = u.event_id
             WHERE u.status IN ('confirmed', 'unconfirmed')

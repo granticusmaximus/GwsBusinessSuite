@@ -60,6 +60,7 @@ public sealed partial class WorldNewsService : IDisposable
         WebCrawler? webCrawler = null)
     {
         _scopes = scopes;
+        _workloads = workloads;
         _httpClientFactory = httpClientFactory;
         _articleReader = articleReader;
         _webCrawler = webCrawler;
@@ -116,7 +117,12 @@ public sealed partial class WorldNewsService : IDisposable
                     throw new InvalidOperationException("it stood aside for someone using the AI and will be summarized on a later read");
                 }
             }, model, TimeProvider.System, at => at.ToLocalGwsDateTime(),
-            new SummaryOptions { PerRun = configuration.GetValue("WorldNews:SummariesPerRead", 1) });
+            new SummaryOptions
+            {
+                PerRun = configuration.GetValue("WorldNews:SummariesPerRead", 1),
+                MinOutlets = 1,
+                Window = TimeSpan.FromDays(30)
+            });
         LastRefreshed = Store.LastFetched(LastReadKey);
         if (LastRefreshed is not null) Status = string.Empty;
         void RebuildFailed(Exception ex) => _logger.LogWarning(ex, "Rebuilding a World News list failed");
@@ -1118,7 +1124,6 @@ public sealed partial class WorldNewsService : IDisposable
             var writtenBy = _serverHasNoModel ? "SentinelGPT on the Mac" : _model;
             var saved = Store.SaveAnalysis(new EventAnalysis(eventId, parsed.Claim, parsed.Summary, parsed.Agreed, parsed.Differences, writtenBy,
                 e.ArticleCount, excerpts.Count, DateTimeOffset.UtcNow));
-            await TranslateHeadlinesAsync(eventId, articles);
             return saved;
         }
         catch (ServerAiUnavailableException ex)
@@ -1143,36 +1148,6 @@ public sealed partial class WorldNewsService : IDisposable
         }
     }
 
-    // English for the story's headlines in other languages, after its analysis is saved (so the
-    // analysis shows first). A failure here only leaves headlines untranslated.
-    private async Task TranslateHeadlinesAsync(string eventId, IReadOnlyList<WorldArticle> articles)
-    {
-        var pending = HeadlineTranslator.Choose(articles, Store.TranslationsForEvent(eventId));
-        if (pending.Count == 0) return;
-        try
-        {
-            var done = 0;
-            foreach (var batch in pending.Chunk(HeadlineTranslator.MaxPerCall))
-            {
-                _analysisStatus[eventId] = $"Translating headlines into English ({done} of {pending.Count})…";
-                string raw;
-                using (MacRelayScope.ForSharedWork())
-                {
-                    await using var scope = _scopes.CreateAsyncScope();
-                    using var limit = new CancellationTokenSource(TimeSpan.FromMinutes(3));
-                    raw = await scope.ServiceProvider.GetRequiredService<IOllamaService>()
-                        .GenerateAsync(_model, HeadlineTranslator.SystemPrompt, HeadlineTranslator.Prompt(batch), 16_384, limit.Token);
-                }
-                Store.SaveTranslations(HeadlineTranslator.Parse(raw, batch), DateTimeOffset.UtcNow);
-                done += batch.Length;
-            }
-        }
-        catch (Exception ex) when (ex is InvalidOperationException or OperationCanceledException or HttpRequestException)
-        {
-            _logger.LogInformation(ex, "World News: headlines for {Event} weren't translated", eventId);
-        }
-    }
-
     [System.Text.RegularExpressions.GeneratedRegex("[^a-z0-9]+")]
     private static partial System.Text.RegularExpressions.Regex NonSlug();
 
@@ -1180,6 +1155,7 @@ public sealed partial class WorldNewsService : IDisposable
     {
         _ollama.Dispose();
         _running.Dispose();
+        _englishRunning.Dispose();
     }
 }
 
@@ -1220,15 +1196,34 @@ public sealed class WorldNewsBackgroundService(WorldNewsService news, IConfigura
         try
         {
             await Task.Delay(TimeSpan.FromSeconds(configuration.GetValue("WorldNews:StartupDelaySeconds", 60)), stoppingToken);
-            using var timer = new PeriodicTimer(WorldNewsService.Interval);
-            do
-            {
-                await news.RefreshAsync(stoppingToken);
-            }
-            while (await timer.WaitForNextTickAsync(stoppingToken));
+            using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+            var reads = ReadLoopAsync(lifetime.Token);
+            var english = EnglishLoopAsync(lifetime.Token);
+            await Task.WhenAny(reads, english);
+            await lifetime.CancelAsync();
+            await Task.WhenAll(reads, english);
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {
+        }
+    }
+
+    private async Task ReadLoopAsync(CancellationToken cancellationToken)
+    {
+        using var timer = new PeriodicTimer(WorldNewsService.Interval);
+        do
+        {
+            await news.RefreshAsync(cancellationToken);
+        }
+        while (await timer.WaitForNextTickAsync(cancellationToken));
+    }
+
+    private async Task EnglishLoopAsync(CancellationToken cancellationToken)
+    {
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            var madeProgress = await news.ProcessEnglishAsync(cancellationToken);
+            await Task.Delay(TimeSpan.FromSeconds(madeProgress ? 5 : 60), cancellationToken);
         }
     }
 }

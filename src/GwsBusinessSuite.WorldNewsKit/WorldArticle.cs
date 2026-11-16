@@ -19,7 +19,14 @@ public sealed record WorldArticle(
     DateTimeOffset SeenAt,
     string Feed,
     string? GroupHint = null,
-    string? Snippet = null);
+    string? Snippet = null)
+{
+    public ReportTranslation? English { get; init; }
+    public string DisplayTitle => English?.Headline ??
+        (HeadlineTranslator.IsEnglish(Language) ? Title : "English translation pending");
+    public string? DisplayDescription => English?.Description ??
+        (HeadlineTranslator.IsEnglish(Language) ? Snippet : null);
+}
 
 public static partial class ArticleNormalizer
 {
