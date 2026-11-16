@@ -19,6 +19,7 @@
 <PageHeader Title="News desk" Icon="bi-journal-text" Description="The stories the desk is following, and the tips readers have sent.">
     <Actions>
         <a class="btn btn-outline-secondary" href="admin/world-news/source-book">My source book</a>
+        <a class="btn btn-outline-secondary" href="admin/world-news/search">Search stories</a>
         <a class="btn btn-outline-secondary" href="world-news/live" target="_blank" rel="noopener">Public live coverage</a>
         <a class="btn btn-outline-secondary" href="admin/world-news"><i class="bi bi-arrow-left me-1" aria-hidden="true"></i>World News</a>
         <a class="btn btn-outline-secondary" href="tip" target="_blank" rel="noopener"><i class="bi bi-box-arrow-up-right me-1" aria-hidden="true"></i>Tip form</a>
@@ -95,6 +96,57 @@
                             </li>
                         }
                     </ol>
+                }
+            }
+        }
+    </div>
+</section>
+
+<section class="card border-0 shadow-sm mb-3" aria-labelledby="desk-morgue">
+    <div class="card-header"><strong id="desk-morgue">Newsroom morgue</strong> <small class="text-secondary">search the retained archive and desk records</small></div>
+    <div class="card-body">
+        <p class="small text-secondary">Search reports, verdicts, approvals, notes, tips, live updates, corrections, dossiers and your own source book. Reports follow the 30-day archive; source-book matches are private to you.</p>
+        <form class="desk-beat-form" role="search" @onsubmit="SearchMorgueAsync" @onsubmit:preventDefault>
+            <label for="desk-morgue-query">Search terms</label>
+            <input id="desk-morgue-query" type="search" class="form-control form-control-sm" maxlength="@MorgueSearch.MaxQueryLength"
+                   @bind="_morgueQuery" @bind:event="oninput" />
+            <button type="submit" class="btn btn-sm btn-primary" disabled="@(string.IsNullOrWhiteSpace(_morgueQuery) || _morgueBusy)">Search the morgue</button>
+            @if (!string.IsNullOrWhiteSpace(_morgueQuery))
+            {
+                <a class="btn btn-sm btn-outline-secondary" href="@StorySearchHref">Search stories</a>
+            }
+        </form>
+        @if (_morgueBusy) { <LoadingIndicator Message="Searching the newsroom archive..." /> }
+        @if (_morgueError is { } morgueError) { <p class="alert alert-warning mt-3" role="alert">@morgueError</p> }
+        @if (_morgueSearched && !_morgueBusy && _morgueError is null)
+        {
+            @if (_morgueHits.Count == 0)
+            {
+                <p class="text-secondary mt-3 mb-0">No retained records matched that search.</p>
+            }
+            else
+            {
+                <ol class="desk-beat-queue mt-3">
+                    @foreach (var hit in _morgueHits)
+                    {
+                        <li>
+                            <span class="small text-secondary">@MorgueKindLabel(hit.Kind) · @hit.At.ToLocalGwsDateTime()</span>
+                            @if (hit.EventId.Length > 0)
+                            {
+                                <a href="@($"/admin/world-news?event={Uri.EscapeDataString(hit.EventId)}")">@(!string.IsNullOrWhiteSpace(hit.Title) ? hit.Title : "Open story")</a>
+                            }
+                            else if (!string.IsNullOrWhiteSpace(hit.Title))
+                            {
+                                <strong>@hit.Title</strong>
+                            }
+                            @if (!string.IsNullOrWhiteSpace(hit.Text)) { <p class="small mb-0">@hit.Text</p> }
+                            @if (!string.IsNullOrWhiteSpace(hit.Username)) { <span class="small text-secondary">@hit.Username</span> }
+                        </li>
+                    }
+                </ol>
+                @if (_morgueHits.Count == MorgueSearch.MaxResults)
+                {
+                    <p class="small text-secondary mb-0">Showing the newest @MorgueSearch.MaxResults matches. Refine the search to narrow the results.</p>
                 }
             }
         }
@@ -221,6 +273,50 @@
     private string? _handover;
     private string? _handoverError;
     private string? _handoverStatus;
+    private string _morgueQuery = string.Empty;
+    private IReadOnlyList<MorgueHit> _morgueHits = [];
+    private bool _morgueBusy;
+    private bool _morgueSearched;
+    private string? _morgueError;
+    private string StorySearchHref => $"/admin/world-news/search?q={Uri.EscapeDataString(_morgueQuery.Trim())}";
+
+    private static string MorgueKindLabel(string kind) => kind switch
+    {
+        "report" => "Report",
+        "verdict" => "Verdict",
+        "approval" => "Approval",
+        "source-use" => "Source history",
+        "contact" => "My source book",
+        "note" => "Desk note",
+        "tip" => "Reader tip",
+        "live" => "Live update",
+        "correction" => "Correction",
+        "dossier" => "Dossier",
+        "budget" => "Budget",
+        _ => "Desk record"
+    };
+
+    private async Task SearchMorgueAsync()
+    {
+        if (_morgueBusy || string.IsNullOrWhiteSpace(_morgueQuery)) return;
+        _morgueBusy = true;
+        _morgueSearched = false;
+        _morgueError = null;
+        try
+        {
+            var username = await CurrentUserAccessor.GetCurrentUsernameAsync();
+            await using var scope = ScopeFactory.CreateAsyncScope();
+            _morgueHits = await scope.ServiceProvider.GetRequiredService<WorldNewsDeskService>()
+                .SearchMorgueAsync(_morgueQuery.Trim(), username);
+            _morgueSearched = true;
+        }
+        catch (Exception ex) when (ex is Microsoft.Data.Sqlite.SqliteException or ArgumentException or InvalidOperationException or UnauthorizedAccessException)
+        {
+            Logger.LogWarning(ex, "World News: couldn't search the newsroom morgue");
+            _morgueError = "The newsroom archive couldn't be searched. Refresh the desk and try again.";
+        }
+        finally { _morgueBusy = false; }
+    }
 
     private async Task GenerateHandoverAsync()
     {

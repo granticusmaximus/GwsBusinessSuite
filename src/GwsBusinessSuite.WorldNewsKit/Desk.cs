@@ -199,6 +199,12 @@ public static class Dossiers
 // corrections, dossiers, the person's own contacts), beside the story search.
 public sealed record MorgueHit(string Kind, string EventId, string Title, string Text, string? Username, DateTimeOffset At);
 
+public static class MorgueSearch
+{
+    public const int MaxQueryLength = 200;
+    public const int MaxResults = 60;
+}
+
 // N15: desk metrics.
 public sealed record DeskMetrics(
     int OnBudget,

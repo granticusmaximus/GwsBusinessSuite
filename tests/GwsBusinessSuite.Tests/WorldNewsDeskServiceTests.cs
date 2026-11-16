@@ -68,6 +68,7 @@ public sealed class WorldNewsDeskServiceTests : IAsyncLifetime
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() => _desk.NotesAsync("e1", username));
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() => _desk.AddNoteAsync("e1", "Private desk note", username));
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() => _desk.HandoverAsync(8, username));
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => _desk.SearchMorgueAsync("Tokyo", username));
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() => _desk.ContactsAsync(username));
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() => _desk.SaveContactAsync(new SourceContact("", "ana", "Source", "", "", 3, "", DateTimeOffset.UtcNow), username));
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() => _desk.RemoveContactAsync("source", username));
@@ -84,6 +85,18 @@ public sealed class WorldNewsDeskServiceTests : IAsyncLifetime
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() => _desk.PublishCorrectionAsync("e1", "Correction", "Corrected fact", null, username));
 
         Assert.Empty(_news.Store.DeskNotes("e1"));
+    }
+
+    [Fact]
+    public async Task Morgue_ShouldSearchForActiveAdmins_AndRejectOversizedQueries()
+    {
+        _news.Store.AddDeskNote("e1", "ana", "Tokyo verification notes", DateTimeOffset.UtcNow);
+
+        var hits = await _desk.SearchMorgueAsync("Tokyo", "ana");
+
+        Assert.Contains(hits, hit => hit.Kind == "note");
+        await Assert.ThrowsAsync<ArgumentException>(() =>
+            _desk.SearchMorgueAsync(new string('x', MorgueSearch.MaxQueryLength + 1), "ana"));
     }
 
     [Fact]

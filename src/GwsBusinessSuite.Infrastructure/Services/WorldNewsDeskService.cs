@@ -154,6 +154,14 @@ public sealed partial class WorldNewsDeskService(IAppDbContext db, WorldNewsServ
         return await Task.Run(() => news.HandoverMarkdown(hours), cancellationToken);
     }
 
+    public async Task<IReadOnlyList<MorgueHit>> SearchMorgueAsync(string text, string username, CancellationToken cancellationToken = default)
+    {
+        await RequireDeskUserAsync(username, cancellationToken);
+        if (text.Length > MorgueSearch.MaxQueryLength)
+            throw new ArgumentException($"Keep the search to {MorgueSearch.MaxQueryLength} characters or fewer.", nameof(text));
+        return await Task.Run(() => news.Store.SearchDesk(text.Trim(), username, MorgueSearch.MaxResults), cancellationToken);
+    }
+
     public async Task<IReadOnlyList<DeskNote>> NotesAsync(string eventId, string username, CancellationToken cancellationToken = default)
     {
         await RequireDeskUserAsync(username, cancellationToken);

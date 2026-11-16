@@ -481,19 +481,31 @@ public sealed class WorldNewsDeskTests : IDisposable
     public void Morgue_ShouldSearchTheDesksRecords_AndOnlyMyContacts()
     {
         using var fixture = new WorldNewsTestStore();
-        fixture.SeedEvent("s1", "e1", "Crane falls", ["A", "B"], Now);
+        fixture.SeedEvent("s1", "e1", "Harbour crane falls", ["A", "B"], Now);
         var store = fixture.Store;
         store.AddDeskNote("e1", "ana", "Harbour master says the crane fell at 06:10", Now);
         store.SaveSourceContact(new SourceContact("", "ana", "Harbour master", "Port of X", "", 4, "", Now));
         store.SaveSourceContact(new SourceContact("", "ben", "Harbour pilot", "Port of X", "", 3, "", Now));
         store.AddCorrection("e1", "Crane", "The crane fell at 06:40, not 06:10.", "ana", Now);
+        store.AppendLabelSnapshots([("e1", "SingleSource", "Harbour report awaiting a second source.", 1, 1)], "test", Now);
 
         var hits = store.SearchDesk("harbour", "ana");
 
         Assert.Contains(hits, h => h.Kind == "note");
+        Assert.Contains(hits, h => h.Kind == "report" && h.EventId == "e1");
+        Assert.Contains(hits, h => h.Kind == "verdict" && h.EventId == "e1");
         Assert.Contains(hits, h => h.Kind == "contact" && h.Title == "Harbour master");
         Assert.DoesNotContain(hits, h => h.Kind == "contact" && h.Title == "Harbour pilot");
         Assert.Single(store.SearchDesk("06:40", "ana"));
+    }
+
+    [Fact]
+    public void Morgue_ShouldBoundQueryAndResultCount()
+    {
+        using var fixture = new WorldNewsTestStore();
+
+        Assert.Throws<ArgumentException>(() => fixture.Store.SearchDesk(new string('x', MorgueSearch.MaxQueryLength + 1), "ana"));
+        Assert.Throws<ArgumentOutOfRangeException>(() => fixture.Store.SearchDesk("harbour", "ana", 0));
     }
 
     [Fact]

@@ -786,11 +786,15 @@ public sealed partial class WorldNewsStore
 
     public IReadOnlyList<MorgueHit> SearchDesk(string text, string username, int limit = 60)
     {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(limit);
+        if (text.Length > MorgueSearch.MaxQueryLength)
+            throw new ArgumentException($"Keep the search to {MorgueSearch.MaxQueryLength} characters or fewer.", nameof(text));
+        limit = Math.Min(limit, MorgueSearch.MaxResults);
         var words = text.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Select(w => w.ToLowerInvariant()).Where(w => w.Length >= 2).Take(6).ToList();
         if (words.Count == 0) return [];
         using var connection = Open();
         var hits = new List<MorgueHit>();
-        void Search(string kind, string sql, string? owner = null)
+        void Search(string sql, string? owner = null)
         {
             using var command = connection.CreateCommand();
             var where = string.Join(" AND ", words.Select((_, i) => $"instr(lower(haystack), $w{i}) > 0"));
@@ -801,14 +805,46 @@ public sealed partial class WorldNewsStore
             using var reader = command.ExecuteReader();
             while (reader.Read())
                 hits.Add(new MorgueHit(reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3), reader.IsDBNull(4) ? null : reader.GetString(4), At(reader, 5)));
-            _ = kind;
         }
-        Search("note", "SELECT 'note' AS kind, event_id, '' AS title, text, username, created_at AS at, text AS haystack FROM desk_notes");
-        Search("budget", "SELECT 'budget' AS kind, event_id, title, status || ': ' || next_action AS text, owner AS username, updated_at AS at, title || ' ' || next_action AS haystack FROM budget");
-        Search("live", "SELECT 'live' AS kind, event_id, status AS title, COALESCE(corrected_text, text) AS text, username, created_at AS at, text || ' ' || COALESCE(corrected_text, '') AS haystack FROM live_updates");
-        Search("correction", "SELECT 'correction' AS kind, event_id, title, text, username, at, title || ' ' || text AS haystack FROM corrections");
-        Search("dossier", "SELECT 'dossier' AS kind, event_id, title, detail AS text, added_by AS username, at, title || ' ' || detail AS haystack FROM dossier_items");
-        Search("contact", "SELECT 'contact' AS kind, '' AS event_id, name AS title, organisation || ' · ' || notes AS text, NULL AS username, created_at AS at, name || ' ' || organisation || ' ' || notes AS haystack FROM source_contacts WHERE owner = $owner", NormalizeUsername(username));
-        return hits.OrderByDescending(h => h.At).Take(limit).ToList();
+        Search("SELECT 'note' AS kind, event_id, '' AS title, text, username, created_at AS at, text AS haystack FROM desk_notes");
+        Search("SELECT 'budget' AS kind, event_id, title, status || ': ' || next_action AS text, owner AS username, updated_at AS at, title || ' ' || next_action AS haystack FROM budget");
+        Search("SELECT 'tip' AS kind, COALESCE(event_id, '') AS event_id, 'Reader tip' AS title, message AS text, handled_by AS username, created_at AS at, message || ' ' || COALESCE(name, '') || ' ' || COALESCE(url, '') AS haystack FROM tips");
+        Search("SELECT 'live' AS kind, event_id, status AS title, COALESCE(corrected_text, text) AS text, username, COALESCE(corrected_at, created_at) AS at, text || ' ' || COALESCE(corrected_text, '') AS haystack FROM live_updates");
+        Search("SELECT 'correction' AS kind, event_id, title, text, username, at, title || ' ' || text AS haystack FROM corrections");
+        Search("SELECT 'dossier' AS kind, event_id, title, detail AS text, added_by AS username, at, title || ' ' || detail AS haystack FROM dossier_items");
+        Search("SELECT 'verdict' AS kind, s.event_id, COALESCE(e.title, 'Story') AS title, s.level || ': ' || s.reason AS text, NULL AS username, s.taken_at AS at, COALESCE(e.title, '') || ' ' || s.level || ' ' || s.reason AS haystack FROM label_snapshots s LEFT JOIN events e ON e.id = s.event_id");
+        Search("SELECT 'approval' AS kind, s.event_id, COALESCE(e.title, 'Story') AS title, s.kind || ': ' || s.label_level AS text, s.username, s.at, COALESCE(e.title, '') || ' ' || s.kind || ' ' || s.label_level || ' ' || s.username AS haystack FROM sign_offs s LEFT JOIN events e ON e.id = s.event_id");
+        Search("SELECT 'contact' AS kind, '' AS event_id, c.name AS title, c.organisation || ' · ' || c.notes AS text, NULL AS username, c.created_at AS at, c.name || ' ' || c.organisation || ' ' || c.notes || ' ' || COALESCE(u.note, '') AS haystack FROM source_contacts c LEFT JOIN source_uses u ON u.source_id = c.id WHERE c.owner = $owner", NormalizeUsername(username));
+        Search("SELECT 'source-use' AS kind, u.event_id, c.name AS title, u.outcome || ': ' || u.note AS text, NULL AS username, u.at, c.name || ' ' || c.organisation || ' ' || u.outcome || ' ' || u.note AS haystack FROM source_uses u JOIN source_contacts c ON c.id = u.source_id WHERE c.owner = $owner", NormalizeUsername(username));
+        SearchReports(connection, text, limit, hits);
+        return hits.OrderByDescending(h => h.At).ThenBy(h => h.Kind, StringComparer.Ordinal).Take(limit).ToList();
+    }
+
+    private void SearchReports(SqliteConnection connection, string text, int limit, List<MorgueHit> hits)
+    {
+        var fullText = FullTextQuery.From(text);
+        if (fullText is null) return;
+        using var command = connection.CreateCommand();
+        string match;
+        if (FullTextReady() && fullText is not null)
+        {
+            match = $"(a.rowid IN (SELECT rowid FROM articles_fts WHERE articles_fts MATCH $query) OR {EnglishTextMatch("a", "$query", true)})";
+            command.Parameters.AddWithValue("$query", fullText);
+        }
+        else
+        {
+            match = $"(instr(lower(a.title || ' ' || COALESCE(a.snippet, '')), lower($query)) > 0 OR {EnglishTextMatch("a", "$query", false)})";
+            command.Parameters.AddWithValue("$query", text.Trim());
+        }
+        command.CommandText = $"""
+            SELECT a.event_id, a.title, COALESCE(a.snippet, ''), a.seen_at
+            FROM articles a
+            WHERE a.event_id IS NOT NULL AND {match}
+            ORDER BY a.seen_at DESC, a.id LIMIT $limit
+            """;
+        command.Parameters.AddWithValue("$limit", limit);
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+            hits.Add(new MorgueHit("report", reader.GetString(0), reader.GetString(1), reader.GetString(2), null, At(reader, 3)));
     }
 }

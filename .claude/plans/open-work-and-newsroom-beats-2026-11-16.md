@@ -269,3 +269,19 @@ concern. Regression sources cover auth, public-only association, holds, limits, 
 privacy projection, retention after pruning, legacy schema upgrade and encoded HTML.
 Static source/call-site and tracked patch-whitespace checks only; no build, test, browser,
 release gate, commit, push or deployment performed. Next unit: N13 morgue/archive search.
+
+## N13: newsroom morgue
+
+Progress: implementation and focused regression sources written; release verification pending.
+
+- [x] Add an active-admin morgue search to News desk, with bounded query/results and explicit loading/error states.
+- [x] Search retained reports through the existing World News full-text and English indexes.
+- [x] Include verdict/approval history and newsroom records; keep source contacts/use history owner-private.
+- [x] Add focused store/service regression sources and document the workflow.
+- [ ] Run focused tests and `scripts/verify-release.sh` on the approved equipped environment.
+
+The store search also covers notes, budget entries, tips, live updates, corrections and dossiers.
+Report hits link to retained stories; the existing broader World News search remains available
+for the same query. Source-book contact details are not included in hits, and another person's
+contacts or source history are never searched. Implementation has not yet been built, run in a
+browser, or release-verified. No commit, push or deployment was performed.
