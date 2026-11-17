@@ -1,0 +1,197 @@
+@using GwsBusinessSuite.Application.Abstractions
+@using GwsBusinessSuite.Infrastructure.Services
+@using GwsBusinessSuite.WorldNewsKit
+@inject ICurrentUserAccessor CurrentUserAccessor
+@inject IServiceScopeFactory ScopeFactory
+@inject ILogger<WorldNewsDossier> Logger
+
+<section class="world-news-dossier" aria-labelledby="dossier-heading">
+    <div class="dossier-header">
+        <div>
+            <h3 id="dossier-heading" class="story-desk-heading">Story dossier</h3>
+            <p class="small text-secondary mb-0">Pin reports, official records, Overwatch snapshots, notes and links. The PDF also includes desk notes, the checklist, sign-offs and story sources.</p>
+        </div>
+        <a class="btn btn-sm btn-outline-secondary" href="@PdfHref" download>
+            <i class="bi bi-file-earmark-pdf me-1" aria-hidden="true"></i>Download dossier PDF
+        </a>
+    </div>
+
+    @if (_error is { } error) { <p class="alert alert-warning mt-3" role="alert">@error</p> }
+    @if (_status is { } status) { <p class="small text-secondary mt-2" role="status">@status</p> }
+
+    @if (_busy && !_loaded)
+    {
+        <LoadingIndicator Message="Loading the story dossier..." />
+    }
+    else
+    {
+        @if (_items.Count == Dossiers.MaxItems)
+        {
+            <p class="small text-secondary mt-3">The dossier has reached its @Dossiers.MaxItems-item limit. Remove an item before pinning another.</p>
+        }
+
+        @if (_items.Count == 0)
+        {
+            <p class="small text-secondary mt-3">Nothing has been pinned yet.</p>
+        }
+        else
+        {
+            <ul class="dossier-items">
+                @foreach (var item in _items)
+                {
+                    <li @key="item.Id">
+                        <div class="dossier-item-main">
+                            <span class="dossier-kind">@KindLabel(item.Kind)</span>
+                            <strong>@item.Title</strong>
+                            @if (!string.IsNullOrWhiteSpace(item.Detail)) { <p class="mb-1">@item.Detail</p> }
+                            @if (WebUrl(item.Url) is { } url)
+                            {
+                                <a class="small" href="@url" target="_blank" rel="noopener noreferrer nofollow">@url</a>
+                            }
+                            <span class="d-block small text-secondary">@item.AddedBy · @item.At.ToLocalGwsDateTime()</span>
+                        </div>
+                        @if (_confirmRemoveId == item.Id)
+                        {
+                            <div class="dossier-item-actions">
+                                <span class="small">Remove this pin?</span>
+                                <button type="button" class="btn btn-sm btn-danger" disabled="@_busy" @onclick="() => RemoveAsync(item.Id)">Remove</button>
+                                <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => _confirmRemoveId = null">Keep</button>
+                            </div>
+                        }
+                        else
+                        {
+                            <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@_busy"
+                                    aria-label="@($"Remove {item.Title} from the dossier")" @onclick="() => _confirmRemoveId = item.Id">Remove</button>
+                        }
+                    </li>
+                }
+            </ul>
+        }
+
+        <form class="dossier-form mt-3" @onsubmit="PinAsync" @onsubmit:preventDefault>
+            <label>
+                Type
+                <select class="form-select form-select-sm" @bind="_kind" disabled="@_busy">
+                    @foreach (var kind in Dossiers.Kinds) { <option value="@kind">@KindLabel(kind)</option> }
+                </select>
+            </label>
+            <label>
+                Title
+                <input class="form-control form-control-sm" maxlength="@Dossiers.MaxTitleLength" @bind="_title" @bind:event="oninput" disabled="@_busy" />
+            </label>
+            <label class="dossier-form-wide">
+                Link (optional)
+                <input class="form-control form-control-sm" type="url" maxlength="@Dossiers.MaxUrlLength" placeholder="https://..." @bind="_url" @bind:event="oninput" disabled="@_busy" />
+            </label>
+            <label class="dossier-form-wide">
+                Detail or note
+                <textarea class="form-control form-control-sm" rows="3" maxlength="@Dossiers.MaxDetailLength" @bind="_detail" @bind:event="oninput" disabled="@_busy"></textarea>
+            </label>
+            <div class="dossier-form-wide">
+                <button type="submit" class="btn btn-sm btn-primary" disabled="@(_busy || _items.Count >= Dossiers.MaxItems || string.IsNullOrWhiteSpace(_title))">
+                    <i class="bi bi-pin-angle me-1" aria-hidden="true"></i>Pin to dossier
+                </button>
+            </div>
+        </form>
+    }
+</section>
+
+@code {
+    [Parameter] public string EventId { get; set; } = string.Empty;
+
+    private IReadOnlyList<DossierItem> _items = [];
+    private string _kind = Dossiers.Report;
+    private string _title = string.Empty;
+    private string _url = string.Empty;
+    private string _detail = string.Empty;
+    private string? _error;
+    private string? _status;
+    private string? _confirmRemoveId;
+    private bool _busy;
+    private bool _loaded;
+    private string? _loadedFor;
+    private string PdfHref => $"/admin/world-news/events/{Uri.EscapeDataString(EventId)}/dossier.pdf";
+
+    protected override Task OnParametersSetAsync() =>
+        _loadedFor == EventId ? Task.CompletedTask : LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _busy = true;
+        _loaded = false;
+        _error = _status = null;
+        try
+        {
+            var username = await CurrentUserAccessor.GetCurrentUsernameAsync();
+            await using var scope = ScopeFactory.CreateAsyncScope();
+            _items = await scope.ServiceProvider.GetRequiredService<WorldNewsDeskService>().DossierAsync(EventId, username);
+            _loadedFor = EventId;
+            _loaded = true;
+        }
+        catch (Exception ex) when (ex is Microsoft.Data.Sqlite.SqliteException or InvalidOperationException or UnauthorizedAccessException)
+        {
+            Logger.LogWarning(ex, "World News: couldn't load a story dossier");
+            _error = "The dossier couldn't be loaded. Refresh the story and try again.";
+        }
+        finally { _busy = false; }
+    }
+
+    private async Task PinAsync()
+    {
+        if (_busy) return;
+        _busy = true;
+        _error = _status = null;
+        try
+        {
+            var username = await CurrentUserAccessor.GetCurrentUsernameAsync();
+            await using var scope = ScopeFactory.CreateAsyncScope();
+            var desk = scope.ServiceProvider.GetRequiredService<WorldNewsDeskService>();
+            var saved = await desk.PinDossierItemAsync(EventId, _kind, _title, _url, _detail, username);
+            var alreadyPinned = _items.Any(item => item.Id == saved.Id);
+            _title = _url = _detail = string.Empty;
+            _confirmRemoveId = null;
+            _items = await desk.DossierAsync(EventId, username);
+            _status = alreadyPinned ? "That link is already in this dossier." : "Pinned to the story dossier.";
+        }
+        catch (Exception ex) when (ex is Microsoft.Data.Sqlite.SqliteException or ArgumentException or InvalidOperationException or UnauthorizedAccessException)
+        {
+            Logger.LogWarning(ex, "World News: couldn't pin a dossier item");
+            _error = ex is ArgumentException ? ex.Message : "That item couldn't be pinned. Refresh the dossier and try again.";
+        }
+        finally { _busy = false; }
+    }
+
+    private async Task RemoveAsync(string id)
+    {
+        if (_busy) return;
+        _busy = true;
+        _error = _status = null;
+        try
+        {
+            var username = await CurrentUserAccessor.GetCurrentUsernameAsync();
+            await using var scope = ScopeFactory.CreateAsyncScope();
+            var desk = scope.ServiceProvider.GetRequiredService<WorldNewsDeskService>();
+            await desk.UnpinDossierItemAsync(EventId, id, username);
+            _items = await desk.DossierAsync(EventId, username);
+            _confirmRemoveId = null;
+            _status = "Removed from the story dossier.";
+        }
+        catch (Exception ex) when (ex is Microsoft.Data.Sqlite.SqliteException or InvalidOperationException or UnauthorizedAccessException)
+        {
+            Logger.LogWarning(ex, "World News: couldn't remove a dossier item");
+            _error = "That item couldn't be removed. Refresh the dossier and try again.";
+        }
+        finally { _busy = false; }
+    }
+
+    private static string KindLabel(string kind) => kind switch
+    {
+        Dossiers.Report => "Report",
+        Dossiers.Record => "Official record / sensor",
+        Dossiers.Note => "Note",
+        _ => "Link"
+    };
+
+    private static string? WebUrl(string? value) =>
+        Uri.TryCreate(value, UriKind.Absolute, out var url) && url.Scheme is "http" or "https" ? url.AbsoluteUri : null;
+}

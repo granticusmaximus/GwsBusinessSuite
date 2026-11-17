@@ -278,10 +278,43 @@ Progress: implementation and focused regression sources written; release verific
 - [x] Search retained reports through the existing World News full-text and English indexes.
 - [x] Include verdict/approval history and newsroom records; keep source contacts/use history owner-private.
 - [x] Add focused store/service regression sources and document the workflow.
-- [ ] Run focused tests and `scripts/verify-release.sh` on the approved equipped environment.
+- [x] Run focused desk-store regressions (32 passed) and the morgue service regression (1 passed).
+- [ ] Complete `scripts/verify-release.sh` on a supported equipped environment.
 
 The store search also covers notes, budget entries, tips, live updates, corrections and dossiers.
 Report hits link to retained stories; the existing broader World News search remains available
 for the same query. Source-book contact details are not included in hits, and another person's
-contacts or source history are never searched. Implementation has not yet been built, run in a
-browser, or release-verified. No commit, push or deployment was performed.
+contacts or source history are never searched. The successful focused test runs used already-built
+dependencies with analyzers disabled because the default test build reports an existing
+`xUnit2031` analyzer issue elsewhere in `WorldNewsDeskTests.cs`. The full release gate was
+attempted: it cannot pass here because Python and Docker are unavailable, Web has three compile
+errors in untouched files, and the full suite reports unrelated Windows/browser/file-lock
+failures. Browser and release readiness remain unverified. No commit, push or deployment was
+performed by the assistant; Grant committed N13 as `81edda98` while work was in progress. The
+branch was fast-forwarded to the refreshed `origin/main`. During N14, Grant advanced `main`
+again with `6be6bd80`; after approval, the assistant fast-forwarded locally to that commit
+without pushing.
+
+## N14: story dossiers
+
+Progress: story dossier workflow implemented and focused coverage passes; release readiness is
+blocked by missing local tools and broad Windows test-suite failures.
+
+- [x] Expose the existing dossier store through active-admin service operations with safe URL validation.
+- [x] Add story-level pin/remove controls and the private dossier PDF download.
+- [x] Scope removal to the requested story, make URL deduplication/cap enforcement transactional, and disable PDF caching.
+- [x] Add regression sources and document the workflow.
+- [x] Run focused checks: `WorldNewsDeskTests` 33/33 and the dossier service/PDF test 1/1.
+- [ ] Get a green `scripts/verify-release.sh` and verify the interactive browser flow.
+
+Pins are shared desk records. PDF exports include up to 100 private desk notes, checks, sign-offs
+and up to 40 report sources; they do not include personal source-book contacts. Snapshot/image
+files are represented by HTTP/HTTPS links, not embedded uploads. No commit, push or deployment
+was performed by the assistant.
+
+The required release gate was run on 17-11-26 against `6be6bd80`. Restore, dependency audit and release build passed;
+responsive lint could not run because Python is unavailable, Docker Compose rendering could not
+run because Docker is unavailable, and the full suite failed (318 failures, 4139 passed), including
+Windows SQLite file-lock cleanup failures. Running the service test class as a group also hit
+Windows SQLite cleanup locks; the N14 service/PDF regression passed alone. No browser workflow was
+independently verified.

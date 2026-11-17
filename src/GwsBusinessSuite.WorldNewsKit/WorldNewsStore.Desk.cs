@@ -689,7 +689,7 @@ public sealed partial class WorldNewsStore
     {
         using var connection = Open();
         using var command = connection.CreateCommand();
-        command.CommandText = "SELECT id, event_id, kind, title, url, detail, added_by, at FROM dossier_items WHERE event_id = $event ORDER BY at";
+        command.CommandText = "SELECT id, event_id, kind, title, url, detail, added_by, at FROM dossier_items WHERE event_id = $event ORDER BY at, id";
         command.Parameters.AddWithValue("$event", eventId);
         using var reader = command.ExecuteReader();
         var items = new List<DossierItem>();
@@ -701,23 +701,74 @@ public sealed partial class WorldNewsStore
     public DossierItem? PinToDossier(string eventId, string kind, string title, string? url, string detail, string addedBy, DateTimeOffset now)
     {
         if (!global::GwsBusinessSuite.WorldNewsKit.Dossiers.Kinds.Contains(kind)) return null;
-        var existing = Dossier(eventId);
-        if (existing.Count >= global::GwsBusinessSuite.WorldNewsKit.Dossiers.MaxItems) return null;
-        if (url is not null && existing.Any(i => i.Url == url)) return existing.First(i => i.Url == url);
-        var item = new DossierItem(NewId(), eventId, kind, title.Trim(), url, detail.Trim(), addedBy, now);
+        if (global::GwsBusinessSuite.WorldNewsKit.Dossiers.Problem(kind, title, url, detail) is { } problem)
+            throw new ArgumentException(problem, nameof(title));
+        var item = new DossierItem(NewId(), eventId, kind, title.Trim(), url?.Trim() is { Length: > 0 } savedUrl ? savedUrl : null, detail.Trim(), addedBy, now);
         using var connection = Open();
+        using var transaction = connection.BeginTransaction(deferred: false);
+        using (var exists = connection.CreateCommand())
+        {
+            exists.Transaction = transaction;
+            exists.CommandText = "SELECT EXISTS(SELECT 1 FROM events WHERE id = $event)";
+            exists.Parameters.AddWithValue("$event", eventId);
+            if ((long)exists.ExecuteScalar()! == 0)
+                throw new InvalidOperationException("That story is no longer available.");
+        }
+        if (item.Url is { } urlValue)
+        {
+            using var duplicate = connection.CreateCommand();
+            duplicate.Transaction = transaction;
+            duplicate.CommandText = "SELECT id, event_id, kind, title, url, detail, added_by, at FROM dossier_items WHERE event_id = $event AND url = $url ORDER BY at, id LIMIT 1";
+            duplicate.Parameters.AddWithValue("$event", eventId);
+            duplicate.Parameters.AddWithValue("$url", urlValue);
+            DossierItem? existing = null;
+            using (var reader = duplicate.ExecuteReader())
+            {
+                if (reader.Read())
+                    existing = new DossierItem(reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3),
+                        reader.IsDBNull(4) ? null : reader.GetString(4), reader.GetString(5), reader.GetString(6), At(reader, 7));
+            }
+            if (existing is not null)
+            {
+                transaction.Commit();
+                return existing;
+            }
+        }
+        using (var count = connection.CreateCommand())
+        {
+            count.Transaction = transaction;
+            count.CommandText = "SELECT COUNT(*) FROM dossier_items WHERE event_id = $event";
+            count.Parameters.AddWithValue("$event", eventId);
+            if ((long)count.ExecuteScalar()! >= Dossiers.MaxItems)
+            {
+                transaction.Commit();
+                return null;
+            }
+        }
         using var command = connection.CreateCommand();
+        command.Transaction = transaction;
         command.CommandText = "INSERT INTO dossier_items (id, event_id, kind, title, url, detail, added_by, at) VALUES ($id, $event, $kind, $title, $url, $detail, $by, $at)";
         command.Parameters.AddWithValue("$id", item.Id);
         command.Parameters.AddWithValue("$event", eventId);
         command.Parameters.AddWithValue("$kind", kind);
         command.Parameters.AddWithValue("$title", item.Title);
-        command.Parameters.AddWithValue("$url", (object?)url ?? DBNull.Value);
+        command.Parameters.AddWithValue("$url", (object?)item.Url ?? DBNull.Value);
         command.Parameters.AddWithValue("$detail", item.Detail);
         command.Parameters.AddWithValue("$by", addedBy);
         command.Parameters.AddWithValue("$at", Unix(now));
         command.ExecuteNonQuery();
+        transaction.Commit();
         return item;
+    }
+
+    public bool UnpinFromDossier(string eventId, string id)
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "DELETE FROM dossier_items WHERE id = $id AND event_id = $event";
+        command.Parameters.AddWithValue("$id", id);
+        command.Parameters.AddWithValue("$event", eventId);
+        return command.ExecuteNonQuery() == 1;
     }
 
     public void UnpinFromDossier(string id)

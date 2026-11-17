@@ -193,6 +193,20 @@ public static class Dossiers
     public const string Link = "link";
     public static readonly IReadOnlyList<string> Kinds = [Report, Record, Note, Link];
     public const int MaxItems = 200;
+    public const int MaxTitleLength = 200;
+    public const int MaxDetailLength = 4000;
+    public const int MaxUrlLength = 2048;
+
+    public static string? Problem(string kind, string title, string? url, string detail) =>
+        !Kinds.Contains(kind) ? "Choose a dossier item type."
+        : string.IsNullOrWhiteSpace(title) ? "Give the dossier item a title."
+        : title.Trim().Length > MaxTitleLength ? $"Keep the title to {MaxTitleLength} characters or fewer."
+        : detail.Length > MaxDetailLength ? $"Keep the detail to {MaxDetailLength} characters or fewer."
+        : url is { Length: > MaxUrlLength } ? $"Keep the link to {MaxUrlLength} characters or fewer."
+        : string.IsNullOrWhiteSpace(url) ? null
+        : !Uri.TryCreate(url.Trim(), UriKind.Absolute, out var link) || link.Scheme is not ("http" or "https")
+            ? "Use an absolute HTTP or HTTPS link, or leave the link empty."
+            : null;
 }
 
 // N13: the morgue: one search over the desk's own records (notes, budget, live updates,

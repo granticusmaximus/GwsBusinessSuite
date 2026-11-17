@@ -420,16 +420,42 @@ public sealed class WorldNewsDeskTests : IDisposable
     [Fact]
     public void Dossier_ShouldPinOnceByUrl_AndRefuseUnknownKinds()
     {
-        var store = Store();
+        using var fixture = new WorldNewsTestStore();
+        fixture.SeedEvent("s1", "e1", "Bridge collapses", ["BBC"], Now);
+        var store = fixture.Store;
         var pinned = store.PinToDossier("e1", Dossiers.Report, "BBC: Bridge collapses", "https://bbc.example/a", "First report", "ana", Now);
         var again = store.PinToDossier("e1", Dossiers.Report, "BBC again", "https://bbc.example/a", "", "ben", Now);
 
         Assert.NotNull(pinned);
         Assert.Equal(pinned!.Id, again!.Id);
         Assert.Null(store.PinToDossier("e1", "video", "x", null, "", "ana", Now));
+        Assert.Throws<ArgumentException>(() => store.PinToDossier("e1", Dossiers.Link, "Unsafe link", "javascript:alert(1)", "", "ana", Now));
         Assert.Single(store.Dossier("e1"));
+        Assert.False(store.UnpinFromDossier("other-event", pinned.Id));
         store.UnpinFromDossier(pinned.Id);
         Assert.Empty(store.Dossier("e1"));
+    }
+
+    [Fact]
+    public void Dossier_ShouldEnforceTheLimit_WhileAllowingAnExistingLinkAtCapacity()
+    {
+        using var fixture = new WorldNewsTestStore();
+        fixture.SeedEvent("s1", "e1", "Bridge collapses", ["BBC"], Now);
+        var store = fixture.Store;
+        DossierItem? first = null;
+
+        for (var index = 0; index < Dossiers.MaxItems; index++)
+        {
+            var item = store.PinToDossier("e1", Dossiers.Report, $"Evidence {index}",
+                index == 0 ? "https://example.com/evidence" : null, "", "ana", Now.AddSeconds(index));
+            Assert.NotNull(item);
+            first ??= item;
+        }
+
+        Assert.Equal(Dossiers.MaxItems, store.Dossier("e1").Count);
+        Assert.Null(store.PinToDossier("e1", Dossiers.Note, "One too many", null, "", "ana", Now));
+        Assert.Equal(first!.Id, store.PinToDossier("e1", Dossiers.Report, "Duplicate", "https://example.com/evidence", "", "ben", Now)!.Id);
+        Assert.Equal(Dossiers.MaxItems, store.Dossier("e1").Count);
     }
 
     [Fact]
@@ -488,6 +514,7 @@ public sealed class WorldNewsDeskTests : IDisposable
         store.SaveSourceContact(new SourceContact("", "ben", "Harbour pilot", "Port of X", "", 3, "", Now));
         store.AddCorrection("e1", "Crane", "The crane fell at 06:40, not 06:10.", "ana", Now);
         store.AppendLabelSnapshots([("e1", "SingleSource", "Harbour report awaiting a second source.", 1, 1)], "test", Now);
+        store.SaveEnglishReports([new ReportTranslation("e1-0", "Harbour crane falls", null, "Quayside incident", null, "The crane fell beside the quay.")], Now);
 
         var hits = store.SearchDesk("harbour", "ana");
 
@@ -496,6 +523,7 @@ public sealed class WorldNewsDeskTests : IDisposable
         Assert.Contains(hits, h => h.Kind == "verdict" && h.EventId == "e1");
         Assert.Contains(hits, h => h.Kind == "contact" && h.Title == "Harbour master");
         Assert.DoesNotContain(hits, h => h.Kind == "contact" && h.Title == "Harbour pilot");
+        Assert.Equal("report", Assert.Single(store.SearchDesk("quayside", "ana")).Kind);
         Assert.Single(store.SearchDesk("06:40", "ana"));
     }
 

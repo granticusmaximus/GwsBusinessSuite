@@ -1155,6 +1155,27 @@ app.MapGet("/admin/world-news/events/{eventId}/document.pdf", (string eventId, G
     .RequireAuthorization("AdminOnly")
     .RequireRateLimiting("public-read");
 
+app.MapGet("/admin/world-news/events/{eventId}/dossier.pdf", async (string eventId, HttpContext httpContext,
+    GwsBusinessSuite.Infrastructure.Services.WorldNewsDeskService desk, CancellationToken cancellationToken) =>
+{
+    try
+    {
+        var file = await desk.ExportDossierPdfAsync(eventId, httpContext.User.Identity?.Name ?? string.Empty, cancellationToken);
+        httpContext.Response.Headers.CacheControl = "no-store";
+        return Results.File(file.Pdf, "application/pdf", file.FileName);
+    }
+    catch (UnauthorizedAccessException)
+    {
+        return Results.Forbid();
+    }
+    catch (InvalidOperationException)
+    {
+        return Results.NotFound();
+    }
+})
+    .RequireAuthorization("AdminOnly")
+    .RequireRateLimiting("public-read");
+
 // Web Push for the installed app (PWA phase 2, 07-11-26): js/push.js turns it on per device from
 // the bell, and WebPushDispatcher sends the bell's notifications. Writes need the X-GWS-Push header,
 // which makes them requests another site can't send without CORS (this app allows none), on top

@@ -162,6 +162,49 @@ public sealed partial class WorldNewsDeskService(IAppDbContext db, WorldNewsServ
         return await Task.Run(() => news.Store.SearchDesk(text.Trim(), username, MorgueSearch.MaxResults), cancellationToken);
     }
 
+    public async Task<IReadOnlyList<DossierItem>> DossierAsync(string eventId, string username, CancellationToken cancellationToken = default)
+    {
+        await RequireDeskUserAsync(username, cancellationToken);
+        return await Task.Run(() =>
+        {
+            if (!news.Store.HasEvent(eventId)) throw new InvalidOperationException("That story is no longer available.");
+            return news.Store.Dossier(eventId);
+        }, cancellationToken);
+    }
+
+    public async Task<DossierItem> PinDossierItemAsync(
+        string eventId, string kind, string title, string? url, string detail, string username, CancellationToken cancellationToken = default)
+    {
+        await RequireDeskUserAsync(username, cancellationToken);
+        if (Dossiers.Problem(kind, title, url, detail) is { } problem) throw new ArgumentException(problem, nameof(title));
+        var normalizedUrl = string.IsNullOrWhiteSpace(url) ? null : new Uri(url.Trim(), UriKind.Absolute).AbsoluteUri;
+        return await Task.Run(() =>
+            news.Store.PinToDossier(eventId, kind, title.Trim(), normalizedUrl, detail.Trim(), username, DateTimeOffset.UtcNow)
+            ?? throw new InvalidOperationException("The dossier is full. Remove an item before adding another."),
+            cancellationToken);
+    }
+
+    public async Task UnpinDossierItemAsync(string eventId, string id, string username, CancellationToken cancellationToken = default)
+    {
+        await RequireDeskUserAsync(username, cancellationToken);
+        if (!await Task.Run(() => news.Store.UnpinFromDossier(eventId, id), cancellationToken))
+            throw new InvalidOperationException("That dossier item is no longer available on this story.");
+    }
+
+    public async Task<(string FileName, byte[] Pdf)> ExportDossierPdfAsync(string eventId, string username, CancellationToken cancellationToken = default)
+    {
+        await RequireDeskUserAsync(username, cancellationToken);
+        return await Task.Run(() =>
+        {
+            var story = news.Story(eventId, username) ?? throw new InvalidOperationException("That story is no longer available.");
+            var items = news.Store.Dossier(eventId);
+            var notes = news.Store.DeskNotes(eventId, limit: 100);
+            var checks = news.Store.DeskChecks(eventId);
+            var signOffs = news.Store.SignOffs(eventId);
+            return (DossierPdf.FileName(story), DossierPdf.Render(story, items, notes, checks, signOffs, username, DateTimeOffset.UtcNow));
+        }, cancellationToken);
+    }
+
     public async Task<IReadOnlyList<DeskNote>> NotesAsync(string eventId, string username, CancellationToken cancellationToken = default)
     {
         await RequireDeskUserAsync(username, cancellationToken);

@@ -330,6 +330,7 @@ else
             <WorldNewsSignOffs @key="(e.Id, typeof(WorldNewsSignOffs))" EventId="@e.Id" ChecklistComplete="@DeskChecklist.IsComplete(_checks)" />
             <WorldNewsLiveEditor @key="(e.Id, typeof(WorldNewsLiveEditor))" EventId="@e.Id" />
             <WorldNewsCorrectionsEditor @key="(e.Id, typeof(WorldNewsCorrectionsEditor))" EventId="@e.Id" Title="@(e.Headline ?? e.Title)" />
+            <WorldNewsDossier @key="(e.Id, typeof(WorldNewsDossier))" EventId="@e.Id" />
         </section>
 
         @* 1. What happened. *@

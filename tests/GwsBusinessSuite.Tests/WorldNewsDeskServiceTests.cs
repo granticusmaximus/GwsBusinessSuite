@@ -9,6 +9,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using UglyToad.PdfPig;
 
 namespace GwsBusinessSuite.Tests;
 
@@ -83,6 +84,10 @@ public sealed class WorldNewsDeskServiceTests : IAsyncLifetime
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() => _desk.ReleaseHoldAsync("e1", username));
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() => _desk.CorrectionsAsync("e1", username));
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() => _desk.PublishCorrectionAsync("e1", "Correction", "Corrected fact", null, username));
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => _desk.DossierAsync("e1", username));
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => _desk.PinDossierItemAsync("e1", Dossiers.Note, "Private note", null, "", username));
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => _desk.UnpinDossierItemAsync("e1", "item", username));
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => _desk.ExportDossierPdfAsync("e1", username));
 
         Assert.Empty(_news.Store.DeskNotes("e1"));
     }
@@ -97,6 +102,32 @@ public sealed class WorldNewsDeskServiceTests : IAsyncLifetime
         Assert.Contains(hits, hit => hit.Kind == "note");
         await Assert.ThrowsAsync<ArgumentException>(() =>
             _desk.SearchMorgueAsync(new string('x', MorgueSearch.MaxQueryLength + 1), "ana"));
+    }
+
+    [Fact]
+    public async Task Dossier_ShouldValidateScopeItemsAndExportThePrivateStoryRecordAsPdf()
+    {
+        await Assert.ThrowsAsync<ArgumentException>(() =>
+            _desk.PinDossierItemAsync("e1", Dossiers.Link, "Unsafe", "javascript:alert(1)", "", "ana"));
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            _desk.DossierAsync("missing", "ana"));
+
+        var saved = await _desk.PinDossierItemAsync("e1", Dossiers.Record, "USGS incident record", "https://example.com/record", "Matches the reported time.", "ana");
+        await _desk.AddNoteAsync("e1", "Private desk context", "ana");
+        await Assert.ThrowsAsync<InvalidOperationException>(() => _desk.UnpinDossierItemAsync("other-event", saved.Id, "ana"));
+        Assert.Equal(saved.Id, Assert.Single(await _desk.DossierAsync("e1", "ana")).Id);
+
+        var export = await _desk.ExportDossierPdfAsync("e1", "ana");
+        Assert.EndsWith(".pdf", export.FileName, StringComparison.Ordinal);
+        Assert.StartsWith("%PDF-", System.Text.Encoding.ASCII.GetString(export.Pdf, 0, 5), StringComparison.Ordinal);
+        using var document = PdfDocument.Open(export.Pdf);
+        var text = string.Join(' ', document.GetPages().SelectMany(page => page.GetWords()).Select(word => word.Text));
+        Assert.Contains("USGS", text);
+        Assert.Contains("incident", text);
+        Assert.Contains("Private", text);
+        Assert.Contains("context", text);
+        Assert.Contains("Verification", text);
+        Assert.Contains("Quake", text);
     }
 
     [Fact]
