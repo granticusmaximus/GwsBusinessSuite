@@ -2830,6 +2830,8 @@ window.tacticalGlobe = (function () {
                 ? source.title : 'English translation pending');
             return '<li><a target="_blank" rel="noopener" href="' + escapeHtml(source.url) + '">' +
                 escapeHtml(source.outlet + ': ' + headline) + '</a>' +
+                (source.englishDescription ? '<p>' + escapeHtml(source.englishDescription) + '</p>' : '') +
+                (source.englishSummary ? '<p><strong>ENGLISH SUMMARY:</strong> ' + escapeHtml(source.englishSummary) + '</p>' : '') +
                 '<details><summary>Original (' + escapeHtml(source.language) + ')</summary>' +
                 escapeHtml(source.title) + '</details></li>';
         }).join('');

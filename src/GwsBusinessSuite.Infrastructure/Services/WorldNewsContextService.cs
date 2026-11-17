@@ -151,7 +151,9 @@ public sealed partial class WorldNewsContextService(
     public Task<IncidentCapture?> CaptureAsync(string username, WorldNewsMapSignal signal, CancellationToken ct = default)
     {
         if (signal.Location.City is null) return Task.FromResult<IncidentCapture?>(null);
-        var notes = string.Join("\n", new[] { signal.Summary }.Concat(signal.Sources.Select(s => $"{s.Outlet}: {s.Title} {s.Url}"))
+        var notes = string.Join("\n", new[] { signal.Summary }.Concat(signal.Sources.Select(s =>
+                $"{s.Outlet}: {s.EnglishTitle ?? s.Title}" +
+                (s.EnglishSummary is { Length: > 0 } summary ? $" — {summary}" : string.Empty) + $" {s.Url}"))
             .Where(line => !string.IsNullOrWhiteSpace(line)));
         return captures.StartAsync(username, Guid.Empty, "World News", $"News: {signal.Title}", signal.Latitude, signal.Longitude, ct,
             CaptureRadiusMiles, notes, $"/admin/world-news?situation={Uri.EscapeDataString(signal.SituationId)}");

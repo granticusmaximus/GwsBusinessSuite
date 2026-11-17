@@ -1194,42 +1194,71 @@ public sealed class WorldNewsAssistantSearch(WorldNewsService news) : GwsBusines
 
 // Reads the news every 15 minutes, starting a minute after the app starts (WorldNews:Enabled
 // turns it off; WorldNews:StartupDelaySeconds changes the wait).
-public sealed class WorldNewsBackgroundService(WorldNewsService news, IConfiguration configuration) : BackgroundService
+public sealed class WorldNewsBackgroundService(
+    WorldNewsService news,
+    IConfiguration configuration,
+    ILogger<WorldNewsBackgroundService> logger) : BackgroundService
 {
+    internal static readonly TimeSpan FailureRetryDelay = TimeSpan.FromMinutes(1);
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         if (!configuration.GetValue("WorldNews:Enabled", true)) return;
         try
         {
             await Task.Delay(TimeSpan.FromSeconds(configuration.GetValue("WorldNews:StartupDelaySeconds", 60)), stoppingToken);
-            using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
-            var reads = ReadLoopAsync(lifetime.Token);
-            var english = EnglishLoopAsync(lifetime.Token);
-            await Task.WhenAny(reads, english);
-            await lifetime.CancelAsync();
-            await Task.WhenAll(reads, english);
+            await Task.WhenAll(
+                RunResilientLoopAsync(ReadOnceAsync, "news refresh", FailureRetryDelay, logger, stoppingToken),
+                RunResilientLoopAsync(EnglishOnceAsync, "English processing", FailureRetryDelay, logger, stoppingToken));
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {
         }
     }
 
-    private async Task ReadLoopAsync(CancellationToken cancellationToken)
+    private async Task<TimeSpan> ReadOnceAsync(CancellationToken cancellationToken)
     {
-        using var timer = new PeriodicTimer(WorldNewsService.Interval);
-        do
-        {
-            await news.RefreshAsync(cancellationToken);
-        }
-        while (await timer.WaitForNextTickAsync(cancellationToken));
+        await news.RefreshAsync(cancellationToken);
+        return WorldNewsService.Interval;
     }
 
-    private async Task EnglishLoopAsync(CancellationToken cancellationToken)
+    private async Task<TimeSpan> EnglishOnceAsync(CancellationToken cancellationToken)
+    {
+        var madeProgress = await news.ProcessEnglishAsync(cancellationToken);
+        return TimeSpan.FromSeconds(madeProgress ? 5 : 60);
+    }
+
+    internal static async Task RunResilientLoopAsync(
+        Func<CancellationToken, Task<TimeSpan>> iteration,
+        string workerName,
+        TimeSpan failureRetryDelay,
+        ILogger logger,
+        CancellationToken cancellationToken)
     {
         while (!cancellationToken.IsCancellationRequested)
         {
-            var madeProgress = await news.ProcessEnglishAsync(cancellationToken);
-            await Task.Delay(TimeSpan.FromSeconds(madeProgress ? 5 : 60), cancellationToken);
+            try
+            {
+                var delay = await iteration(cancellationToken);
+                if (delay > TimeSpan.Zero)
+                    await Task.Delay(delay, cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                break;
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "World News {WorkerName} worker failed; retrying in {Delay}", workerName, failureRetryDelay);
+                try
+                {
+                    await Task.Delay(failureRetryDelay, cancellationToken);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    break;
+                }
+            }
         }
     }
 }

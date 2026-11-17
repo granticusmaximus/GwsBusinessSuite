@@ -40,7 +40,7 @@ public sealed record WorldNewsMapSignal(
 // translation is available. The map never generates translations or sends source content to a
 // third party; it only reuses World News's stored, user-visible translation.
 public sealed record WorldNewsMapSource(string Outlet, string Title, string Url, string Language = "Unknown",
-    string? EnglishTitle = null);
+    string? EnglishTitle = null, string? EnglishDescription = null, string? EnglishSummary = null);
 public sealed record WorldNewsRouteItem(WorldNewsMapSignal Signal, string Reason);
 public sealed record WorldNewsLocalLens(
     IReadOnlyList<WorldNewsMapSignal> Signals,
@@ -295,10 +295,9 @@ public sealed class WorldNewsMapService(WorldNewsStore store, WorldNewsMapCache?
             .OrderByDescending(a => a.SeenAt)
             .Take(4)
             .ToList();
-        var translations = store.Translations(sources.Select(article => article.Id));
         var mappedSources = sources
             .Select(article => new WorldNewsMapSource(article.Outlet, article.Title, article.Url, article.Language,
-                translations.GetValueOrDefault(article.Id)))
+                article.English?.Headline, article.English?.Description, article.English?.Summary))
             .ToList();
         // The summary often names the city the headline leaves out ("near Madrid, in Toledo province").
         if (location.Precision == WorldNewsPrecision.Country && summary is not null
