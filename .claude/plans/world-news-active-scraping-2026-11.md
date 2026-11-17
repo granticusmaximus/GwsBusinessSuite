@@ -35,3 +35,19 @@ Release build, Mac Debug build and all 4,459 tests passed. Responsive and deploy
 run because no targets were supplied. Production discovery remains unchanged until Grant commits
 and pushes; live SearXNG searches, publisher yield and the authenticated Sources layout therefore
 remain deployment acceptance items.
+
+## Adaptive discovery and useful-yield diagnostics (17-11-26)
+
+- [x] Persist a next-run and zero-yield streak for every configured standing search.
+- [x] Keep productive searches at ten minutes; exponentially back repeated zero-yield searches off
+  to one hour; retry failed searches after five minutes without stopping the other watches.
+- [x] Retain high-priority article queuing ahead of feed, sitemap, homepage and link-traversal work.
+- [x] Show the complete search funnel on Sources: searches, raw results, configured-publisher
+  results, genuinely new queued URLs and failures.
+- [x] Run focused regressions and the complete release gate.
+
+Focused crawler/background/CSS coverage passed 12/12. The final `scripts/verify-release.sh` result
+was `PARTIAL`: responsive lint, whitespace, Compose rendering, restore, dependency audit,
+zero-warning Release build, Mac Debug build and all 4,459 automated tests passed. Responsive and
+deployed checks were not run because no targets were supplied. Live useful-yield counts and the
+authenticated Sources layout remain deployment acceptance, and no publication action was taken.

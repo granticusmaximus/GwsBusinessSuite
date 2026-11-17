@@ -333,7 +333,21 @@ public sealed class WebCrawlTests : IDisposable
         status.ActiveNewsDiscovery.Should().BeTrue();
         status.LastNewsDiscoveryAt.Should().Be(clock.GetUtcNow());
         status.NewsDiscoverySearchesToday.Should().Be(2);
+        status.NewsDiscoveryReturnedToday.Should().Be(4);
+        status.NewsDiscoveryEligibleToday.Should().Be(2);
         status.NewsDiscoveryResultsToday.Should().Be(1, "duplicate publisher results across standing searches are counted once per cycle");
+        status.NewsDiscoveryFailuresToday.Should().Be(0);
+
+        clock.Advance(TimeSpan.FromMinutes(5));
+        (await crawler.DiscoverWorldNewsAsync()).Should().Be(0, "productive searches are not due again for ten minutes");
+        search.Queries.Should().HaveCount(2);
+
+        clock.Advance(TimeSpan.FromMinutes(5));
+        (await crawler.DiscoverWorldNewsAsync()).Should().Be(0, "already queued URLs are not counted as new discovery yield");
+        search.Queries.Should().HaveCount(3, "the zero-yield watch already backed off while the productive watch became due");
+        status = await crawler.GetStatusAsync();
+        status.NewsDiscoverySearchesToday.Should().Be(3);
+        status.NewsDiscoveryResultsToday.Should().Be(1);
         web.Requested.Should().Contain("https://www.nytimes.com/robots.txt");
         web.Requested.Should().NotContain(url => url.Contains("unknown.example", StringComparison.Ordinal));
     }

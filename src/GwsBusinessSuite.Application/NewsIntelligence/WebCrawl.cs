@@ -10,7 +10,8 @@ public sealed record WebSearchHit(string Url, string Host, string Title, string 
 
 public sealed record WebCrawlStatus(bool Enabled, long PagesIndexed, int Sites, int PagesToday, int DailyLimit, int Queued,
     DateTimeOffset? LastCrawlAt, int TopicMatchesToday, int RetentionDays, bool ActiveNewsDiscovery,
-    DateTimeOffset? LastNewsDiscoveryAt, int NewsDiscoverySearchesToday, int NewsDiscoveryResultsToday);
+    DateTimeOffset? LastNewsDiscoveryAt, int NewsDiscoverySearchesToday, int NewsDiscoveryReturnedToday,
+    int NewsDiscoveryEligibleToday, int NewsDiscoveryResultsToday, int NewsDiscoveryFailuresToday);
 
 public sealed record WebCrawlSite(string Host, string HomeUrl, bool AddedByHand, int PagesIndexed, DateTimeOffset? LastFetchedAt, string? LastError);
 

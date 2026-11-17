@@ -40,7 +40,10 @@ else
         {
             <div class="sources-number @(!crawl.ActiveNewsDiscovery ? "is-warn" : "")"><span>@(crawl.ActiveNewsDiscovery ? "On" : "Off")</span><small>active article discovery</small></div>
             <div class="sources-number"><span>@crawl.NewsDiscoverySearchesToday.ToString("N0")</span><small>standing searches today</small></div>
-            <div class="sources-number"><span>@crawl.NewsDiscoveryResultsToday.ToString("N0")</span><small>publisher pages discovered today</small></div>
+            <div class="sources-number"><span>@crawl.NewsDiscoveryReturnedToday.ToString("N0")</span><small>search results today</small></div>
+            <div class="sources-number"><span>@crawl.NewsDiscoveryEligibleToday.ToString("N0")</span><small>configured-publisher results</small></div>
+            <div class="sources-number"><span>@crawl.NewsDiscoveryResultsToday.ToString("N0")</span><small>new article URLs queued</small></div>
+            <div class="sources-number @(crawl.NewsDiscoveryFailuresToday > 0 ? "is-warn" : "")"><span>@crawl.NewsDiscoveryFailuresToday.ToString("N0")</span><small>search failures today</small></div>
         }
     </section>
 
@@ -48,8 +51,9 @@ else
     {
         <p class="small text-secondary">
             Active discovery last ran @(crawlStatus.LastNewsDiscoveryAt is { } discoveryAt ? discoveryAt.ToLocalGwsDateTime() : "not yet").
-            It searches the configured world, regional, conflict, weather, economy, technology, health, climate and politics watchlist every ten minutes;
-            only configured publishers enter the robots-aware crawl.
+            It checks the configured world, regional, conflict, weather, economy, technology, health, climate and politics watchlist every five minutes;
+            productive searches stay on a ten-minute cadence while repeated zero-yield searches back off to one hour.
+            Only configured publishers enter the robots-aware crawl.
         </p>
     }
 

@@ -33,8 +33,12 @@ public sealed class WebCrawlOptions
     // reached a feed yet. Results still enter the robots-aware crawler and only known news hosts
     // are accepted.
     public bool ActiveNewsDiscovery { get; set; } = true;
-    public int NewsDiscoveryIntervalMinutes { get; set; } = 10;
-    public int NewsDiscoveryQueriesPerCycle { get; set; } = 12;
+    // The background loop checks this often; each query keeps its own durable next-run time so
+    // productive watches stay frequent while repeated zero-yield watches back off.
+    public int NewsDiscoveryIntervalMinutes { get; set; } = 5;
+    public int NewsDiscoveryQueriesPerCycle { get; set; } = 6;
+    public int NewsDiscoveryProductiveIntervalMinutes { get; set; } = 10;
+    public int NewsDiscoveryQuietMaxIntervalMinutes { get; set; } = 60;
     public string[] NewsDiscoveryQueries { get; set; } =
     [
         "breaking world news today",
@@ -92,7 +96,10 @@ public sealed class WebCrawler(
     private int _newsDiscoveryQuery;
     private const string DiscoveryAttemptMark = "news-discovery-attempt";
     private const string DiscoverySearchCounter = "news-discovery-searches";
+    private const string DiscoveryReturnedCounter = "news-discovery-returned";
+    private const string DiscoveryEligibleCounter = "news-discovery-eligible";
     private const string DiscoveryResultCounter = "news-discovery-results";
+    private const string DiscoveryFailureCounter = "news-discovery-failures";
 
     // Where crawling starts: every feed Media Watch and World News already read (topics' trusted
     // feeds, the curated tech blogs, World News's outlets) and those sites' home pages.
@@ -145,43 +152,67 @@ public sealed class WebCrawler(
             .ToArray();
         if (configuredQueries.Length == 0) return 0;
 
-        var queryCount = Math.Clamp(options.Value.NewsDiscoveryQueriesPerCycle, 1, configuredQueries.Length);
-        var start = Interlocked.Add(ref _newsDiscoveryQuery, queryCount) - queryCount;
-        var results = new List<OllamaWebSearchResult>();
-        for (var offset = 0; offset < queryCount; offset++)
-        {
-            ct.ThrowIfCancellationRequested();
-            var query = configuredQueries[(start + offset) % configuredQueries.Length];
-            try
-            {
-                results.AddRange(await webSearch.SearchAsync(query, maxResults: 10, ct));
-                await Store.AddToCounterAsync(Today, DiscoverySearchCounter, 1);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
-            {
-                logger.LogWarning(ex, "Web crawl active news search failed for {Query}", query);
-            }
-        }
-        await Store.SetMarkAsync(DiscoveryAttemptMark, NowMs);
         var publisherHosts = OutletFeeds.Outlets
             .Select(outlet => Uri.TryCreate(outlet.Url, UriKind.Absolute, out var uri) ? NormalizeHost(uri.Host) : null)
             .OfType<string>()
             .ToHashSet(StringComparer.Ordinal);
-        var entries = new List<(string, string, bool, int, int, int)>();
-        foreach (var result in results)
+        var queryCount = Math.Clamp(options.Value.NewsDiscoveryQueriesPerCycle, 1, configuredQueries.Length);
+        var start = Interlocked.Add(ref _newsDiscoveryQuery, queryCount) - queryCount;
+        var dueQueries = new List<(string Query, long NextAt)>();
+        for (var offset = 0; offset < configuredQueries.Length; offset++)
         {
-            if (WebPageReader.Normalize(result.Url, new Uri("https://localhost/")) is not { } url || url.IsLoopback || IsSkipped(url.Host)) continue;
-            var host = NormalizeHost(url.Host);
-            if (!publisherHosts.Any(publisher => host == publisher || host.EndsWith("." + publisher, StringComparison.Ordinal)
-                    || publisher.EndsWith("." + host, StringComparison.Ordinal))) continue;
-            await Store.EnsureSiteAsync(url.Host, Home(url), NowMs, MinDelayMs);
-            entries.Add((url.AbsoluteUri, url.Host, false, 0, 1, 10));
+            var query = configuredQueries[(start + offset) % configuredQueries.Length];
+            dueQueries.Add((query, await Store.GetMarkAsync(DiscoveryMark(query, "next")) ?? 0));
         }
-        var discovered = entries.DistinctBy(entry => entry.Item1, StringComparer.OrdinalIgnoreCase).ToList();
-        await Store.EnqueueAsync(discovered, NowMs);
-        await Store.AddToCounterAsync(Today, DiscoveryResultCounter, discovered.Count);
-        return discovered.Count;
+
+        var selected = dueQueries.Where(item => item.NextAt <= NowMs).OrderBy(item => item.NextAt)
+            .ThenBy(item => item.Query, StringComparer.Ordinal).Take(queryCount).Select(item => item.Query).ToList();
+        var newUrls = 0;
+        foreach (var query in selected)
+        {
+            ct.ThrowIfCancellationRequested();
+            try
+            {
+                var results = await webSearch.SearchAsync(query, maxResults: 10, ct);
+                await Store.AddToCounterAsync(Today, DiscoverySearchCounter, 1);
+                await Store.AddToCounterAsync(Today, DiscoveryReturnedCounter, results.Count);
+                var entries = new List<(string, string, bool, int, int, int)>();
+                foreach (var result in results)
+                {
+                    if (WebPageReader.Normalize(result.Url, new Uri("https://localhost/")) is not { } url || url.IsLoopback || IsSkipped(url.Host)) continue;
+                    var host = NormalizeHost(url.Host);
+                    if (!publisherHosts.Any(publisher => host == publisher || host.EndsWith("." + publisher, StringComparison.Ordinal)
+                            || publisher.EndsWith("." + host, StringComparison.Ordinal))) continue;
+                    await Store.EnsureSiteAsync(url.Host, Home(url), NowMs, MinDelayMs);
+                    entries.Add((url.AbsoluteUri, url.Host, false, 0, 1, 10));
+                }
+                var eligible = entries.DistinctBy(entry => entry.Item1, StringComparer.OrdinalIgnoreCase).ToList();
+                await Store.AddToCounterAsync(Today, DiscoveryEligibleCounter, eligible.Count);
+                var queued = await Store.EnqueueAsync(eligible, NowMs);
+                await Store.AddToCounterAsync(Today, DiscoveryResultCounter, queued);
+                newUrls += queued;
+                var emptyMark = DiscoveryMark(query, "empty");
+                var emptyRuns = queued == 0 ? (await Store.GetMarkAsync(emptyMark) ?? 0) + 1 : 0;
+                await Store.SetMarkAsync(emptyMark, emptyRuns);
+                var minutes = queued > 0
+                    ? Math.Max(1, options.Value.NewsDiscoveryProductiveIntervalMinutes)
+                    : Math.Min(Math.Max(1, options.Value.NewsDiscoveryQuietMaxIntervalMinutes),
+                        Math.Max(1, options.Value.NewsDiscoveryProductiveIntervalMinutes) * (1L << (int)Math.Min(3, emptyRuns)));
+                await Store.SetMarkAsync(DiscoveryMark(query, "next"), NowMs + minutes * 60_000);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                logger.LogWarning(ex, "Web crawl active news search failed for {Query}", query);
+                await Store.AddToCounterAsync(Today, DiscoveryFailureCounter, 1);
+                await Store.SetMarkAsync(DiscoveryMark(query, "next"), NowMs + 5 * 60_000);
+            }
+        }
+        await Store.SetMarkAsync(DiscoveryAttemptMark, NowMs);
+        return newUrls;
     }
+
+    private static string DiscoveryMark(string query, string suffix) =>
+        $"news-discovery-{Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(query)))[..16]}-{suffix}";
 
     private async Task FetchEntryAsync(FrontierEntry entry, CancellationToken ct)
     {
@@ -453,7 +484,10 @@ public sealed class WebCrawler(
             options.Value.ActiveNewsDiscovery && webSearch?.IsConfigured == true,
             await Store.GetMarkAsync(DiscoveryAttemptMark) is { } discoveryMs ? DateTimeOffset.FromUnixTimeMilliseconds(discoveryMs) : null,
             (int)await Store.GetCounterAsync(Today, DiscoverySearchCounter),
-            (int)await Store.GetCounterAsync(Today, DiscoveryResultCounter));
+            (int)await Store.GetCounterAsync(Today, DiscoveryReturnedCounter),
+            (int)await Store.GetCounterAsync(Today, DiscoveryEligibleCounter),
+            (int)await Store.GetCounterAsync(Today, DiscoveryResultCounter),
+            (int)await Store.GetCounterAsync(Today, DiscoveryFailureCounter));
     }
 
     public async Task<IReadOnlyList<WebCrawlSite>> ListSitesAsync(int limit = 100, CancellationToken ct = default) =>
