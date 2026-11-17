@@ -92,7 +92,15 @@ public class AppDelegate : MauiUIApplicationDelegate
 	// The page's own search where it has one (World News, lists), else the app's command palette
 	// (app.js listens for gws-find).
 	[Export("gwsFind:")]
-	public void FindInWorkspace(NSObject sender) => RunInWorkspace("window.dispatchEvent(new CustomEvent('gws-find'))");
+	public void FindInWorkspace(NSObject sender)
+	{
+		if (MacToolbarActions.ActiveSentinelWindow is { } sentinel)
+		{
+			sentinel.EvaluateWorkspaceScript("document.querySelector('.sentinel-global-search')?.click()");
+			return;
+		}
+		RunInWorkspace("window.dispatchEvent(new CustomEvent('gws-find'))");
+	}
 
 	// Switches to the Workspace tab if another is showing; its page sets EvaluateScript as it appears.
 	private static void RunInWorkspace(string script) => MainThread.BeginInvokeOnMainThread(async () =>
