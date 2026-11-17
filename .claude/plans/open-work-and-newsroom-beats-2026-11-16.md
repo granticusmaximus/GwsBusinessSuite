@@ -318,3 +318,26 @@ run because Docker is unavailable, and the full suite failed (318 failures, 4139
 Windows SQLite file-lock cleanup failures. Running the service test class as a group also hit
 Windows SQLite cleanup locks; the N14 service/PDF regression passed alone. No browser workflow was
 independently verified.
+
+## N15: desk metrics
+
+Progress: implementation and local validation complete; browser/deployed acceptance remains.
+
+- [x] Expose the existing desk calculations through the active-admin service boundary.
+- [x] Add all-time desk KPIs and open items per person to News desk with loading, refresh and error states.
+- [x] Correct even-sample median calculation and add focused authorization/calculation regressions.
+- [x] Run focused tests and `scripts/verify-release.sh`.
+- [ ] Verify the interactive desk layout and refresh behavior in a browser.
+
+Metrics use retained desk records: budget ownership/status history, two-person verdict sign-offs,
+current trust labels, tips linked to stories, live updates and public corrections. “Held up” means
+the current label is not disputed and is at least as strong as the label at verdict. The dashboard
+does not rank people or infer individual performance from shared outcomes. N15 is the final newsroom
+unit; B10 reading work remains separate.
+
+Focused desk/service coverage passed 51/51. The first release-gate run exposed an N14 scoped-CSS
+regression: the dossier used a heading class styled only by its parent component. The dossier now
+owns that style; the CSS guard plus focused coverage passed 53/53. The final release gate was
+`PARTIAL`: responsive lint, whitespace, Docker rendering, restore, dependency audit, zero-warning
+Release build and all 4,459 automated tests passed. Responsive/deployed checks were not run because
+no targets were supplied; the Mac build was correctly skipped because this unit does not touch it.

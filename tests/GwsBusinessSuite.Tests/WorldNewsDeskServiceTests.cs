@@ -70,6 +70,7 @@ public sealed class WorldNewsDeskServiceTests : IAsyncLifetime
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() => _desk.AddNoteAsync("e1", "Private desk note", username));
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() => _desk.HandoverAsync(8, username));
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() => _desk.SearchMorgueAsync("Tokyo", username));
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => _desk.MetricsAsync(username));
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() => _desk.ContactsAsync(username));
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() => _desk.SaveContactAsync(new SourceContact("", "ana", "Source", "", "", 3, "", DateTimeOffset.UtcNow), username));
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() => _desk.RemoveContactAsync("source", username));
@@ -90,6 +91,17 @@ public sealed class WorldNewsDeskServiceTests : IAsyncLifetime
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() => _desk.ExportDossierPdfAsync("e1", username));
 
         Assert.Empty(_news.Store.DeskNotes("e1"));
+    }
+
+    [Fact]
+    public async Task Metrics_ShouldBeAvailableToActiveAdmins()
+    {
+        _news.Store.SetBudgetItem(new BudgetItem("e1", "Quake hits Tokyo", "ana", "watching", "Verify", DateTimeOffset.UtcNow, "ana"));
+
+        var metrics = await _desk.MetricsAsync("ana");
+
+        Assert.Equal(1, metrics.OnBudget);
+        Assert.Equal(("ana", 1), Assert.Single(metrics.OpenPerPerson));
     }
 
     [Fact]

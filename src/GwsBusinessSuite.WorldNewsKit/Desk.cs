@@ -245,7 +245,11 @@ public static class DeskMetricsRules
     public static TimeSpan? Median(IEnumerable<TimeSpan> spans)
     {
         var list = spans.OrderBy(s => s).ToList();
-        return list.Count == 0 ? null : list[list.Count / 2];
+        if (list.Count == 0) return null;
+        var middle = list.Count / 2;
+        return list.Count % 2 == 1
+            ? list[middle]
+            : TimeSpan.FromTicks((list[middle - 1].Ticks + list[middle].Ticks) / 2);
     }
 }
 

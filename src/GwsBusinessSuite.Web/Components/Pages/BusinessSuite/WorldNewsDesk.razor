@@ -28,6 +28,49 @@
 
 @if (!string.IsNullOrEmpty(_error)) { <p class="alert alert-warning" role="alert">@_error</p> }
 
+<section class="card border-0 shadow-sm mb-3" aria-labelledby="desk-metrics">
+    <div class="card-header desk-metrics-header">
+        <span><strong id="desk-metrics">Desk metrics</strong> <small class="text-secondary">newsroom workflow and outcomes</small></span>
+        <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@_metricsBusy" @onclick="LoadMetricsAsync">Refresh metrics</button>
+    </div>
+    <div class="card-body">
+        <p class="small text-secondary">All-time operational counts from retained desk records. A verdict held when the current trust label is at least as strong as the label signed by two people.</p>
+        @if (_metricsBusy)
+        {
+            <LoadingIndicator Message="Calculating desk metrics..." />
+        }
+        else if (_metricsError is { } metricsError)
+        {
+            <p class="alert alert-warning mb-0" role="alert">@metricsError</p>
+        }
+        else if (_metrics is { } metrics)
+        {
+            <div class="desk-metric-grid">
+                <div class="desk-metric"><span>On the budget</span><strong>@metrics.OnBudget</strong></div>
+                <div class="desk-metric"><span>Median to verdict</span><strong>@FormatDuration(metrics.MedianTimeToVerdict)</strong></div>
+                <div class="desk-metric"><span>Verdicts held up</span><strong>@FormatRatio(metrics.VerdictsHeld, metrics.VerdictsSigned, metrics.VerdictsHeldPercent)</strong></div>
+                <div class="desk-metric"><span>Tips became stories</span><strong>@FormatRatio(metrics.TipsBecameStories, metrics.Tips, metrics.Tips == 0 ? null : (int)Math.Round(100.0 * metrics.TipsBecameStories / metrics.Tips))</strong></div>
+                <div class="desk-metric"><span>Live updates</span><strong>@metrics.LiveUpdates</strong></div>
+                <div class="desk-metric"><span>Corrections published</span><strong>@metrics.CorrectionsPublished</strong></div>
+            </div>
+            <h2 class="h6 mt-3">Open items per person</h2>
+            @if (metrics.OpenPerPerson.Count == 0)
+            {
+                <p class="text-secondary mb-0">No open budget items.</p>
+            }
+            else
+            {
+                <ul class="desk-open-items">
+                    @foreach (var item in metrics.OpenPerPerson)
+                    {
+                        <li><span>@(string.IsNullOrWhiteSpace(item.Owner) ? "Unassigned" : item.Owner)</span><strong>@item.Open</strong></li>
+                    }
+                </ul>
+            }
+        }
+    </div>
+</section>
+
 <section class="card border-0 shadow-sm mb-3" aria-labelledby="desk-beats">
     <div class="card-header"><strong id="desk-beats">My beats</strong> <small class="text-secondary">your regions and kinds of story</small></div>
     <div class="card-body">
@@ -278,7 +321,21 @@
     private bool _morgueBusy;
     private bool _morgueSearched;
     private string? _morgueError;
+    private DeskMetrics? _metrics;
+    private bool _metricsBusy = true;
+    private string? _metricsError;
     private string StorySearchHref => $"/admin/world-news/search?q={Uri.EscapeDataString(_morgueQuery.Trim())}";
+
+    private static string FormatDuration(TimeSpan? duration) => duration switch
+    {
+        null => "Not enough data",
+        { TotalDays: >= 1 } value => $"{(int)value.TotalDays}d {value.Hours}h",
+        { TotalHours: >= 1 } value => $"{(int)value.TotalHours}h {value.Minutes}m",
+        { } value => $"{Math.Max(0, (int)value.TotalMinutes)}m"
+    };
+
+    private static string FormatRatio(int value, int total, int? percent) =>
+        percent is null ? $"{value} of {total}" : $"{value} of {total} ({percent}%)";
 
     private static string MorgueKindLabel(string kind) => kind switch
     {
@@ -359,6 +416,25 @@
     {
         await LoadAsync();
         await LoadBeatsAsync();
+        await LoadMetricsAsync();
+    }
+
+    private async Task LoadMetricsAsync()
+    {
+        _metricsBusy = true;
+        _metricsError = null;
+        try
+        {
+            var username = await CurrentUserAccessor.GetCurrentUsernameAsync();
+            await using var scope = ScopeFactory.CreateAsyncScope();
+            _metrics = await scope.ServiceProvider.GetRequiredService<WorldNewsDeskService>().MetricsAsync(username);
+        }
+        catch (Exception ex) when (ex is Microsoft.Data.Sqlite.SqliteException or InvalidOperationException or UnauthorizedAccessException)
+        {
+            Logger.LogWarning(ex, "World News: couldn't calculate desk metrics");
+            _metricsError = "Desk metrics couldn't be calculated. Refresh them and try again.";
+        }
+        finally { _metricsBusy = false; }
     }
 
     private void BeatKindChanged() => _beatValue = BeatValues[0];
@@ -443,12 +519,14 @@
             UpdatedAt = DateTimeOffset.UtcNow, UpdatedBy = by,
         }));
         await LoadAsync();
+        await LoadMetricsAsync();
     }
 
     private async Task RemoveAsync(BudgetItem row)
     {
         await Task.Run(() => News.Store.RemoveBudgetItem(row.EventId));
         await LoadAsync();
+        await LoadMetricsAsync();
     }
 
     private async Task SetTipAsync(NewsTip tip, string status)
@@ -463,5 +541,6 @@
         var by = await CurrentUserAccessor.GetCurrentUsernameAsync();
         await Task.Run(() => News.Store.SetTipStatus(tip.Id, status, eventId, by));
         await LoadAsync();
+        await LoadMetricsAsync();
     }
 }

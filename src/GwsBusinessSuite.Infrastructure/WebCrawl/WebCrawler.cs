@@ -33,7 +33,25 @@ public sealed class WebCrawlOptions
     // reached a feed yet. Results still enter the robots-aware crawler and only known news hosts
     // are accepted.
     public bool ActiveNewsDiscovery { get; set; } = true;
-    public int NewsDiscoveryIntervalMinutes { get; set; } = 15;
+    public int NewsDiscoveryIntervalMinutes { get; set; } = 10;
+    public int NewsDiscoveryQueriesPerCycle { get; set; } = 12;
+    public string[] NewsDiscoveryQueries { get; set; } =
+    [
+        "breaking world news today",
+        "latest Africa news today",
+        "latest Asia Pacific news today",
+        "latest Europe news today",
+        "latest Middle East news today",
+        "latest Latin America news today",
+        "latest North America news today",
+        "latest conflict security diplomacy news",
+        "latest severe weather disaster news",
+        "latest global economy markets business news",
+        "latest technology cybersecurity news",
+        "latest public health science news",
+        "latest climate energy news",
+        "latest elections government policy news"
+    ];
 }
 
 // Media Watch's web crawler (see IWebCrawlService). Polite by design: it reads each site's
@@ -72,16 +90,9 @@ public sealed class WebCrawler(
     private DateOnly Today => DateOnly.FromDateTime(time.GetUtcNow().UtcDateTime);
     private int MinDelayMs => Math.Max(1, options.Value.MinDelaySeconds) * 1000;
     private int _newsDiscoveryQuery;
-    private static readonly string[] NewsDiscoveryQueries =
-    [
-        "breaking world news today",
-        "latest Africa news today",
-        "latest Asia Pacific news today",
-        "latest Europe news today",
-        "latest Middle East news today",
-        "latest Latin America news today",
-        "latest North America news today"
-    ];
+    private const string DiscoveryAttemptMark = "news-discovery-attempt";
+    private const string DiscoverySearchCounter = "news-discovery-searches";
+    private const string DiscoveryResultCounter = "news-discovery-results";
 
     // Where crawling starts: every feed Media Watch and World News already read (topics' trusted
     // feeds, the curated tech blogs, World News's outlets) and those sites' home pages.
@@ -127,8 +138,31 @@ public sealed class WebCrawler(
     {
         if (!options.Value.ActiveNewsDiscovery || webSearch?.IsConfigured != true) return 0;
 
-        var query = NewsDiscoveryQueries[Interlocked.Increment(ref _newsDiscoveryQuery) % NewsDiscoveryQueries.Length];
-        var results = await webSearch.SearchAsync(query, maxResults: 10, ct);
+        var configuredQueries = options.Value.NewsDiscoveryQueries
+            .Select(query => query.Trim())
+            .Where(query => query.Length is >= 2 and <= 500)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        if (configuredQueries.Length == 0) return 0;
+
+        var queryCount = Math.Clamp(options.Value.NewsDiscoveryQueriesPerCycle, 1, configuredQueries.Length);
+        var start = Interlocked.Add(ref _newsDiscoveryQuery, queryCount) - queryCount;
+        var results = new List<OllamaWebSearchResult>();
+        for (var offset = 0; offset < queryCount; offset++)
+        {
+            ct.ThrowIfCancellationRequested();
+            var query = configuredQueries[(start + offset) % configuredQueries.Length];
+            try
+            {
+                results.AddRange(await webSearch.SearchAsync(query, maxResults: 10, ct));
+                await Store.AddToCounterAsync(Today, DiscoverySearchCounter, 1);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                logger.LogWarning(ex, "Web crawl active news search failed for {Query}", query);
+            }
+        }
+        await Store.SetMarkAsync(DiscoveryAttemptMark, NowMs);
         var publisherHosts = OutletFeeds.Outlets
             .Select(outlet => Uri.TryCreate(outlet.Url, UriKind.Absolute, out var uri) ? NormalizeHost(uri.Host) : null)
             .OfType<string>()
@@ -143,8 +177,10 @@ public sealed class WebCrawler(
             await Store.EnsureSiteAsync(url.Host, Home(url), NowMs, MinDelayMs);
             entries.Add((url.AbsoluteUri, url.Host, false, 0, 1, 10));
         }
-        await Store.EnqueueAsync(entries.DistinctBy(entry => entry.Item1, StringComparer.OrdinalIgnoreCase), NowMs);
-        return entries.Select(entry => entry.Item1).Distinct(StringComparer.OrdinalIgnoreCase).Count();
+        var discovered = entries.DistinctBy(entry => entry.Item1, StringComparer.OrdinalIgnoreCase).ToList();
+        await Store.EnqueueAsync(discovered, NowMs);
+        await Store.AddToCounterAsync(Today, DiscoveryResultCounter, discovered.Count);
+        return discovered.Count;
     }
 
     private async Task FetchEntryAsync(FrontierEntry entry, CancellationToken ct)
@@ -413,7 +449,11 @@ public sealed class WebCrawler(
         var (pages, sites, queued, lastFetchMs) = await Store.GetStatsAsync();
         return new WebCrawlStatus(options.Value.Enabled, pages, sites, (int)await Store.GetCounterAsync(Today, "fetches"),
             options.Value.DailyPageLimit, queued, lastFetchMs is { } ms ? DateTimeOffset.FromUnixTimeMilliseconds(ms) : null,
-            (int)await Store.GetCounterAsync(Today, "matches"), options.Value.RetentionDays);
+            (int)await Store.GetCounterAsync(Today, "matches"), options.Value.RetentionDays,
+            options.Value.ActiveNewsDiscovery && webSearch?.IsConfigured == true,
+            await Store.GetMarkAsync(DiscoveryAttemptMark) is { } discoveryMs ? DateTimeOffset.FromUnixTimeMilliseconds(discoveryMs) : null,
+            (int)await Store.GetCounterAsync(Today, DiscoverySearchCounter),
+            (int)await Store.GetCounterAsync(Today, DiscoveryResultCounter));
     }
 
     public async Task<IReadOnlyList<WebCrawlSite>> ListSitesAsync(int limit = 100, CancellationToken ct = default) =>

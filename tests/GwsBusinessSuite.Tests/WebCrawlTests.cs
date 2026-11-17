@@ -320,13 +320,20 @@ public sealed class WebCrawlTests : IDisposable
             DatabasePath = _dbPath,
             MinDelaySeconds = 1,
             DailyPageLimit = 100,
-            ParallelSites = 2
+            ParallelSites = 2,
+            NewsDiscoveryQueriesPerCycle = 2,
+            NewsDiscoveryQueries = ["breaking world news today", "latest technology cybersecurity news"]
         }), clock, NullLogger<WebCrawler>.Instance, search);
 
         (await crawler.DiscoverWorldNewsAsync()).Should().Be(1);
         await crawler.CrawlOnceAsync();
 
-        search.Queries.Should().ContainSingle();
+        search.Queries.Should().Equal("breaking world news today", "latest technology cybersecurity news");
+        var status = await crawler.GetStatusAsync();
+        status.ActiveNewsDiscovery.Should().BeTrue();
+        status.LastNewsDiscoveryAt.Should().Be(clock.GetUtcNow());
+        status.NewsDiscoverySearchesToday.Should().Be(2);
+        status.NewsDiscoveryResultsToday.Should().Be(1, "duplicate publisher results across standing searches are counted once per cycle");
         web.Requested.Should().Contain("https://www.nytimes.com/robots.txt");
         web.Requested.Should().NotContain(url => url.Contains("unknown.example", StringComparison.Ordinal));
     }

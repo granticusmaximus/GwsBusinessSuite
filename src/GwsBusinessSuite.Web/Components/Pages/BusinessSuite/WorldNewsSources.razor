@@ -3,10 +3,12 @@
 @attribute [Authorize(Policy = "AdminOnly")]
 @using Microsoft.AspNetCore.Authorization
 @using GwsBusinessSuite.Application.Abstractions
+@using GwsBusinessSuite.Application.NewsIntelligence
 @using GwsBusinessSuite.Infrastructure.Services
 @using GwsBusinessSuite.WorldNewsKit
 @inject WorldNewsService News
 @inject ICurrentUserAccessor CurrentUserAccessor
+@inject IWebCrawlService WebCrawl
 
 @* World News trust plan 1.15-1.18 (13-11-26): the crawler's numbers, coverage by region, every
    feed with its health, adding an outlet by its homepage, and outlets' records. *@
@@ -34,7 +36,22 @@ else
         <div class="sources-number"><span>@d.Feeds.Count(f => f.State == "ok")</span><small>of @d.Feeds.Count feeds answering</small></div>
         <div class="sources-number @(Failing > 0 ? "is-warn" : "")"><span>@Failing</span><small>failing or refusing</small></div>
         <div class="sources-number"><span>@d.Feeds.Count(f => f.State is "quiet" or "paused")</span><small>quiet or paused</small></div>
+        @if (_crawlStatus is { } crawl)
+        {
+            <div class="sources-number @(!crawl.ActiveNewsDiscovery ? "is-warn" : "")"><span>@(crawl.ActiveNewsDiscovery ? "On" : "Off")</span><small>active article discovery</small></div>
+            <div class="sources-number"><span>@crawl.NewsDiscoverySearchesToday.ToString("N0")</span><small>standing searches today</small></div>
+            <div class="sources-number"><span>@crawl.NewsDiscoveryResultsToday.ToString("N0")</span><small>publisher pages discovered today</small></div>
+        }
     </section>
+
+    @if (_crawlStatus is { } crawlStatus)
+    {
+        <p class="small text-secondary">
+            Active discovery last ran @(crawlStatus.LastNewsDiscoveryAt is { } discoveryAt ? discoveryAt.ToLocalGwsDateTime() : "not yet").
+            It searches the configured world, regional, conflict, weather, economy, technology, health, climate and politics watchlist every ten minutes;
+            only configured publishers enter the robots-aware crawl.
+        </p>
+    }
 
     @if (d.Silences.Count > 0)
     {
@@ -161,6 +178,7 @@ else
 
 @code {
     private CrawlDashboard? _dashboard;
+    private WebCrawlStatus? _crawlStatus;
     private bool _busy;
     private string _state = string.Empty;
     private string _homepage = string.Empty;
@@ -180,7 +198,14 @@ else
     private async Task LoadAsync()
     {
         _busy = true;
-        try { _dashboard = await Task.Run(() => News.Dashboard(DateTimeOffset.UtcNow)); }
+        try
+        {
+            var dashboard = Task.Run(() => News.Dashboard(DateTimeOffset.UtcNow));
+            var crawlStatus = WebCrawl.GetStatusAsync();
+            await Task.WhenAll(dashboard, crawlStatus);
+            _dashboard = await dashboard;
+            _crawlStatus = await crawlStatus;
+        }
         finally { _busy = false; }
     }
 

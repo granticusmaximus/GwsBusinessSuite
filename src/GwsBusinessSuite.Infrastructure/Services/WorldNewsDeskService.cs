@@ -162,6 +162,12 @@ public sealed partial class WorldNewsDeskService(IAppDbContext db, WorldNewsServ
         return await Task.Run(() => news.Store.SearchDesk(text.Trim(), username, MorgueSearch.MaxResults), cancellationToken);
     }
 
+    public async Task<DeskMetrics> MetricsAsync(string username, CancellationToken cancellationToken = default)
+    {
+        await RequireDeskUserAsync(username, cancellationToken);
+        return await Task.Run(() => news.Store.DeskMetrics(DateTimeOffset.UtcNow), cancellationToken);
+    }
+
     public async Task<IReadOnlyList<DossierItem>> DossierAsync(string eventId, string username, CancellationToken cancellationToken = default)
     {
         await RequireDeskUserAsync(username, cancellationToken);

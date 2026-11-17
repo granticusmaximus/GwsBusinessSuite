@@ -483,6 +483,14 @@ public sealed class WorldNewsDeskTests : IDisposable
     }
 
     [Fact]
+    public void Metrics_ShouldAverageTheMiddleDurations_ForAnEvenSample()
+    {
+        var median = DeskMetricsRules.Median([TimeSpan.FromHours(1), TimeSpan.FromHours(5)]);
+
+        Assert.Equal(TimeSpan.FromHours(3), median);
+    }
+
+    [Fact]
     public void Handover_ShouldSayWhatMoved_WhatIsUnconfirmed_AndWhatIsOpen()
     {
         var budget = new[]

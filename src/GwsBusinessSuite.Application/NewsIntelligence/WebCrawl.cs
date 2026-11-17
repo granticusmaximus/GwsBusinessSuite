@@ -9,7 +9,8 @@ namespace GwsBusinessSuite.Application.NewsIntelligence;
 public sealed record WebSearchHit(string Url, string Host, string Title, string Snippet, DateTimeOffset? PublishedAt, DateTimeOffset FetchedAt);
 
 public sealed record WebCrawlStatus(bool Enabled, long PagesIndexed, int Sites, int PagesToday, int DailyLimit, int Queued,
-    DateTimeOffset? LastCrawlAt, int TopicMatchesToday, int RetentionDays);
+    DateTimeOffset? LastCrawlAt, int TopicMatchesToday, int RetentionDays, bool ActiveNewsDiscovery,
+    DateTimeOffset? LastNewsDiscoveryAt, int NewsDiscoverySearchesToday, int NewsDiscoveryResultsToday);
 
 public sealed record WebCrawlSite(string Host, string HomeUrl, bool AddedByHand, int PagesIndexed, DateTimeOffset? LastFetchedAt, string? LastError);
 
