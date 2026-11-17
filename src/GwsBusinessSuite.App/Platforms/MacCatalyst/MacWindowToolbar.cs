@@ -32,6 +32,7 @@ internal static class MacToolbarActions
     // other tabs show - the menu switches to the Workspace tab first.
     public static Action? SetUpTouchId { get; set; }
     public static Action? SignInWithTouchId { get; set; }
+    public static MainPage? ActiveSentinelWindow { get; set; }
 
     // Raised by a tab button; AppShell owns the actual navigation.
     public static Action<string>? SelectTab { get; set; }

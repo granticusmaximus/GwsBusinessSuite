@@ -11,6 +11,9 @@ public partial class App : Microsoft.Maui.Controls.Application
 	private readonly SentinelAgentMacRelay _agentRelay;
 	private readonly SignInApprovalRelay _signInApprovals;
 	private readonly LocalAiPowerPolicyService _localAiPower;
+#if MACCATALYST
+	private readonly List<Window> _sentinelWindows = [];
+#endif
 	private SignInApprovalPage? _approvalShown;
 
 	public App(OfflineSyncService offlineSync, NativeSessionClient session, WorldNewsSummaryRelay worldNewsSummaries,
@@ -99,4 +102,18 @@ public partial class App : Microsoft.Maui.Controls.Application
 #endif
 		return window;
 	}
+
+#if MACCATALYST
+	internal void OpenSentinelWindow()
+	{
+		var services = IPlatformApplication.Current?.Services
+			?? throw new InvalidOperationException("The application services are unavailable.");
+		var page = services.GetRequiredService<MainPage>();
+		page.IsSentinelWindow = true;
+		var window = new Window(page) { Title = "Sentinel", MinimumWidth = 820, MinimumHeight = 600 };
+		_sentinelWindows.Add(window);
+		window.Destroying += (_, _) => _sentinelWindows.Remove(window);
+		OpenWindow(window);
+	}
+#endif
 }

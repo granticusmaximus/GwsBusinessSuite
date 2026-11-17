@@ -32,6 +32,10 @@ public partial class MainPage : ContentPage
     private bool _connectivitySubscribed;
     private bool _wasOffline;
     private bool _startedLoading;
+    internal bool IsSentinelWindow { get; set; }
+    private string WorkspaceStartUrl => IsSentinelWindow
+        ? $"{AppEndpoints.BaseUrl}/admin/sentinel/window"
+        : AppEndpoints.StartUrl;
     private CancellationTokenSource? _navigationTimeoutCts;
 #if MACCATALYST
     private bool _nativeOverwatchCompatibilityReloaded;
@@ -60,6 +64,10 @@ public partial class MainPage : ContentPage
     }
 
 #if MACCATALYST
+    internal void EvaluateWorkspaceScript(string script) => _ = WorkspaceView.EvaluateJavaScriptAsync(script);
+    internal void SignInWithTouchId() => _ = SignInWithTouchIdAsync(reportProblems: true);
+    internal void SetUpTouchId() => _ = SetUpTouchIdAsync();
+
     private void OnWorkspaceViewHandlerChanged(object? sender, EventArgs e)
     {
         if (WorkspaceView.Handler?.PlatformView is WKWebView webView)
@@ -87,16 +95,19 @@ public partial class MainPage : ContentPage
         // Route the Mac window's native titlebar buttons to this page's own handlers while it is
         // the visible tab. Cleared in OnDisappearing so Reload is a no-op while the SentinelGPT
         // tab is showing instead of silently reloading a WebView the user can no longer see.
-        MacToolbarActions.Reload = () => OnReloadClicked(this, EventArgs.Empty);
-        MacToolbarActions.EvaluateScript = script => _ = WorkspaceView.EvaluateJavaScriptAsync(script);
-        MacToolbarActions.ConfigureDeviceLogin = () => OnConfigureDeviceLoginClicked(this, EventArgs.Empty);
-        MacToolbarActions.SetUpTouchId = () => _ = SetUpTouchIdAsync();
-        MacToolbarActions.SignInWithTouchId = () => _ = SignInWithTouchIdAsync(reportProblems: true);
-        MacToolbarActions.SyncSelectedTab?.Invoke("MainPage");
+        if (!IsSentinelWindow)
+        {
+            MacToolbarActions.Reload = () => OnReloadClicked(this, EventArgs.Empty);
+            MacToolbarActions.EvaluateScript = script => _ = WorkspaceView.EvaluateJavaScriptAsync(script);
+            MacToolbarActions.ConfigureDeviceLogin = () => OnConfigureDeviceLoginClicked(this, EventArgs.Empty);
+            MacToolbarActions.SetUpTouchId = () => _ = SetUpTouchIdAsync();
+            MacToolbarActions.SignInWithTouchId = () => _ = SignInWithTouchIdAsync(reportProblems: true);
+            MacToolbarActions.SyncSelectedTab?.Invoke("MainPage");
+        }
 #endif
 
         // Another tab (e.g. Notes after saving) asked to open a page here.
-        if (_startedLoading && WorkspaceNavigation.TakePending() is { } pendingUrl)
+        if (!IsSentinelWindow && _startedLoading && WorkspaceNavigation.TakePending() is { } pendingUrl)
         {
             WorkspaceView.Source = pendingUrl;
         }
@@ -109,7 +120,7 @@ public partial class MainPage : ContentPage
             await StartWorkspaceAsync();
 #if MACCATALYST
             // Overwatch camera watch runs on this Mac's own Ollama, using the Workspace session.
-            _cameraWatcher.Start();
+            if (!IsSentinelWindow) _cameraWatcher.Start();
 #endif
         }
     }
@@ -117,6 +128,13 @@ public partial class MainPage : ContentPage
     private async Task StartWorkspaceAsync()
     {
 #if MACCATALYST
+        if (IsSentinelWindow)
+        {
+            _resumingSession = _touchIdLock.IsSetUp;
+            BeginBlockingNavigation();
+            WorkspaceView.Source = WorkspaceStartUrl;
+            return;
+        }
         await ClearStaleWebViewCacheAsync();
 
         // With Touch ID set up, open the workspace first (05-11-26). A Touch ID sign-in now lasts its
@@ -129,7 +147,7 @@ public partial class MainPage : ContentPage
         {
             _resumingSession = true;
             BeginBlockingNavigation();
-            WorkspaceView.Source = AppEndpoints.StartUrl;
+            WorkspaceView.Source = WorkspaceStartUrl;
             return;
         }
 #endif
@@ -152,7 +170,7 @@ public partial class MainPage : ContentPage
         // No device secret configured, device login failed/was cancelled, or a non-MacCatalyst
         // platform - fall back to today's behavior exactly: load the WebView and let the user
         // sign in (with MFA) inside it.
-        WorkspaceView.Source = AppEndpoints.StartUrl;
+        WorkspaceView.Source = WorkspaceStartUrl;
     }
 
 #if MACCATALYST
@@ -197,7 +215,7 @@ public partial class MainPage : ContentPage
             return null;
         }
         DebugLog($"Device sign-in: handoff={result.WebSignInUrl is not null}");
-        return result.WebSignInUrl ?? AppEndpoints.StartUrl;
+        return result.WebSignInUrl ?? WorkspaceStartUrl;
     }
 #endif
 
@@ -238,9 +256,12 @@ public partial class MainPage : ContentPage
         }
 
 #if MACCATALYST
-        MacToolbarActions.Reload = null;
-        MacToolbarActions.EvaluateScript = null;
-        MacToolbarActions.ConfigureDeviceLogin = null;
+        if (!IsSentinelWindow)
+        {
+            MacToolbarActions.Reload = null;
+            MacToolbarActions.EvaluateScript = null;
+            MacToolbarActions.ConfigureDeviceLogin = null;
+        }
 #endif
 
         base.OnDisappearing();
@@ -282,6 +303,23 @@ public partial class MainPage : ContentPage
             args.Cancel = true;
             _ = HandleNativeRequestAsync(nativeUri.Host);
             return;
+        }
+        if (IsSentinelWindow && Uri.TryCreate(args.Url, UriKind.Absolute, out var sentinelUri)
+            && AppEndpoints.IsTrusted(sentinelUri))
+        {
+            var destination = SentinelWindowNavigation.Classify(sentinelUri);
+            if (destination == SentinelWindowDestination.Workspace)
+            {
+                args.Cancel = true;
+                WorkspaceView.Source = $"{WorkspaceStartUrl}{sentinelUri.Query}{sentinelUri.Fragment}";
+                return;
+            }
+            if (destination == SentinelWindowDestination.External)
+            {
+                args.Cancel = true;
+                _ = Launcher.Default.OpenAsync(sentinelUri);
+                return;
+            }
         }
         SlowNavigationNotice.IsVisible = false;
         NavigationProgress.IsVisible = !LoadingOverlay.IsVisible;
@@ -570,7 +608,7 @@ public partial class MainPage : ContentPage
                 }
             }
 #endif
-            _ = OfferTouchIdOnceAsync(args.Url);
+            if (!IsSentinelWindow) _ = OfferTouchIdOnceAsync(args.Url);
             _ = VerifyTouchIdSessionAsync(args.Url);
             return;
         }
@@ -673,7 +711,7 @@ public partial class MainPage : ContentPage
     {
         StatusOverlay.IsVisible = false;
         BeginBlockingNavigation();
-        WorkspaceView.Source = AppEndpoints.StartUrl;
+        WorkspaceView.Source = WorkspaceStartUrl;
     }
 
     private void BeginBlockingNavigation()

@@ -42,10 +42,11 @@ public class AppDelegate : MauiUIApplicationDelegate
 		var checkForUpdates = UICommand.Create("Check for Updates…", null, new Selector("gwsCheckForUpdates:"), null);
 		var setUpTouchId = UICommand.Create("Set Up Touch ID…", null, new Selector("gwsSetUpTouchId:"), null);
 		var signInWithTouchId = UICommand.Create("Sign In with Touch ID", null, new Selector("gwsSignInWithTouchId:"), null);
+		var openSentinelWindow = UICommand.Create("Open Sentinel in New Window", null, new Selector("gwsOpenSentinelWindow:"), null);
 		// PWA phase 4 (07-11-26): this Mac is SentinelGPT's model for your phone and tablet.
 		var openAtLogin = UICommand.Create("Open at Login…", null, new Selector("gwsOpenAtLogin:"), null);
 		builder.InsertSiblingMenuAfter(
-			UIMenu.Create(string.Empty, null, UIMenuIdentifier.None, UIMenuOptions.DisplayInline, [checkForUpdates, setUpTouchId, signInWithTouchId, openAtLogin]),
+			UIMenu.Create(string.Empty, null, UIMenuIdentifier.None, UIMenuOptions.DisplayInline, [checkForUpdates, setUpTouchId, signInWithTouchId, openSentinelWindow, openAtLogin]),
 			UIMenuIdentifier.About.GetConstant()!);
 
 		// The standard Mac commands for the web workspace (12-11-26): Settings..., Back, Forward and
@@ -66,8 +67,21 @@ public class AppDelegate : MauiUIApplicationDelegate
 	}
 
 	[Export("gwsSettings:")]
-	public void OpenSettings(NSObject sender) =>
+	public void OpenSettings(NSObject sender)
+	{
+		if (MacToolbarActions.ActiveSentinelWindow is not null)
+		{
+			_ = Launcher.Default.OpenAsync(new Uri($"{AppEndpoints.BaseUrl}/admin/settings"));
+			return;
+		}
 		RunInWorkspace("(window.Blazor && Blazor.navigateTo) ? Blazor.navigateTo('/admin/settings') : location.assign('/admin/settings')");
+	}
+
+	[Export("gwsOpenSentinelWindow:")]
+	public void OpenSentinelWindow(NSObject sender) => MainThread.BeginInvokeOnMainThread(() =>
+	{
+		if (Microsoft.Maui.Controls.Application.Current is App app) app.OpenSentinelWindow();
+	});
 
 	[Export("gwsBack:")]
 	public void GoBack(NSObject sender) => RunInWorkspace("history.back()");
@@ -83,6 +97,11 @@ public class AppDelegate : MauiUIApplicationDelegate
 	// Switches to the Workspace tab if another is showing; its page sets EvaluateScript as it appears.
 	private static void RunInWorkspace(string script) => MainThread.BeginInvokeOnMainThread(async () =>
 	{
+		if (MacToolbarActions.ActiveSentinelWindow is { } sentinel)
+		{
+			sentinel.EvaluateWorkspaceScript(script);
+			return;
+		}
 		if (MacToolbarActions.EvaluateScript is null)
 		{
 			MacToolbarActions.SelectTab?.Invoke("MainPage");
@@ -104,6 +123,11 @@ public class AppDelegate : MauiUIApplicationDelegate
 	[Export("gwsSignInWithTouchId:")]
 	public void SignInWithTouchId(NSObject sender) => MainThread.BeginInvokeOnMainThread(() =>
 	{
+		if (MacToolbarActions.ActiveSentinelWindow is { } sentinel)
+		{
+			sentinel.SignInWithTouchId();
+			return;
+		}
 		MacToolbarActions.SelectTab?.Invoke("MainPage");
 		MacToolbarActions.SignInWithTouchId?.Invoke();
 	});
@@ -111,6 +135,11 @@ public class AppDelegate : MauiUIApplicationDelegate
 	[Export("gwsSetUpTouchId:")]
 	public void SetUpTouchId(NSObject sender) => MainThread.BeginInvokeOnMainThread(() =>
 	{
+		if (MacToolbarActions.ActiveSentinelWindow is { } sentinel)
+		{
+			sentinel.SetUpTouchId();
+			return;
+		}
 		MacToolbarActions.SelectTab?.Invoke("MainPage");
 		MacToolbarActions.SetUpTouchId?.Invoke();
 	});

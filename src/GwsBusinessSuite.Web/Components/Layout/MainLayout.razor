@@ -247,7 +247,8 @@
         {
             var path = Navigation.ToBaseRelativePath(Navigation.Uri);
             return path.StartsWith("admin/canvas", StringComparison.OrdinalIgnoreCase)
-                || path.StartsWith("admin/ssh-terminal-window", StringComparison.OrdinalIgnoreCase);
+                || path.StartsWith("admin/ssh-terminal-window", StringComparison.OrdinalIgnoreCase)
+                || Navigation.ToAbsoluteUri(Navigation.Uri).AbsolutePath.Equals("/admin/sentinel/window", StringComparison.OrdinalIgnoreCase);
         }
     }
 

@@ -1,5 +1,6 @@
 @page "/admin/wiki"
 @page "/admin/sentinel"
+@page "/admin/sentinel/window"
 @rendermode InteractiveServer
 @attribute [Authorize(Policy = "ContentAccess")]
 @implements IAsyncDisposable
@@ -8,6 +9,7 @@
 @using GwsBusinessSuite.Domain.Entities
 @using System.Text.Json
 @using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.AspNetCore.Components.Routing
 @using Microsoft.AspNetCore.WebUtilities
 @inject GwsBusinessSuite.Web.Services.AssistantContext Assistant
 @inject IWikiService WikiService
@@ -2228,6 +2230,7 @@
 
     private async Task SetShellFocusAsync(bool on)
     {
+        if (_windowNavigationRegistration is not null) return;
         try
         {
             await JS.InvokeVoidAsync("gwsFocusMode.set", on);
@@ -3257,6 +3260,12 @@
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        if (firstRender && Navigator.ToAbsoluteUri(Navigator.Uri).AbsolutePath.Equals(
+                "/admin/sentinel/window", StringComparison.OrdinalIgnoreCase))
+        {
+            _windowNavigationRegistration = Navigator.RegisterLocationChangingHandler(KeepWindowNavigationAsync);
+        }
+
         if (SelectedPageId != _keptOfflineLoadedFor)
         {
             await RefreshKeptOfflineAsync();
@@ -5138,8 +5147,25 @@
 
     public sealed record LinkedDatabaseSuggestion(Guid Id, string Title, string Icon);
 
+    private IDisposable? _windowNavigationRegistration;
+
+    private async ValueTask KeepWindowNavigationAsync(LocationChangingContext context)
+    {
+        var target = Navigator.ToAbsoluteUri(context.TargetLocation);
+        var origin = Navigator.ToAbsoluteUri(Navigator.BaseUri);
+        if (Uri.Compare(target, origin, UriComponents.SchemeAndServer, UriFormat.Unescaped,
+                StringComparison.OrdinalIgnoreCase) == 0
+            && (target.AbsolutePath.Equals("/admin/sentinel/window", StringComparison.OrdinalIgnoreCase)
+                || target.AbsolutePath.StartsWith("/admin/sentinel/present/", StringComparison.OrdinalIgnoreCase)))
+            return;
+
+        context.PreventNavigation();
+        await JS.InvokeVoidAsync("location.assign", target.AbsoluteUri);
+    }
+
     public async ValueTask DisposeAsync()
     {
+        _windowNavigationRegistration?.Dispose();
         // Flush any pending autosave before the block editor module (and possibly the whole
         // circuit) tears down below - the component is going away entirely (route change,
         // browser closed, circuit lost), which is exactly the case OpenPageAsync/
@@ -5154,7 +5180,7 @@
         }
 
         // Leaving Sentinel in focus mode shouldn't leave the rest of the admin without its chrome.
-        if (_focusMode)
+        if (_focusMode && _windowNavigationRegistration is null)
         {
             try { await JS.InvokeVoidAsync("gwsFocusMode.set", false); }
             catch (Exception ex) when (ex is JSDisconnectedException or JSException) { }

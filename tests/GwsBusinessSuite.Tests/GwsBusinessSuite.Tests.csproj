@@ -29,6 +29,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Compile Include="..\..\src\GwsBusinessSuite.App\SentinelWindowNavigation.cs" Link="Native\SentinelWindowNavigation.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\src\GwsBusinessSuite.Domain\GwsBusinessSuite.Domain.csproj" />
     <ProjectReference
       Include="..\..\src\GwsBusinessSuite.Application\GwsBusinessSuite.Application.csproj" />
