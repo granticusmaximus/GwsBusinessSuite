@@ -329,6 +329,7 @@ public sealed class WebCrawlTests : IDisposable
         await crawler.CrawlOnceAsync();
 
         search.Queries.Should().Equal("breaking world news today", "latest technology cybersecurity news");
+        search.RecentQueries.Should().Equal(search.Queries);
         var status = await crawler.GetStatusAsync();
         status.ActiveNewsDiscovery.Should().BeTrue();
         status.LastNewsDiscoveryAt.Should().Be(clock.GetUtcNow());
@@ -382,11 +383,18 @@ public sealed class WebCrawlTests : IDisposable
     {
         public bool IsConfigured => true;
         public List<string> Queries { get; } = [];
+        public List<string> RecentQueries { get; } = [];
 
         public Task<IReadOnlyList<OllamaWebSearchResult>> SearchAsync(string query, int? maxResults = null, CancellationToken ct = default)
         {
             Queries.Add(query);
             return Task.FromResult(results);
+        }
+
+        public Task<IReadOnlyList<OllamaWebSearchResult>> SearchRecentAsync(string query, int? maxResults = null, CancellationToken ct = default)
+        {
+            RecentQueries.Add(query);
+            return SearchAsync(query, maxResults, ct);
         }
 
         public Task<OllamaWebSearchResult> FetchAsync(string url, CancellationToken ct = default) =>

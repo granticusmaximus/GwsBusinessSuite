@@ -30,10 +30,23 @@ public sealed class OllamaWebSearchService(
 
     public bool IsConfigured => UsesOllama || UsesSearxng;
 
-    public async Task<IReadOnlyList<OllamaWebSearchResult>> SearchAsync(
+    public Task<IReadOnlyList<OllamaWebSearchResult>> SearchAsync(
         string query,
         int? maxResults = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default) =>
+        SearchCoreAsync(query, maxResults, recent: false, ct);
+
+    public Task<IReadOnlyList<OllamaWebSearchResult>> SearchRecentAsync(
+        string query,
+        int? maxResults = null,
+        CancellationToken ct = default) =>
+        SearchCoreAsync(query, maxResults, recent: true, ct);
+
+    private async Task<IReadOnlyList<OllamaWebSearchResult>> SearchCoreAsync(
+        string query,
+        int? maxResults,
+        bool recent,
+        CancellationToken ct)
     {
         if (!IsConfigured)
         {
@@ -46,15 +59,17 @@ public sealed class OllamaWebSearchService(
             throw new ArgumentException("A web search query must be between 2 and 500 characters.", nameof(query));
         }
 
-        if (UsesSearxng) return await SearchSearxngAsync(normalizedQuery, Math.Clamp(maxResults ?? _options.MaxResults, 1, 10), ct);
+        var resultLimit = Math.Clamp(maxResults ?? _options.MaxResults, 1, 10);
+        if (UsesSearxng)
+            return await SearchSearxngAsync(normalizedQuery, resultLimit, recent ? "day" : null, ct);
 
         using var request = CreateRequest(
             HttpMethod.Post,
             "/api/web_search",
             new
             {
-                query = normalizedQuery,
-                max_results = Math.Clamp(maxResults ?? _options.MaxResults, 1, 10)
+                query = recent ? $"{normalizedQuery} within the past 24 hours" : normalizedQuery,
+                max_results = resultLimit
             });
         using var response = await http.SendAsync(request, ct);
         response.EnsureSuccessStatusCode();
@@ -96,9 +111,14 @@ public sealed class OllamaWebSearchService(
             Limit(result.Content, 12_000));
     }
 
-    private async Task<IReadOnlyList<OllamaWebSearchResult>> SearchSearxngAsync(string query, int maxResults, CancellationToken ct)
+    private async Task<IReadOnlyList<OllamaWebSearchResult>> SearchSearxngAsync(
+        string query,
+        int maxResults,
+        string? timeRange,
+        CancellationToken ct)
     {
-        var url = $"{_options.SearxngUrl.TrimEnd('/')}/search?format=json&safesearch=1&q={Uri.EscapeDataString(query)}";
+        var range = timeRange is null ? string.Empty : $"&time_range={Uri.EscapeDataString(timeRange)}";
+        var url = $"{_options.SearxngUrl.TrimEnd('/')}/search?format=json&safesearch=1{range}&q={Uri.EscapeDataString(query)}";
         using var response = await http.GetAsync(url, ct);
         response.EnsureSuccessStatusCode();
         var result = await response.Content.ReadFromJsonAsync<WebSearchResponse>(cancellationToken: ct);

@@ -53,7 +53,7 @@ else
             Active discovery last ran @(crawlStatus.LastNewsDiscoveryAt is { } discoveryAt ? discoveryAt.ToLocalGwsDateTime() : "not yet").
             It checks the configured world, regional, conflict, weather, economy, technology, health, climate and politics watchlist every five minutes;
             productive searches stay on a ten-minute cadence while repeated zero-yield searches back off to one hour.
-            Only configured publishers enter the robots-aware crawl.
+            Searches favor the past 24 hours; freshness remains best-effort for undated results. Only configured publishers enter the robots-aware crawl.
         </p>
     }
 

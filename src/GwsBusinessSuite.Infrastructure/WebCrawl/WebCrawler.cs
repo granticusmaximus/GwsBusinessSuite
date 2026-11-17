@@ -173,7 +173,7 @@ public sealed class WebCrawler(
             ct.ThrowIfCancellationRequested();
             try
             {
-                var results = await webSearch.SearchAsync(query, maxResults: 10, ct);
+                var results = await webSearch.SearchRecentAsync(query, maxResults: 10, ct);
                 await Store.AddToCounterAsync(Today, DiscoverySearchCounter, 1);
                 await Store.AddToCounterAsync(Today, DiscoveryReturnedCounter, results.Count);
                 var entries = new List<(string, string, bool, int, int, int)>();

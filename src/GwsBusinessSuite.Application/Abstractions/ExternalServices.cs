@@ -112,6 +112,11 @@ public interface IOllamaWebSearchService
         string query,
         int? maxResults = null,
         CancellationToken ct = default);
+    Task<IReadOnlyList<OllamaWebSearchResult>> SearchRecentAsync(
+        string query,
+        int? maxResults = null,
+        CancellationToken ct = default) =>
+        SearchAsync($"{query} within the past 24 hours", maxResults, ct);
     Task<OllamaWebSearchResult> FetchAsync(string url, CancellationToken ct = default);
 }
 public interface IDockerDeploymentService { Task<string> DeployAsync(string appName, string dockerfilePath, CancellationToken ct = default); }

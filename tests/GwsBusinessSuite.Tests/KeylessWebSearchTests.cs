@@ -1,4 +1,5 @@
 using System.Net;
+using System.Text.Json;
 using FluentAssertions;
 using GwsBusinessSuite.Application.Wiki;
 using GwsBusinessSuite.Infrastructure.Services;
@@ -35,6 +36,52 @@ public sealed class KeylessWebSearchTests
 
         asked!.AbsoluteUri.Should().StartWith("http://10.1.2.3:8888/search?format=json").And.Contain("q=earthquake%20today");
         results.Should().ContainSingle().Which.Should().Be(new GwsBusinessSuite.Application.Abstractions.OllamaWebSearchResult("Quake hits", "https://news.example/quake", "A magnitude 6"));
+    }
+
+    [Fact]
+    public async Task RecentSearch_ShouldRequestSearxngDayRange()
+    {
+        Uri? asked = null;
+        var http = new HttpClient(new Handler(request =>
+        {
+            asked = request.RequestUri;
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("""{"results":[]}""", System.Text.Encoding.UTF8, "application/json"),
+            };
+        }));
+        var service = new OllamaWebSearchService(http, Options.Create(new OllamaWebOptions { SearxngUrl = "http://10.1.2.3:8888/" }));
+
+        await service.SearchRecentAsync("latest world news");
+
+        asked!.Query.Should().Contain("time_range=day").And.Contain("q=latest%20world%20news");
+    }
+
+    [Fact]
+    public async Task RecentSearch_ShouldTellOllamaProviderToPreferLastDay()
+    {
+        string? submittedQuery = null;
+        var http = new HttpClient(new Handler(request =>
+        {
+            using var payload = JsonDocument.Parse(request.Content!.ReadAsStringAsync().GetAwaiter().GetResult());
+            submittedQuery = payload.RootElement.GetProperty("query").GetString();
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("""{"results":[]}""", System.Text.Encoding.UTF8, "application/json"),
+            };
+        }))
+        {
+            BaseAddress = new Uri("https://ollama.example/"),
+        };
+        var service = new OllamaWebSearchService(http, Options.Create(new OllamaWebOptions
+        {
+            ApiKey = "test-key",
+            BaseUrl = "https://ollama.example/",
+        }));
+
+        await service.SearchRecentAsync("latest world news");
+
+        submittedQuery.Should().Be("latest world news within the past 24 hours");
     }
 
     [Fact]
