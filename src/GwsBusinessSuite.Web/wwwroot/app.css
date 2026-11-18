@@ -1003,6 +1003,38 @@ h1:focus { outline: none; }
 .gws-rail-flyout-remove:hover,
 .gws-rail-flyout-remove:focus-visible { background: var(--gws-sidebar-hover-bg); color: var(--gws-text-strong); }
 .gws-rail-flyout-empty { margin: .2rem .5rem .55rem; color: var(--gws-text-soft); font-size: .8125rem; }
+
+/* The right-click menu on the nav's Sentinel links (js/sentinel-window.js). */
+.gws-context-menu {
+    position: fixed;
+    z-index: 1090;
+    min-width: 15rem;
+    padding: .35rem;
+    border: 1px solid var(--gws-panel-border);
+    border-radius: 12px;
+    background: var(--gws-panel-bg);
+    color: var(--gws-text-strong);
+    box-shadow: 0 12px 32px rgba(0, 0, 0, .28);
+}
+.gws-context-menu-item {
+    display: flex;
+    align-items: center;
+    gap: .55rem;
+    width: 100%;
+    min-height: 36px;
+    padding: .35rem .6rem;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    color: inherit;
+    font-size: .875rem;
+    text-align: left;
+}
+.gws-context-menu-item:hover,
+.gws-context-menu-item:focus-visible { background: var(--gws-sidebar-hover-bg); outline: none; }
+@media (pointer: coarse) {
+    .gws-context-menu-item { min-height: 44px; }
+}
 @media (pointer: coarse) {
     .gws-rail-flyout li a { min-height: 44px; }
     .gws-rail-flyout-remove { width: 44px; height: 44px; }

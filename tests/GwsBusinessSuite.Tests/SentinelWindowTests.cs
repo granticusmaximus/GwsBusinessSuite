@@ -25,6 +25,16 @@ public sealed class SentinelWindowTests
             .Should().Be((SentinelWindowDestination)expected);
     }
 
+    [Theory]
+    [InlineData(null, "https://example.test/admin/sentinel/window")]
+    [InlineData("?page=6f9619ff-8b86-d011-b42d-00cf4fc964ff", "https://example.test/admin/sentinel/window?page=6f9619ff-8b86-d011-b42d-00cf4fc964ff")]
+    [InlineData("?database=6f9619ff-8b86-d011-b42d-00cf4fc964ff&row=6f9619ff-8b86-d011-b42d-00cf4fc964fe", "https://example.test/admin/sentinel/window?database=6f9619ff-8b86-d011-b42d-00cf4fc964ff&row=6f9619ff-8b86-d011-b42d-00cf4fc964fe")]
+    [InlineData("?page=not-a-guid&next=https://evil.test", "https://example.test/admin/sentinel/window")]
+    public void WindowUrl_KeepsOnlyThePageOrDatabaseToOpen(string? query, string expected)
+    {
+        SentinelWindowNavigation.WindowUrl("https://example.test/", query).Should().Be(expected);
+    }
+
     [Fact]
     public void WindowRoute_UsesTheExistingAuthorizedSentinelEditor()
     {

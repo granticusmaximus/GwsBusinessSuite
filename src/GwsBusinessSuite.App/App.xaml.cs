@@ -104,12 +104,13 @@ public partial class App : Microsoft.Maui.Controls.Application
 	}
 
 #if MACCATALYST
-	internal void OpenSentinelWindow()
+	internal void OpenSentinelWindow(string? query = null)
 	{
 		var services = IPlatformApplication.Current?.Services
 			?? throw new InvalidOperationException("The application services are unavailable.");
 		var page = services.GetRequiredService<MainPage>();
 		page.IsSentinelWindow = true;
+		page.SentinelWindowQuery = query;
 		var window = new Window(page) { Title = "Sentinel", MinimumWidth = 820, MinimumHeight = 600 };
 		_sentinelWindows.Add(window);
 		window.Destroying += (_, _) => _sentinelWindows.Remove(window);

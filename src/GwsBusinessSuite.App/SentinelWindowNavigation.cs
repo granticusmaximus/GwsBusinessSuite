@@ -9,6 +9,22 @@ internal enum SentinelWindowDestination
 
 internal static class SentinelWindowNavigation
 {
+    public const string WindowPath = "/admin/sentinel/window";
+
+    // The Sentinel window's address, keeping only the page or database to open from the request
+    // (gws-native://sentinel-window?page=...), so the page can't steer the window anywhere else.
+    public static string WindowUrl(string baseUrl, string? query)
+    {
+        var url = baseUrl.TrimEnd('/') + WindowPath;
+        if (string.IsNullOrEmpty(query)) return url;
+        var kept = query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries)
+            .Select(part => part.Split('=', 2))
+            .Where(pair => pair.Length == 2 && pair[0] is "page" or "database" or "row" && Guid.TryParse(pair[1], out _))
+            .Select(pair => $"{pair[0]}={Guid.Parse(pair[1])}")
+            .ToList();
+        return kept.Count == 0 ? url : $"{url}?{string.Join('&', kept)}";
+    }
+
     public static SentinelWindowDestination Classify(Uri uri)
     {
         var path = uri.AbsolutePath.TrimEnd('/');

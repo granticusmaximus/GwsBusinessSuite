@@ -21,6 +21,14 @@
         <p class="small text-secondary mb-0">@DateTimeOffset.Now.ToString("dd-MM-yy")</p>
     </Meta>
     <Actions>
+        @if (IsAdmin)
+        {
+            @* sentinel-window.js opens it: a new app window in the Mac app, a popup in a browser. *@
+            <a class="btn btn-primary" href="/admin/sentinel/window" data-gws-sentinel-window
+               title="Open Sentinel on its own, in a new window">
+                <i class="bi bi-window-plus me-1" aria-hidden="true"></i>Open Sentinel in New Window
+            </a>
+        }
         <a class="btn btn-primary" href="/admin/article-editor"><i class="bi bi-pencil-square me-1" aria-hidden="true"></i>Manage posts</a>
         @if (IsNativeApp)
         {

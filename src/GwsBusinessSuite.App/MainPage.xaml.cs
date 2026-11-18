@@ -33,8 +33,10 @@ public partial class MainPage : ContentPage
     private bool _wasOffline;
     private bool _startedLoading;
     internal bool IsSentinelWindow { get; set; }
+    // The page or database the Sentinel window opens on (from gws-native://sentinel-window?page=...).
+    internal string? SentinelWindowQuery { get; set; }
     private string WorkspaceStartUrl => IsSentinelWindow
-        ? $"{AppEndpoints.BaseUrl}/admin/sentinel/window"
+        ? SentinelWindowNavigation.WindowUrl(AppEndpoints.BaseUrl, SentinelWindowQuery)
         : AppEndpoints.StartUrl;
     private CancellationTokenSource? _navigationTimeoutCts;
 #if MACCATALYST
@@ -315,7 +317,7 @@ public partial class MainPage : ContentPage
         if (Uri.TryCreate(args.Url, UriKind.Absolute, out var nativeUri) && nativeUri.Scheme == "gws-native")
         {
             args.Cancel = true;
-            _ = HandleNativeRequestAsync(nativeUri.Host);
+            _ = HandleNativeRequestAsync(nativeUri.Host, nativeUri.Query);
             return;
         }
         if (IsSentinelWindow && Uri.TryCreate(args.Url, UriKind.Absolute, out var sentinelUri)
@@ -325,7 +327,7 @@ public partial class MainPage : ContentPage
             if (destination == SentinelWindowDestination.Workspace)
             {
                 args.Cancel = true;
-                WorkspaceView.Source = $"{WorkspaceStartUrl}{sentinelUri.Query}{sentinelUri.Fragment}";
+                WorkspaceView.Source = SentinelWindowNavigation.WindowUrl(AppEndpoints.BaseUrl, sentinelUri.Query) + sentinelUri.Fragment;
                 return;
             }
             if (destination == SentinelWindowDestination.External)
@@ -353,8 +355,16 @@ public partial class MainPage : ContentPage
 
     // Does the Touch ID step, then tells the page (a "gws-native" DOM event). The page doesn't
     // trust the event: it asks the server whether the unlock or the new key is really there.
-    private async Task HandleNativeRequestAsync(string action)
+    private async Task HandleNativeRequestAsync(string action, string query = "")
     {
+        // The dashboard's "Open Sentinel in New Window" button and the nav's right-click menu.
+        if (action == "sentinel-window")
+        {
+#if MACCATALYST
+            if (Microsoft.Maui.Controls.Application.Current is App app) app.OpenSentinelWindow(query);
+#endif
+            return;
+        }
         // The sign-in page's Touch ID button: the Touch ID screen takes it from here.
         if (action == "signin")
         {
