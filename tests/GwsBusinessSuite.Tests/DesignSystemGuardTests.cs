@@ -99,4 +99,87 @@ public sealed class DesignSystemGuardTests
         File.ReadAllText(Path.Combine(app, "App.xaml.cs")).Should().Contain("window.MinimumWidth = 820;");
         File.ReadAllText(Path.Combine(Web, "wwwroot/app.js")).Should().Contain("window.addEventListener('gws-find'");
     }
+
+    // Apple-style pass (18-11-26): the Mac toolbar's Sidebar and Search drive the page, and the page
+    // drops its own copies only for an app build that has them.
+    [Fact]
+    public void MacApp_ToolbarSidebarAndSearch_ShouldReachThePage()
+    {
+        var mac = Path.GetFullPath(Path.Combine(Web, "../GwsBusinessSuite.App/Platforms/MacCatalyst"));
+        File.ReadAllText(Path.Combine(mac, "MacWebViewCompatibility.cs")).Should().Contain("window.__gwsMacNativeChrome = true;");
+        File.ReadAllText(Path.Combine(mac, "MacWindowToolbar.cs")).Should().Contain("\"toolbar-sidebar\"").And.Contain("\"toolbar-search\"");
+        File.ReadAllText(Path.Combine(mac, "AppDelegate.cs")).Should()
+            .Contain("new CustomEvent('gws-toggle-sidebar')").And.Contain("new CustomEvent('gws-open-search')")
+            .And.Contain("[Export(\"toggleSidebar:\")]");
+
+        var appJs = File.ReadAllText(Path.Combine(Web, "wwwroot/app.js"));
+        appJs.Should().Contain("window.addEventListener('gws-toggle-sidebar', toggleNavigation);")
+            .And.Contain("window.addEventListener('gws-open-search', openCommand);");
+        foreach (var script in new[] { appJs, File.ReadAllText(Path.Combine(Web, "wwwroot/js/theme-init.js")) })
+            script.Should().Contain("window.__gwsMacNativeChrome === true ? 'native'").And.Contain("'data-gws-mac'");
+        File.ReadAllText(Path.Combine(Web, "wwwroot/app.css")).Should()
+            .Contain(":root[data-gws-mac=\"native\"] .gws-admin-bar :is(.gws-sidebar-toggle, .gws-command-trigger) { display: none; }");
+    }
+
+    private static IEnumerable<string> AdminSheets() =>
+        Files("*.razor.css").Prepend(Path.Combine(Web, "wwwroot/app.css"));
+
+    [Fact]
+    public void AdminStyles_ShouldSizeTextFromTheTypeScale()
+    {
+        var literal = AdminSheets()
+            .SelectMany(path => Regex.Matches(File.ReadAllText(path), @"font-size\s*:\s*-?\d*\.?\d+(rem|px)\b").Select(match => $"{Name(path)}: {match.Value}"));
+        literal.Should().BeEmpty("text sizes are var(--gws-type-*) tokens (app.css :root); clamp() and em stay allowed");
+    }
+
+    [Fact]
+    public void AdminStyles_ShouldRoundCornersFromTheRadiusScale()
+    {
+        // Hairlines (up to 2px), percentages and calc() offsets for nested corners stay allowed.
+        var literal = AdminSheets().SelectMany(path =>
+            Regex.Matches(File.ReadAllText(path), @"border(-(top|bottom)-(left|right))?-radius\s*:\s*([^;}]+)")
+                .Select(match => Regex.Replace(match.Groups[3].Value, @"(calc|var)\([^;}]*\)", ""))
+                .Where(value => Regex.Matches(value, @"(?<![\w.-])(\d*\.?\d+)px\b")
+                    .Select(px => double.Parse(px.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture))
+                    .Any(px => px > 2))
+                .Select(value => $"{Name(path)}: {value.Trim()}"));
+        literal.Should().BeEmpty("corners are var(--gws-radius-*) tokens (app.css :root)");
+    }
+
+    [Fact]
+    public void AdminStyles_ShouldOnlyUseTokensThatExist()
+    {
+        // A token is defined by a stylesheet, set inline by a Razor component, or set by a script.
+        var wwwroot = Path.Combine(Web, "wwwroot");
+        var defined = Directory.EnumerateFiles(wwwroot, "*.css", SearchOption.AllDirectories)
+            .Concat(Files("*.razor"))
+            .SelectMany(path => Regex.Matches(File.ReadAllText(path), @"(--gws-[\w-]+)\s*:").Select(match => match.Groups[1].Value))
+            .Concat(Directory.EnumerateFiles(wwwroot, "*.js", SearchOption.AllDirectories)
+                .SelectMany(path => Regex.Matches(File.ReadAllText(path), @"setProperty\(\s*'(--gws-[\w-]+)'").Select(match => match.Groups[1].Value)))
+            .ToHashSet(StringComparer.Ordinal);
+
+        var missing = AdminSheets().SelectMany(path =>
+        {
+            var css = File.ReadAllText(path);
+            var unknown = Regex.Matches(css, @"var\(\s*(--gws-[\w-]+)\s*\)").Select(match => match.Groups[1].Value)
+                .Where(token => !defined.Contains(token));
+            // The admin pages don't load public-site.css, so a --neu-* token must be set in its own file.
+            var neu = path.EndsWith(".razor.css", StringComparison.Ordinal)
+                ? Regex.Matches(css, @"var\(\s*(--neu-[\w-]+)").Select(match => match.Groups[1].Value)
+                    .Where(token => !Regex.IsMatch(css, Regex.Escape(token) + @"\s*:"))
+                : Enumerable.Empty<string>();
+            return unknown.Concat(neu).Distinct().Select(token => $"{Name(path)}: {token}");
+        });
+        missing.Should().BeEmpty("an undefined var() with no fallback silently drops the whole declaration");
+    }
+
+    [Fact]
+    public void AdminStyles_ShouldNotGrowNewOneOffShadows()
+    {
+        // A ratchet (18-11-26, 185): lower it as shadows move onto --gws-neu-* and --gws-shadow-* tokens.
+        const int ceiling = 185;
+        var raw = AdminSheets().Sum(path => Regex.Matches(File.ReadAllText(path), @"box-shadow\s*:\s*([^;}]+)")
+            .Count(match => !Regex.IsMatch(match.Groups[1].Value, @"^\s*(none|var\([^()]*\)|inherit|initial|unset)\s*(!important)?\s*$")));
+        raw.Should().BeLessThanOrEqualTo(ceiling, "new shadows use the existing tokens");
+    }
 }
