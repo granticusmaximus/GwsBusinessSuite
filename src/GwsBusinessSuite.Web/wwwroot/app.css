@@ -66,6 +66,10 @@
     --gws-type-3xl: 2rem;
     --gws-type-4xl: 2.5rem;
     --gws-type-5xl: 3rem;
+    /* Motion (18-11-26): short and eased like macOS; reduced-motion users get none (below). */
+    --gws-ease: cubic-bezier(.25, .1, .25, 1);
+    --gws-duration-fast: 120ms;
+    --gws-duration-base: 200ms;
     --gws-control-height: 40px;
     --gws-control-height-sm: 34px;
     /* Visual system (shell redesign R4). Spacing is a 4px scale (step-N is N x 4px; gws-responsive.css
@@ -1257,6 +1261,22 @@ button.gws-nav-button { width: 100%; background: none; text-align: left; font-fa
 :root[data-gws-mac="native"] .gws-admin-bar :is(.gws-sidebar-toggle, .gws-command-trigger) { display: none; }
 :root[data-gws-mac]:not(:has(.gws-status-item:is([data-tone="warning"], [data-tone="danger"]))) { --gws-status-strip-height: 0px; }
 :root[data-gws-mac]:not(:has(.gws-status-item:is([data-tone="warning"], [data-tone="danger"]))) .gws-status-strip { display: none; }
+
+/* Press feedback (18-11-26): a button gives slightly under the pointer, as a Mac control does. */
+:is(.btn, .gws-theme-toggle, .gws-sidebar-toggle, .gws-command-trigger, .gws-bottom-bar-item):active:not(:disabled) {
+    transform: scale(.98);
+}
+:is(.btn, .gws-theme-toggle, .gws-sidebar-toggle, .gws-command-trigger, .gws-bottom-bar-item) {
+    transition-property: background-color, border-color, color, box-shadow, transform;
+    transition-duration: var(--gws-duration-fast);
+    transition-timing-function: var(--gws-ease);
+}
+
+/* Reduce Motion (System Settings > Accessibility) turns transitions and smooth scrolling off app-wide. */
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { transition-duration: 0s !important; scroll-behavior: auto !important; }
+    :is(.btn, .gws-theme-toggle, .gws-sidebar-toggle, .gws-command-trigger, .gws-bottom-bar-item):active { transform: none; }
+}
 @media print { .gws-status-strip { display: none; } }
 
 /* Boards: where a dragged card will land (kanban-board.js adds it to <body>, outside the board's
