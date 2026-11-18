@@ -29,7 +29,9 @@ public sealed record WorldNewsMapSignal(
     // For cyber stories, how sure it is (CyberStatus), from the headlines.
     string? Status = null,
     // The situation's latest event, whose document READ DOCUMENT opens (06-11-26).
-    string? EventId = null)
+    string? EventId = null,
+    // Subtype, icon and how sure the tag is (SituationSubtypes, 18-11-26).
+    SituationTag? Tag = null)
 {
     public string Country => Location.Country;
     public double Latitude => Location.Latitude;
@@ -278,12 +280,14 @@ public sealed class WorldNewsMapService(WorldNewsStore store, WorldNewsMapCache?
         var sources = details.Sources;
         var (outlets, before) = growth.GetValueOrDefault(situation.Id);
         var kind = KindOf(situation);
+        var tag = SituationSubtypes.Tag(kind, [situation.Title, situation.Latest, summary,
+            .. sources.Select(source => source.EnglishTitle ?? source.Title)]);
         return new WorldNewsMapSignal(situation.Id, situation.Title, situation.Latest, location, situation.EventCount,
             situation.OutletCount, situation.ArticleCount, situation.LastSeen, summary, sources, kind,
             situation.LastSeen >= DateTimeOffset.UtcNow - SituationLinker.QuietAfter,
             SituationSurge.IsSurging(outlets, before) ? SituationSurge.Message(outlets, before) : null,
             kind == SituationKinds.Cyber ? CyberStatus.Of([situation.Title, situation.Latest, summary, .. sources.Select(source => source.Title)]) : null,
-            details.EventId);
+            details.EventId, tag);
     }
 
     private Details LoadDetails(SituationOverview situation, WorldNewsLocation location)

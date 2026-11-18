@@ -31,6 +31,7 @@
 @inject GwsBusinessSuite.Infrastructure.Services.TimeMachineService TimeMachine
 @inject GwsBusinessSuite.Infrastructure.Services.OverwatchBriefingService Briefings
 @inject GwsBusinessSuite.Infrastructure.Services.WorldNewsMapService WorldNewsMap
+@inject GwsBusinessSuite.Infrastructure.Services.WorldNewsService WorldNewsReads
 @inject GwsBusinessSuite.Infrastructure.Services.WorldNewsContextService NewsContext
 @inject GwsBusinessSuite.Infrastructure.Services.MapNoteService MapNotes
 @inject GwsBusinessSuite.Application.LiveLayers.AircraftService AircraftService
@@ -1610,6 +1611,7 @@
         _username = await CurrentUserAccessor.GetCurrentUsernameAsync();
         _favorites = (await CameraFavoritesService.GetFavoritesAsync(_username)).ToList();
         _favoriteCameraIds = _favorites.Select(f => f.Id).ToHashSet();
+        WorldNewsReads.Changed += OnWorldNewsRead;
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -2247,6 +2249,45 @@
         return Task.Run(() => WorldNewsMap.Signal(situationId, since));
     }
 
+    // Live layer (18-11-26): when a World News read finishes, the pins (and shading) redraw without a
+    // globe move. The read's start and mid-read events are skipped, the redraw waits 2s so a burst of
+    // events is one redraw, and a time-machine view stays on its moment.
+    private CancellationTokenSource? _worldNewsLiveCts;
+
+    private void OnWorldNewsRead()
+    {
+        if (!_worldNewsOn || _timeMachineOn || WorldNewsReads.IsRefreshing) return;
+        var next = new CancellationTokenSource();
+        var previous = Interlocked.Exchange(ref _worldNewsLiveCts, next);
+        previous?.Cancel();
+        previous?.Dispose();
+        _ = RedrawWorldNewsAfterReadAsync(next.Token);
+    }
+
+    private async Task RedrawWorldNewsAfterReadAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await Task.Delay(TimeSpan.FromSeconds(2), cancellationToken);
+            await InvokeAsync(async () =>
+            {
+                if (cancellationToken.IsCancellationRequested || !_worldNewsOn || _timeMachineOn) return;
+                await PushWorldNewsAsync();
+                if (_worldNewsShading) await PushWorldNewsShadingAsync();
+                StateHasChanged();
+            });
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (JSDisconnectedException)
+        {
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+    }
+
     private bool _worldNewsShading;
 
     private async Task ToggleWorldNewsShadingAsync()
@@ -2391,6 +2432,10 @@
         precision = signal.Location.Precision,
         kind = signal.Kind,
         kindLabel = GwsBusinessSuite.WorldNewsKit.SituationKinds.Label(signal.Kind),
+        subtype = signal.Tag?.Subtype,
+        tagLabel = signal.Tag?.Label,
+        tagConfidence = signal.Tag?.Confidence,
+        icon = signal.Tag?.Icon ?? GwsBusinessSuite.WorldNewsKit.SituationSubtypes.KindIcon(signal.Kind),
         status = signal.Status is { } status ? GwsBusinessSuite.WorldNewsKit.CyberStatus.Label(status) : null,
         statusMeaning = signal.Status is { } meaning ? GwsBusinessSuite.WorldNewsKit.CyberStatus.Meaning(meaning) : null,
         active = signal.Active,
@@ -4977,6 +5022,9 @@
 
     public async ValueTask DisposeAsync()
     {
+        WorldNewsReads.Changed -= OnWorldNewsRead;
+        _worldNewsLiveCts?.Cancel();
+        _worldNewsLiveCts?.Dispose();
         _briefCts?.Cancel();
         _driveCts?.Cancel();
         _aircraftCts?.Cancel();

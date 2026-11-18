@@ -188,6 +188,83 @@ public sealed class WorldNewsKitTests : IDisposable
     }
 
     [Fact]
+    public void Clusterer_ShouldKeepStoriesFromDifferentCountriesApart_OnlyWithThePlaceGuard()
+    {
+        (WorldArticle, float[])[] reports =
+        [
+            (Article("es", "Floods in Spain kill 10", "English", Now.AddHours(-3)), new[] { 1f, 0.02f }),
+            (Article("pt", "Floods in Portugal kill 4", "English", Now.AddHours(-2)), new[] { 1f, 0.03f }),
+            (Article("es2", "Spain floods: death toll rises", "English", Now.AddHours(-1)), new[] { 1f, 0.01f }),
+        ];
+        var guarded = new List<NewsEvent>();
+        var plain = new List<NewsEvent>();
+        var ids = 0;
+
+        EventClusterer.Assign(reports, guarded, [], EventClusterer.DefaultThreshold, EventClusterer.DefaultWindow, () => $"g{ids++}", new GroupingRules());
+        EventClusterer.Assign(reports, plain, [], EventClusterer.DefaultThreshold, EventClusterer.DefaultWindow, () => $"p{ids++}");
+
+        guarded.Select(e => e.ArticleCount).Should().Equal([2, 1], "both Spain reports, then Portugal on its own");
+        plain.Should().ContainSingle("similarity alone can't tell the two floods apart");
+    }
+
+    [Fact]
+    public void Clusterer_ShouldAskMoreOfAQuietEvent_BeforeItTakesANewReport()
+    {
+        var angle = Math.Sqrt(1 - 0.67 * 0.67);
+        (WorldArticle, float[])[] reports =
+        [
+            (Article("old", "Bridge closed after crash", "English", Now.AddHours(-31)), new[] { 1f, 0f }),
+            // 0.67 to the event: over the 0.65 threshold, under the 0.675 asked 30 hours on.
+            (Article("new", "Bridge reopens", "English", Now.AddHours(-1)), new[] { 0.67f, (float)angle }),
+        ];
+        var guarded = new List<NewsEvent>();
+        var plain = new List<NewsEvent>();
+        var ids = 0;
+
+        EventClusterer.Assign(reports, guarded, [], EventClusterer.DefaultThreshold, EventClusterer.DefaultWindow, () => $"g{ids++}", new GroupingRules());
+        EventClusterer.Assign(reports, plain, [], EventClusterer.DefaultThreshold, EventClusterer.DefaultWindow, () => $"p{ids++}");
+
+        guarded.Should().HaveCount(2);
+        plain.Should().ContainSingle();
+    }
+
+    [Fact]
+    public void MergeTwins_ShouldNotJoinEventsAboutDifferentCountries_WithThePlaceGuard()
+    {
+        var spain = Event("a", "Floods in Spain", new[] { 1f, 0.02f, 0f }, 3);
+        var portugal = Event("b", "Portugal floods", new[] { 1f, 0.03f, 0f }, 2);
+        var events = new List<NewsEvent> { spain, portugal };
+
+        EventClusterer.MergeTwins(events, new HashSet<NewsEvent> { portugal }, EventClusterer.DefaultMergeThreshold, new GroupingRules())
+            .Should().BeEmpty();
+        events.Should().HaveCount(2);
+    }
+
+    [Fact]
+    public async Task Pipeline_ShouldReadGoogleNewsEditions_AtMostOncePerSlowSourceGap()
+    {
+        var store = new WorldNewsStore(_dbPath);
+        var handler = new FakeHttp(request => request.RequestUri!.Host == "news.google.com"
+            ? (HttpStatusCode.OK, FranceFeed)
+            : (HttpStatusCode.InternalServerError, "model not loaded"));
+        var http = new HttpClient(handler);
+        var time = new ManualTime(Now);
+        var options = new WorldNewsOptions { Editions = [France], Outlets = [], SlowSourceGap = TimeSpan.FromMinutes(15) };
+        var pipeline = new WorldNewsPipeline(store, http, new GdeltDocClient(http, time),
+            new OllamaClient(new Uri("http://localhost:11434/"), http), time, options);
+        int GoogleReads() => handler.Urls.Count(url => url.StartsWith("https://news.google.com/", StringComparison.Ordinal));
+
+        await pipeline.RunCycleAsync(CancellationToken.None);
+        time.Advance(TimeSpan.FromMinutes(5));
+        await pipeline.RunCycleAsync(CancellationToken.None);
+        GoogleReads().Should().Be(1, "five minutes on, the edition isn't due");
+
+        time.Advance(TimeSpan.FromMinutes(10));
+        await pipeline.RunCycleAsync(CancellationToken.None);
+        GoogleReads().Should().Be(2);
+    }
+
+    [Fact]
     public void SituationLinker_ShouldLinkEventsOnOneStory_AndKeepOthersAndOldOnesApart()
     {
         var rally = Event("rally", "Rally before the election", [1f, 0.1f, 0f], 4);

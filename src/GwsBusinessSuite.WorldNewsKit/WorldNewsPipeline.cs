@@ -29,6 +29,11 @@ public sealed record WorldNewsOptions
     // Wikipedia's Current events portal as an early signal (13-11-26). Off unless the host turns it on.
     public bool ReadWikipediaCurrentEvents { get; init; }
     public IReadOnlyList<string> GdeltQueries { get; init; } = [];
+    // Google News editions and the configured GDELT searches are read at most this often, however
+    // often reads run (18-11-26). Surging stories' follow-up searches are exempt. Zero reads them every time.
+    public TimeSpan SlowSourceGap { get; init; } = TimeSpan.Zero;
+    // How events are grouped beyond similarity (GroupingRules, 18-11-26). Null keeps similarity alone.
+    public GroupingRules? Grouping { get; init; }
     // Searches for stories that are surging (FollowUpQueries, 13-11-26), asked for each read.
     public Func<IReadOnlyList<string>>? FollowUpQueries { get; init; }
     public int EmbedBatchSize { get; init; } = 64;
@@ -67,6 +72,9 @@ public sealed class WorldNewsPipeline(WorldNewsStore store, HttpClient http, Gde
 
         foreach (var edition in options.Editions)
         {
+            var editionKey = "google-news:" + edition.Url;
+            var editionAt = time.GetUtcNow();
+            if (!FeedSchedule.IsDueAfter(store.LastFetched(editionKey), options.SlowSourceGap, editionAt)) continue;
             sourcesAttempted++;
             try
             {
@@ -74,6 +82,7 @@ public sealed class WorldNewsPipeline(WorldNewsStore store, HttpClient http, Gde
                 sourcesSucceeded++;
                 fetched += articles.Count;
                 added += store.AddArticles(articles);
+                store.SetLastFetched(editionKey, editionAt);
             }
             catch (Exception ex) when (ex is HttpRequestException or XmlException or TaskCanceledException && !ct.IsCancellationRequested)
             {
@@ -174,11 +183,13 @@ public sealed class WorldNewsPipeline(WorldNewsStore store, HttpClient http, Gde
         // Surging stories are followed with their own searches, at most three a read, after the
         // configured ones (GDELT allows one request every five seconds).
         var followUps = (options.FollowUpQueries?.Invoke() ?? []).Take(WorldNewsKit.FollowUpQueries.MaxPerRead).ToList();
+        var followUpSet = followUps.ToHashSet(StringComparer.OrdinalIgnoreCase);
         foreach (var query in options.GdeltQueries.Concat(followUps).Distinct(StringComparer.OrdinalIgnoreCase))
         {
-            sourcesAttempted++;
             var feed = "gdelt:" + query;
             var startedAt = time.GetUtcNow();
+            if (!followUpSet.Contains(query) && !FeedSchedule.IsDueAfter(store.LastFetched(feed), options.SlowSourceGap, startedAt)) continue;
+            sourcesAttempted++;
             var from = (store.LastFetched(feed) ?? startedAt - options.FirstLookback) - TimeSpan.FromMinutes(15);
             var result = await gdelt.SearchAsync(query, from, ct);
             if (result.Note is not null)
@@ -265,9 +276,9 @@ public sealed class WorldNewsPipeline(WorldNewsStore store, HttpClient http, Gde
         var since = now - options.EventWindow;
         var events = store.ActiveEvents(since);
         var clustering = EventClusterer.Assign(store.EmbeddedUnassigned(), events, store.GroupHintEvents(since),
-            options.JoinThreshold, options.EventWindow, () => Guid.NewGuid().ToString("N"));
+            options.JoinThreshold, options.EventWindow, () => Guid.NewGuid().ToString("N"), options.Grouping);
         store.SaveClustering(clustering);
-        var merges = EventClusterer.MergeTwins(events, clustering.Touched.ToHashSet(), options.MergeThreshold);
+        var merges = EventClusterer.MergeTwins(events, clustering.Touched.ToHashSet(), options.MergeThreshold, options.Grouping);
         store.ApplyMerges(merges);
         // Events that reached a situation's size are placed in one (the first read after an update
         // places every recent event, oldest first).

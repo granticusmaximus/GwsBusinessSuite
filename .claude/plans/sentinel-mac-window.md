@@ -9,7 +9,14 @@
   (`MainPage.StartSentinelWindow`, from `Window.Created`/`Activated`) instead of relying on
   `OnAppearing`, and logs to `gws-mainpage-debug.log`. The missing menu item means the Mac's
   checkout was behind `origin/main`: pull, then `open gws`.
-- [ ] Mac smoke test: menu item appears, window loads Sentinel, main window unaffected. Send the
+- [x] 18-11-26 (`f690e8e7`): dashboard button and right-click "Open Sentinel in New App Window"
+  on the Knowledge rail button, Sentinel nav links and pinned Sentinel pages
+  (`wwwroot/js/sentinel-window.js`). In the Mac app it navigates to
+  `gws-native://sentinel-window?page=…`, which `MainPage.HandleNativeRequestAsync` turns into
+  `App.OpenSentinelWindow(query)`. Browsers get a popup. `SentinelWindowNavigation.WindowUrl`
+  keeps only GUID `page`/`database`/`row`. Unit and Playwright tests pass on Windows.
+- [ ] Mac smoke test: menu item, dashboard button and rail right-click each open the window
+  (confirm WKWebView raises `Navigating` for the scripted `gws-native://` navigation), window loads Sentinel, main window unaffected. Send the
   `Sentinel window:` lines from `gws-mainpage-debug.log` if it is still blank.
 - [ ] Run the available tests and release gate; record Mac-only checks separately.
 

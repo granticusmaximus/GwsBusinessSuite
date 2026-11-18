@@ -86,6 +86,67 @@ window.tacticalGlobe = (function () {
 
     const pinBillboardImage = createPinBillboardImage('#05080a', 2);
     const pinBillboardImageSelected = createPinBillboardImage('#ffe066', 4);
+
+    // World News pins carry their story's Bootstrap icon (18-11-26). Same white-fill pin, with the
+    // glyph cut in near-black so the purple tint colours only the disc. Until the icon font has
+    // loaded, a pin is the plain disc; setWorldNews redraws once it has.
+    const iconPinImages = new Map();
+    let iconFontReady = false;
+    let iconFontWaiting = null;
+
+    function iconGlyph(name) {
+        const probe = document.createElement('i');
+        probe.className = 'bi bi-' + name;
+        probe.setAttribute('aria-hidden', 'true');
+        probe.style.position = 'absolute';
+        probe.style.visibility = 'hidden';
+        document.body.appendChild(probe);
+        const content = getComputedStyle(probe, '::before').content;
+        probe.remove();
+        if (!content || content === 'none' || content === 'normal') return '';
+        return content.replace(/^["']|["']$/g, '');
+    }
+
+    function whenIconFontReady(redraw) {
+        if (iconFontReady) return true;
+        if (!iconFontWaiting && document.fonts && document.fonts.load) {
+            iconFontWaiting = document.fonts.load('16px "bootstrap-icons"').then(function (faces) {
+                iconFontReady = faces && faces.length > 0;
+            }).catch(function () { iconFontReady = false; });
+        }
+        if (iconFontWaiting) iconFontWaiting.then(function () { if (iconFontReady) redraw(); });
+        return false;
+    }
+
+    function iconPinImage(name) {
+        if (!name || !iconFontReady) return pinBillboardImage;
+        if (iconPinImages.has(name)) return iconPinImages.get(name);
+        const glyph = iconGlyph(name);
+        if (!glyph) {
+            iconPinImages.set(name, pinBillboardImage);
+            return pinBillboardImage;
+        }
+        const size = 56;
+        const canvas = document.createElement('canvas');
+        canvas.width = size;
+        canvas.height = size;
+        const ctx = canvas.getContext('2d');
+        ctx.beginPath();
+        ctx.arc(size / 2, size / 2, size / 2 - 3, 0, Math.PI * 2);
+        ctx.fillStyle = '#ffffff';
+        ctx.fill();
+        ctx.lineWidth = 4;
+        ctx.strokeStyle = '#05080a';
+        ctx.stroke();
+        ctx.fillStyle = '#05080a';
+        ctx.font = '30px "bootstrap-icons"';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(glyph, size / 2, size / 2 + 1);
+        const image = canvas.toDataURL();
+        iconPinImages.set(name, image);
+        return image;
+    }
     let nativeRendererFailureReported = false;
     let latestNativeFragmentShaderSource = '';
 
@@ -2766,15 +2827,21 @@ window.tacticalGlobe = (function () {
         }
         const entry = viewers.get(containerId);
         if (!entry) return;
+        entry.worldNewsSignals = signals || [];
+        const iconsReady = whenIconFontReady(function () {
+            if (viewers.get(containerId) === entry && entry.worldNewsSignals) setWorldNews(containerId, entry.worldNewsSignals);
+        });
         entry.worldNewsDataSource.entities.suspendEvents();
         entry.worldNewsDataSource.entities.removeAll();
         const reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
         (signals || []).forEach(function (signal) {
             // Bigger for wider coverage (3 outlets ~12px, 50+ ~30px); faded once a story goes quiet.
-            const size = Math.min(30, 8 + Math.log2(Math.max(2, Number(signal.outletCount) || 2)) * 4);
+            // An icon pin is at least 18px so its glyph stays readable.
+            const outletSize = Math.min(30, 8 + Math.log2(Math.max(2, Number(signal.outletCount) || 2)) * 4);
+            const size = iconsReady && signal.icon ? Math.max(18, outletSize) : outletSize;
             const color = Cesium.Color.fromCssColorString('#c77dff').withAlpha(signal.active === false ? 0.45 : 1);
             const billboard = {
-                image: pinBillboardImage,
+                image: iconsReady ? iconPinImage(signal.icon) : pinBillboardImage,
                 width: size,
                 height: size,
                 color: color,
@@ -2813,6 +2880,7 @@ window.tacticalGlobe = (function () {
     function clearWorldNews(containerId) {
         const entry = viewers.get(containerId || 'tg-viewport');
         if (!entry) return;
+        entry.worldNewsSignals = null;
         entry.worldNewsDataSource.entities.removeAll();
         setPulsing(entry, false);
     }
@@ -2849,6 +2917,7 @@ window.tacticalGlobe = (function () {
             (signal.latest !== signal.title ? '<div><strong>LATEST:</strong> ' + escapeHtml(signal.latest) + '</div>' : '') +
             (signal.summary ? '<p>' + escapeHtml(signal.summary) + '</p>' : '') +
             '<div class="tg-stream-panel-meta">' + escapeHtml((signal.kindLabel ? signal.kindLabel.toUpperCase() + ' · ' : '') +
+            (signal.subtype && signal.tagLabel ? signal.tagLabel.toUpperCase() + ' · ' : '') +
             (signal.active === false ? 'QUIET · ' : '')) + escapeHtml(signal.place || signal.country) + ' · ' +
             escapeHtml(String(signal.eventCount)) + ' EVENTS · ' + escapeHtml(String(signal.outletCount)) +
             ' OUTLETS · UPDATED ' + escapeHtml(signal.lastSeen) + '</div>' +

@@ -83,7 +83,8 @@ public static class EventClusterer
         Dictionary<string, string> hintEvents,
         double threshold,
         TimeSpan window,
-        Func<string> newId)
+        Func<string> newId,
+        GroupingRules? rules = null)
     {
         var byId = events.ToDictionary(e => e.Id);
         var touched = new HashSet<NewsEvent>();
@@ -100,17 +101,17 @@ public static class EventClusterer
 
             if (target is null)
             {
-                var best = threshold;
+                var best = (double)threshold;
                 var earliest = article.SeenAt - window;
                 foreach (var candidate in events)
                 {
                     if (candidate.LastSeen < earliest) continue;
                     var similarity = Dot(candidate.Centroid, vector);
-                    if (similarity >= best)
-                    {
-                        best = similarity;
-                        target = candidate;
-                    }
+                    if (similarity < best) continue;
+                    if (rules is not null && (similarity < rules.Required(threshold, article.SeenAt - candidate.LastSeen, window)
+                                              || rules.Conflicts(article.Title, candidate.Title))) continue;
+                    best = similarity;
+                    target = candidate;
                 }
             }
 
@@ -136,7 +137,8 @@ public static class EventClusterer
 
     // Merges each changed event into a closer, larger twin (or a smaller twin into it), closest
     // pairs first. The dropped event's reports move to the kept one.
-    public static IReadOnlyList<EventMerge> MergeTwins(List<NewsEvent> events, IReadOnlyCollection<NewsEvent> changed, double mergeThreshold)
+    public static IReadOnlyList<EventMerge> MergeTwins(List<NewsEvent> events, IReadOnlyCollection<NewsEvent> changed, double mergeThreshold,
+        GroupingRules? rules = null)
     {
         var candidates = new List<(float Similarity, NewsEvent A, NewsEvent B)>();
         foreach (var a in changed)
@@ -144,7 +146,7 @@ public static class EventClusterer
         {
             if (ReferenceEquals(a, b) || (changed.Contains(b) && string.CompareOrdinal(a.Id, b.Id) > 0)) continue;
             var similarity = Dot(a.Centroid, b.Centroid);
-            if (similarity >= mergeThreshold) candidates.Add((similarity, a, b));
+            if (similarity >= mergeThreshold && rules?.Conflicts(a.Title, b.Title) != true) candidates.Add((similarity, a, b));
         }
 
         var dropped = new HashSet<NewsEvent>();

@@ -33,6 +33,11 @@ public static class FeedSchedule
 
     public static bool IsRefusal(int status) => status is 401 or 403 or 405 or 451;
 
+    // For sources read without validators (Google News editions, GDELT searches) that keep their
+    // own pace while outlet feeds are read every few minutes (18-11-26).
+    public static bool IsDueAfter(DateTimeOffset? lastRead, TimeSpan gap, DateTimeOffset now) =>
+        gap <= TimeSpan.Zero || lastRead is not { } last || now - last >= gap;
+
     public static FeedHealth AfterFailure(FeedHealth health, int? status, string error, DateTimeOffset now)
     {
         var failures = health.Failures + 1;

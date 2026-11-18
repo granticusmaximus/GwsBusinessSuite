@@ -28,6 +28,10 @@ public sealed partial class WorldNewsService : IDisposable
     // The last finished read is kept in the news database, so a restart doesn't show "Not read yet".
     private const string LastReadKey = "world-news:last-read";
     public static readonly TimeSpan Interval = TimeSpan.FromMinutes(15);
+    // How often the background service reads (WorldNews:ReadIntervalMinutes, 5 by default since
+    // 18-11-26). Each feed still keeps its own pace (FeedSchedule), so a short interval mostly
+    // means a busy outlet's new stories arrive within minutes rather than up to 15.
+    public TimeSpan ReadInterval { get; }
     // The most events a list holds; the page shows them a page at a time.
     public const int MaxEvents = 300;
 
@@ -91,8 +95,16 @@ public sealed partial class WorldNewsService : IDisposable
             FollowUpQueries = FollowUpSearches,
             AddedOutlets = () => Store.CustomFeeds(),
             PausedFeeds = () => Store.PausedFeeds(),
-            EmbedSlot = workloads is null ? null : ct => workloads.AcquireAsync(OllamaWorkloadPriority.Background, ct).AsTask()
+            EmbedSlot = workloads is null ? null : ct => workloads.AcquireAsync(OllamaWorkloadPriority.Background, ct).AsTask(),
+            // Outlet feeds are read every few minutes now (ReadInterval); Google News and GDELT keep their 15.
+            SlowSourceGap = TimeSpan.FromMinutes(Math.Clamp(configuration.GetValue("WorldNews:SlowSourceMinutes", 15), 0, 120)),
+            Grouping = configuration.GetValue("WorldNews:Grouping:Enabled", true)
+                ? new GroupingRules(
+                    PlaceGuard: configuration.GetValue("WorldNews:Grouping:PlaceGuard", true),
+                    QuietPenalty: Math.Clamp(configuration.GetValue("WorldNews:Grouping:QuietPenalty", 0.05), 0, 0.2))
+                : null
         };
+        ReadInterval = TimeSpan.FromMinutes(Math.Clamp(configuration.GetValue("WorldNews:ReadIntervalMinutes", 5), 2, 60));
         // One GDELT client for the reads and for people's searches, so both share its pacing.
         _gdelt = new GdeltDocClient(http, TimeProvider.System);
         _pipeline = new WorldNewsPipeline(Store, http, _gdelt, _ollama, TimeProvider.System, _options);
@@ -1192,8 +1204,8 @@ public sealed class WorldNewsAssistantSearch(WorldNewsService news) : GwsBusines
     }
 }
 
-// Reads the news every 15 minutes, starting a minute after the app starts (WorldNews:Enabled
-// turns it off; WorldNews:StartupDelaySeconds changes the wait).
+// Reads the news every few minutes (WorldNewsService.ReadInterval), starting a minute after the app
+// starts (WorldNews:Enabled turns it off; WorldNews:StartupDelaySeconds changes the wait).
 public sealed class WorldNewsBackgroundService(
     WorldNewsService news,
     IConfiguration configuration,
@@ -1219,7 +1231,7 @@ public sealed class WorldNewsBackgroundService(
     private async Task<TimeSpan> ReadOnceAsync(CancellationToken cancellationToken)
     {
         await news.RefreshAsync(cancellationToken);
-        return WorldNewsService.Interval;
+        return news.ReadInterval;
     }
 
     private async Task<TimeSpan> EnglishOnceAsync(CancellationToken cancellationToken)
