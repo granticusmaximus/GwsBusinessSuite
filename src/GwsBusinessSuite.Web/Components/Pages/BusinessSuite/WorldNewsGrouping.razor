@@ -1,0 +1,270 @@
+@using GwsBusinessSuite.Infrastructure.Services
+@using GwsBusinessSuite.WorldNewsKit
+@inject WorldNewsService News
+@inject NavigationManager Navigation
+
+@* How this story was grouped, and a person's corrections to it (18-11-26): a search for this
+   story alone, "not the same story" for chosen reports, moving them or merging the story into a
+   similar one, and the history of every grouping decision. Corrections are remembered, so the
+   automatic grouping never undoes them. *@
+<section id="story-part-grouping" class="story-part story-grouping" aria-labelledby="story-h-grouping">
+    <h2 id="story-h-grouping">Grouping</h2>
+
+    <div class="story-grouping-actions">
+        <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="PullStoryAsync" disabled="@_pulling"
+                title="Search GDELT and the web for this story's headline now">
+            @if (_pulling)
+            {
+                <span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>
+            }
+            else
+            {
+                <i class="bi bi-arrow-clockwise me-1" aria-hidden="true"></i>
+            }
+            Pull for this story
+        </button>
+        <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="ToggleCorrectingAsync" aria-expanded="@(_correcting ? "true" : "false")">
+            <i class="bi bi-diagram-3 me-1" aria-hidden="true"></i>@(_correcting ? "Done correcting" : "Correct the grouping")
+        </button>
+    </div>
+
+    @if (_message is not null)
+    {
+        <p class="story-grouping-message" role="status">
+            @_message
+            @if (_newStoryId is { } created)
+            {
+                <a class="ms-1" href="@StoryHref(created)">Open that story</a>
+            }
+        </p>
+    }
+
+    @if (_suggestions.Count > 0)
+    {
+        <div class="story-grouping-suggestions">
+            @foreach (var suggestion in _suggestions)
+            {
+                <div class="story-grouping-suggestion">
+                    <i class="bi bi-lightbulb" aria-hidden="true"></i>
+                    <span>Possibly a different story: @suggestion.Reason</span>
+                    <button type="button" class="btn btn-sm btn-outline-primary" disabled="@_busy" @onclick="() => SplitAsync(suggestion.ArticleIds)">
+                        Split them off
+                    </button>
+                </div>
+            }
+        </div>
+    }
+
+    @if (_correcting)
+    {
+        <div class="story-grouping-editor">
+            <p class="story-quiet">Pick the reports that aren't about this story.</p>
+            <ul class="story-grouping-reports">
+                @foreach (var report in _reports)
+                {
+                    var id = report.Id;
+                    <li>
+                        <label>
+                            <input type="checkbox" checked="@_chosen.Contains(id)" @onchange="e => Choose(id, e.Value is true)" />
+                            <span class="story-grouping-report-title">@report.DisplayTitle</span>
+                            <small>@report.Outlet · @report.SeenAt.ToLocalGwsDateTime()</small>
+                        </label>
+                    </li>
+                }
+            </ul>
+            <div class="story-grouping-editor-actions">
+                <button type="button" class="btn btn-sm btn-outline-primary" disabled="@(_busy || _chosen.Count == 0 || _chosen.Count >= _reports.Count)"
+                        @onclick="() => SplitAsync(_chosen.ToList())"
+                        title="The chosen reports become a story of their own, never grouped with this one again">
+                    Not the same story (@_chosen.Count)
+                </button>
+                <select class="form-select form-select-sm story-grouping-target" aria-label="A similar story" @bind="_targetId">
+                    <option value="">A similar story…</option>
+                    @foreach (var similar in _similar)
+                    {
+                        <option value="@similar.Event.Id">@(similar.Event.Headline ?? similar.Event.Title)</option>
+                    }
+                </select>
+                <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@(_busy || _chosen.Count == 0 || _chosen.Count >= _reports.Count || string.IsNullOrEmpty(_targetId))"
+                        @onclick="MoveAsync" title="Move the chosen reports into the story picked">
+                    Move to it
+                </button>
+                <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@(_busy || string.IsNullOrEmpty(_targetId))"
+                        @onclick="MergeAsync" title="Join this story and the one picked into one">
+                    Merge with it
+                </button>
+            </div>
+            @if (_similar.Count == 0 && _similarLoaded)
+            {
+                <p class="story-quiet">No similar stories to move reports to or merge with.</p>
+            }
+        </div>
+    }
+
+    @if (_history.Count > 0)
+    {
+        <details class="story-grouping-history">
+            <summary>How this story was grouped (@_history.Count)</summary>
+            <ol>
+                @foreach (var entry in _history)
+                {
+                    <li>
+                        <span class="story-grouping-when">@entry.At.ToLocalGwsDateTime()</span>
+                        <span>@entry.Detail</span>
+                        <small>by @entry.Actor</small>
+                    </li>
+                }
+            </ol>
+        </details>
+    }
+</section>
+
+@code {
+    // The story this panel corrects.
+    [Parameter, EditorRequired] public string EventId { get; set; } = string.Empty;
+    [Parameter, EditorRequired] public string Username { get; set; } = string.Empty;
+    // Called after a correction changed this story's reports, so the view loads it again.
+    [Parameter] public EventCallback OnChanged { get; set; }
+
+    private IReadOnlyList<WorldArticle> _reports = [];
+    private IReadOnlyList<FoundStory> _similar = [];
+    private IReadOnlyList<GroupingLogEntry> _history = [];
+    private IReadOnlyList<SplitSuggestion> _suggestions = [];
+    private readonly HashSet<string> _chosen = new(StringComparer.Ordinal);
+    private string? _shownFor;
+    private string? _targetId;
+    private string? _message;
+    private string? _newStoryId;
+    private bool _correcting;
+    private bool _similarLoaded;
+    private bool _pulling;
+    private bool _busy;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (EventId == _shownFor) return;
+        _shownFor = EventId;
+        _correcting = false;
+        _similar = [];
+        _similarLoaded = false;
+        _message = null;
+        _newStoryId = null;
+        _targetId = null;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        var id = EventId;
+        var withReports = _correcting;
+        var (history, suggestions, reports) = await Task.Run(() =>
+            (News.GroupingHistory(id), News.SuggestedSplits(id), withReports ? News.Store.ArticlesForEvent(id) : []));
+        if (id != EventId) return;
+        _history = history;
+        _suggestions = suggestions;
+        _reports = reports;
+        _chosen.IntersectWith(_reports.Select(r => r.Id));
+        if (_correcting && !_similarLoaded) await LoadSimilarAsync();
+    }
+
+    private async Task LoadSimilarAsync()
+    {
+        var id = EventId;
+        var similar = await News.SimilarToAsync(id);
+        if (id != EventId) return;
+        _similar = similar.Stories.Where(s => s.Event.Id != id).Take(12).ToList();
+        _similarLoaded = true;
+    }
+
+    private async Task ToggleCorrectingAsync()
+    {
+        _correcting = !_correcting;
+        _chosen.Clear();
+        if (_correcting) await LoadAsync();
+    }
+
+    private void Choose(string id, bool on)
+    {
+        if (on) _chosen.Add(id);
+        else _chosen.Remove(id);
+    }
+
+    private async Task PullStoryAsync()
+    {
+        _pulling = true;
+        _message = null;
+        _newStoryId = null;
+        try
+        {
+            _message = await News.PullStoryAsync(EventId, Username);
+        }
+        finally
+        {
+            _pulling = false;
+        }
+        await AfterChangeAsync();
+    }
+
+    private async Task SplitAsync(IReadOnlyCollection<string> articleIds)
+    {
+        await RunAsync(async () =>
+        {
+            var created = await News.SplitAsync(EventId, articleIds, Username);
+            _newStoryId = created;
+            _message = created is null ? "Those reports couldn't be split off; the story may have changed. Try again."
+                : $"{articleIds.Count} {(articleIds.Count == 1 ? "report is" : "reports are")} now a story of their own, kept apart from this one.";
+        });
+    }
+
+    private async Task MoveAsync()
+    {
+        if (string.IsNullOrEmpty(_targetId)) return;
+        var target = _targetId;
+        var count = _chosen.Count;
+        await RunAsync(async () =>
+        {
+            var moved = await News.MoveAsync(EventId, target, _chosen.ToList(), Username);
+            _newStoryId = moved ? target : null;
+            _message = moved ? $"Moved {count} {(count == 1 ? "report" : "reports")}." : "Those reports couldn't be moved; the stories may have changed.";
+        });
+    }
+
+    private async Task MergeAsync()
+    {
+        if (string.IsNullOrEmpty(_targetId)) return;
+        var target = _targetId;
+        string? kept = null;
+        await RunAsync(async () =>
+        {
+            kept = await News.MergeAsync(EventId, target, Username);
+            _message = kept is null ? "The stories couldn't be merged; one may no longer be kept." : "Merged.";
+        });
+        // The merged story kept the other one's id: show it there.
+        if (kept is not null && kept != EventId) Navigation.NavigateTo(StoryHref(kept));
+    }
+
+    private async Task RunAsync(Func<Task> correction)
+    {
+        _busy = true;
+        _newStoryId = null;
+        try
+        {
+            await correction();
+            _chosen.Clear();
+            _similarLoaded = false;
+        }
+        finally
+        {
+            _busy = false;
+        }
+        await AfterChangeAsync();
+    }
+
+    private async Task AfterChangeAsync()
+    {
+        await LoadAsync();
+        await OnChanged.InvokeAsync();
+    }
+
+    private static string StoryHref(string eventId) => $"admin/world-news/events/{Uri.EscapeDataString(eventId)}";
+}

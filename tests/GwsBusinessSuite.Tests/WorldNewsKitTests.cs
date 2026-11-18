@@ -182,7 +182,9 @@ public sealed class WorldNewsKitTests : IDisposable
 
         var merges = EventClusterer.MergeTwins(events, new HashSet<NewsEvent> { b }, EventClusterer.DefaultMergeThreshold);
 
-        merges.Should().ContainSingle().Which.Should().Be(new EventMerge(a, b));
+        var merge = merges.Should().ContainSingle().Subject;
+        (merge.Keep, merge.Drop).Should().Be((a, b));
+        merge.Reason.Should().StartWith("similarity ");
         a.ArticleCount.Should().Be(5);
         events.Should().Equal(a, c);
     }
@@ -238,6 +240,154 @@ public sealed class WorldNewsKitTests : IDisposable
         EventClusterer.MergeTwins(events, new HashSet<NewsEvent> { portugal }, EventClusterer.DefaultMergeThreshold, new GroupingRules())
             .Should().BeEmpty();
         events.Should().HaveCount(2);
+    }
+
+    [Fact]
+    public void HeadlineNumbers_ShouldKeepDistinctiveNumbers_NotYearsOrLoneDigits()
+    {
+        HeadlineNumbers.In("Magnitude 7.1 quake kills 1,200 in 2026 as 3 aftershocks hit; 47 missing")
+            .Should().BeEquivalentTo(["7.1", "1200", "47"]);
+    }
+
+    [Fact]
+    public void MergeTwins_ShouldMergeJustBelowTheThreshold_OnlyWhenTheHeadlinesShareANumber()
+    {
+        var angle = (float)Math.Sqrt(1 - 0.835 * 0.835);
+        List<NewsEvent> Pair(string titleA, string titleB) =>
+            [Event("a", titleA, [1f, 0f], 3), Event("b", titleB, [0.835f, angle], 2)];
+
+        var withNumber = Pair("Quake of 7.1 hits the coast", "7.1 tremor shakes coastal towns");
+        var merge = EventClusterer.MergeTwins(withNumber, withNumber.ToHashSet(), EventClusterer.DefaultMergeThreshold, new GroupingRules())
+            .Should().ContainSingle().Subject;
+        merge.Reason.Should().Contain("both name 7.1");
+
+        var without = Pair("Quake hits the coast", "Tremor shakes coastal towns");
+        EventClusterer.MergeTwins(without, without.ToHashSet(), EventClusterer.DefaultMergeThreshold, new GroupingRules())
+            .Should().BeEmpty("0.835 is under the 0.85 threshold without shared evidence");
+    }
+
+    [Fact]
+    public void MergeTwins_ShouldNeverJoinAPairKeptApart_AndJoinAPairTheAiConfirmed()
+    {
+        var twinA = Event("a", "Bridge collapse", [1f, 0f, 0f], 3);
+        var twinB = Event("b", "Bridge collapses", [0.99f, 0.14f, 0f], 2);
+        var nearC = Event("c", "Rescue at the mine", [0f, 0f, 1f], 4);
+        var nearD = Event("d", "Miners trapped underground", [0f, (float)Math.Sqrt(1 - 0.83 * 0.83), 0.83f], 2);
+        var events = new List<NewsEvent> { twinA, twinB, nearC, nearD };
+
+        var merges = EventClusterer.MergeTwins(events, events.ToHashSet(), EventClusterer.DefaultMergeThreshold, new GroupingRules(),
+            keepApart: (x, y) => GroupingPairs.Key(x, y) == ("a", "b"), confirmed: new HashSet<(string, string)> { ("c", "d") });
+
+        var merge = merges.Should().ContainSingle().Subject;
+        (merge.Keep.Id, merge.Drop.Id).Should().Be(("c", "d"));
+        merge.Reason.Should().StartWith("the AI judged them one story");
+    }
+
+    [Fact]
+    public void CloseCalls_ShouldOfferPairsJustBelowTheThreshold_ClosestFirst_SkippingJudgedOnes()
+    {
+        NewsEvent Near(string id, double similarity) => Event(id, id, [(float)similarity, (float)Math.Sqrt(1 - similarity * similarity)], 2);
+        var anchor = Event("anchor", "anchor", [1f, 0f], 3);
+        List<NewsEvent> events = [anchor, Near("close", 0.84), Near("closer", 0.845), Near("far", 0.6), Near("judged", 0.83)];
+
+        var calls = EventClusterer.CloseCalls(events, 0.80, 0.85, 10, skip: (a, b) => a == "judged" || b == "judged");
+
+        calls.Where(c => c.A.Id == "anchor" || c.B.Id == "anchor").Select(c => c.A.Id == "anchor" ? c.B.Id : c.A.Id)
+            .Should().Equal("closer", "close");
+    }
+
+    [Fact]
+    public void PullPlanner_ShouldTakeEachKindInTurn_WithoutRepeats_UpToTheLimit()
+    {
+        var plan = PullPlanner.Plan(
+            ["Kenya election results announced", "Floods swamp Valencia region"],
+            ["Floods swamp Valencia region", "Bridge collapse Lisbon harbour"],
+            ["semiconductor export rules"],
+            max: 4);
+
+        plan.Select(q => q.Why).Should().Equal(PullPlanner.Thin, PullPlanner.Surging, PullPlanner.Watch, PullPlanner.Thin);
+        plan.Select(q => q.Query).Should().OnlyHaveUniqueItems();
+        plan[0].Query.Should().Be("Floods swamp Valencia region");
+    }
+
+    [Theory]
+    [InlineData("Sure. {\"same\": true, \"reason\": \"Both report the 7.1 quake.\"}", true, "Both report the 7.1 quake.")]
+    [InlineData("{\"same\": \"false\", \"reason\": \"Different floods\"}", false, "Different floods")]
+    [InlineData("Yes, the same rescue.", true, "the same rescue")]
+    [InlineData("I can't tell.", null, "")]
+    public void GroupingAdjudicator_ShouldReadTheVerdict_FromJsonOrPlainWords(string reply, bool? same, string reason)
+    {
+        GroupingAdjudicator.Parse(reply).Should().Be((same, reason));
+    }
+
+    [Fact]
+    public void SplitSuggestions_ShouldFlagAMinorityNamingOtherCountries_OnlyWhenTheyAreFew()
+    {
+        WorldArticle[] story =
+        [
+            Article("s1", "Floods in Spain kill 10", "English", Now),
+            Article("s2", "Spain floods: toll rises", "English", Now),
+            Article("s3", "Spanish towns cut off by floods", "English", Now),
+            Article("p1", "Portugal braces for storm", "English", Now),
+        ];
+
+        var suggestion = SplitSuggestions.For(story).Should().ContainSingle().Subject;
+        suggestion.ArticleIds.Should().Equal("p1");
+        suggestion.Reason.Should().Contain("Portugal");
+
+        SplitSuggestions.For([story[0], story[1], story[3], Article("p2", "Portugal storm warning", "English", Now)])
+            .Should().BeEmpty("half the reports isn't an outlier");
+    }
+
+    [Fact]
+    public void Store_ShouldKeepASplitApart_ThroughRegroupAndLaterMerges_AndLogEachStep()
+    {
+        var store = new WorldNewsStore(_dbPath);
+        SeedEvent(store, "quake", Reports("quake", 4), [1f, 0f]);
+        SeedEvent(store, "big", Reports("big", 6), [0f, 1f]);
+        var pipeline = Pipeline(store);
+
+        var split = store.SplitReports("quake", ["quake3"], null, "grant", Now);
+
+        split.Should().NotBeNull();
+        store.ArticlesForEvent(split!).Select(a => a.Id).Should().Equal("quake3");
+        store.Event("quake")!.ArticleCount.Should().Be(3);
+        pipeline.Regroup().Merges.Should().BeEmpty("the split story reads exactly like its source, but a person kept them apart");
+        store.MoveReports("quake", "big", ["quake0", "quake1", "quake2"], null, "grant", Now).Should().BeFalse("that would empty the story");
+
+        store.MergeStories(split, "big", "grant", Now).Should().Be("big", "the larger story keeps its id");
+        store.ApartPairs().Should().Contain(GroupingPairs.Key("quake", "big"), "the verdict follows the story it was merged into");
+        store.GroupingHistory("quake").Select(h => h.Action).Should().Contain("split");
+        store.GroupingHistory("big").Select(h => h.Action).Should().Contain(["split", "merged"]);
+    }
+
+    [Fact]
+    public async Task Pipeline_ShouldSkipTheSlowSourceGap_AndRunExtraSearches_WhenAPersonPulls()
+    {
+        var store = new WorldNewsStore(_dbPath);
+        var handler = new FakeHttp(request => request.RequestUri!.Host == "news.google.com"
+            ? (HttpStatusCode.OK, FranceFeed)
+            : (HttpStatusCode.InternalServerError, "model not loaded"));
+        var http = new HttpClient(handler);
+        var time = new ManualTime(Now);
+        var options = new WorldNewsOptions { Editions = [France], Outlets = [], GdeltQueries = [], SlowSourceGap = TimeSpan.FromMinutes(15) };
+        var pipeline = new WorldNewsPipeline(store, http, new GdeltDocClient(http, time),
+            new OllamaClient(new Uri("http://localhost:11434/"), http), time, options);
+
+        await pipeline.RunCycleAsync(CancellationToken.None);
+        time.Advance(TimeSpan.FromMinutes(5));
+        await pipeline.RunCycleAsync(new ReadRequest(Force: true, Queries: ["kenya election results"]), CancellationToken.None);
+
+        handler.Urls.Count(url => url.StartsWith("https://news.google.com/", StringComparison.Ordinal)).Should().Be(2);
+        handler.Urls.Should().Contain(url => url.Contains("kenya", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private WorldNewsPipeline Pipeline(WorldNewsStore store)
+    {
+        var http = new HttpClient(new FakeHttp(_ => (HttpStatusCode.InternalServerError, "offline")));
+        var time = new ManualTime(Now);
+        return new WorldNewsPipeline(store, http, new GdeltDocClient(http, time), new OllamaClient(new Uri("http://localhost:11434/"), http), time,
+            new WorldNewsOptions { Editions = [], Outlets = [], GdeltQueries = [] });
     }
 
     [Fact]

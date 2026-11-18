@@ -105,6 +105,8 @@ public sealed partial class WorldNewsService : IDisposable
                 : null
         };
         ReadInterval = TimeSpan.FromMinutes(Math.Clamp(configuration.GetValue("WorldNews:ReadIntervalMinutes", 5), 2, 60));
+        PullCooldown = TimeSpan.FromMinutes(Math.Clamp(configuration.GetValue("WorldNews:ManualPullCooldownMinutes", 5), 1, 60));
+        _regroupAiChecks = Math.Clamp(configuration.GetValue("WorldNews:Regroup:AiChecks", 6), 0, 30);
         // One GDELT client for the reads and for people's searches, so both share its pacing.
         _gdelt = new GdeltDocClient(http, TimeProvider.System);
         _pipeline = new WorldNewsPipeline(Store, http, _gdelt, _ollama, TimeProvider.System, _options);
@@ -216,12 +218,18 @@ public sealed partial class WorldNewsService : IDisposable
     public event Action<string, WorldNewsAlert>? AlertCreated;
 
     // One read. A read already running is left to finish rather than doubled up.
-    public async Task RefreshAsync(CancellationToken ct)
+    public Task RefreshAsync(CancellationToken ct) => ReadAsync(null, wait: false, ct);
+
+    // wait: a person's Pull latest waits for a running read to finish, then reads again with its
+    // own request. Null when no read ran or it failed.
+    private async Task<CycleReport?> ReadAsync(ReadRequest? request, bool wait, CancellationToken ct)
     {
-        if (!await _running.WaitAsync(0, ct)) return;
+        if (wait) await _running.WaitAsync(ct);
+        else if (!await _running.WaitAsync(0, ct)) return null;
+        CycleReport? finished = null;
         try
         {
-            Status = "Reading the world's news...";
+            Status = request?.Force == true ? "Pulling the latest news now..." : "Reading the world's news...";
             Changed?.Invoke();
             // Synchronous SQLite work and CPU-bound grouping: keep it off the caller's thread.
             var crawlerImport = new WorldNewsImportResult(0, 0, 0);
@@ -241,7 +249,7 @@ public sealed partial class WorldNewsService : IDisposable
                     crawlerNotes.Add($"Media Watch crawler import: {ex.Message}");
                 }
             }
-            var report = await Task.Run(() => _pipeline.RunCycleAsync(ct), ct);
+            var report = await Task.Run(() => _pipeline.RunCycleAsync(request, ct), ct);
             if (crawlerAttempted > 0)
             {
                 report = report with
@@ -287,6 +295,7 @@ public sealed partial class WorldNewsService : IDisposable
                 + $"{report.NewEvents:N0} new events, {summaries.Written:N0} summaries written.{latestReport}{crawlerSummary}{problems}";
             if (notes.Count > 0)
                 _logger.LogWarning("World news read finished with {Count} problem(s): {Notes}", notes.Count, string.Join(" | ", notes));
+            finished = report;
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -305,6 +314,7 @@ public sealed partial class WorldNewsService : IDisposable
             _mapCache?.Clear();
             Changed?.Invoke();
         }
+        return finished;
     }
 
     private const string RelayKey = "world-news:summary-relay";
@@ -1171,6 +1181,10 @@ public sealed partial class WorldNewsService : IDisposable
 
     public void Dispose()
     {
+        _stopping.Cancel();
+        _stopping.Dispose();
+        _pulling.Dispose();
+        _regrouping.Dispose();
         _ollama.Dispose();
         _running.Dispose();
         _englishRunning.Dispose();

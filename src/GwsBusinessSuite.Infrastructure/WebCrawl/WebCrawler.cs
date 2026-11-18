@@ -39,6 +39,8 @@ public sealed class WebCrawlOptions
     public int NewsDiscoveryQueriesPerCycle { get; set; } = 6;
     public int NewsDiscoveryProductiveIntervalMinutes { get; set; } = 10;
     public int NewsDiscoveryQuietMaxIntervalMinutes { get; set; } = 60;
+    // Searches one Pull latest runs at most (its own queries first, 18-11-26).
+    public int ManualDiscoveryQueries { get; set; } = 10;
     public string[] NewsDiscoveryQueries { get; set; } =
     [
         "breaking world news today",
@@ -152,10 +154,7 @@ public sealed class WebCrawler(
             .ToArray();
         if (configuredQueries.Length == 0) return 0;
 
-        var publisherHosts = OutletFeeds.Outlets
-            .Select(outlet => Uri.TryCreate(outlet.Url, UriKind.Absolute, out var uri) ? NormalizeHost(uri.Host) : null)
-            .OfType<string>()
-            .ToHashSet(StringComparer.Ordinal);
+        var publisherHosts = PublisherHosts();
         var queryCount = Math.Clamp(options.Value.NewsDiscoveryQueriesPerCycle, 1, configuredQueries.Length);
         var start = Interlocked.Add(ref _newsDiscoveryQuery, queryCount) - queryCount;
         var dueQueries = new List<(string Query, long NextAt)>();
@@ -171,44 +170,89 @@ public sealed class WebCrawler(
         foreach (var query in selected)
         {
             ct.ThrowIfCancellationRequested();
-            try
+            var queued = await SearchAndQueueAsync(query, publisherHosts, ct);
+            if (queued is null)
             {
-                var results = await webSearch.SearchRecentAsync(query, maxResults: 10, ct);
-                await Store.AddToCounterAsync(Today, DiscoverySearchCounter, 1);
-                await Store.AddToCounterAsync(Today, DiscoveryReturnedCounter, results.Count);
-                var entries = new List<(string, string, bool, int, int, int)>();
-                foreach (var result in results)
-                {
-                    if (WebPageReader.Normalize(result.Url, new Uri("https://localhost/")) is not { } url || url.IsLoopback || IsSkipped(url.Host)) continue;
-                    var host = NormalizeHost(url.Host);
-                    if (!publisherHosts.Any(publisher => host == publisher || host.EndsWith("." + publisher, StringComparison.Ordinal)
-                            || publisher.EndsWith("." + host, StringComparison.Ordinal))) continue;
-                    await Store.EnsureSiteAsync(url.Host, Home(url), NowMs, MinDelayMs);
-                    entries.Add((url.AbsoluteUri, url.Host, false, 0, 1, 10));
-                }
-                var eligible = entries.DistinctBy(entry => entry.Item1, StringComparer.OrdinalIgnoreCase).ToList();
-                await Store.AddToCounterAsync(Today, DiscoveryEligibleCounter, eligible.Count);
-                var queued = await Store.EnqueueAsync(eligible, NowMs);
-                await Store.AddToCounterAsync(Today, DiscoveryResultCounter, queued);
-                newUrls += queued;
-                var emptyMark = DiscoveryMark(query, "empty");
-                var emptyRuns = queued == 0 ? (await Store.GetMarkAsync(emptyMark) ?? 0) + 1 : 0;
-                await Store.SetMarkAsync(emptyMark, emptyRuns);
-                var minutes = queued > 0
-                    ? Math.Max(1, options.Value.NewsDiscoveryProductiveIntervalMinutes)
-                    : Math.Min(Math.Max(1, options.Value.NewsDiscoveryQuietMaxIntervalMinutes),
-                        Math.Max(1, options.Value.NewsDiscoveryProductiveIntervalMinutes) * (1L << (int)Math.Min(3, emptyRuns)));
-                await Store.SetMarkAsync(DiscoveryMark(query, "next"), NowMs + minutes * 60_000);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
-            {
-                logger.LogWarning(ex, "Web crawl active news search failed for {Query}", query);
-                await Store.AddToCounterAsync(Today, DiscoveryFailureCounter, 1);
                 await Store.SetMarkAsync(DiscoveryMark(query, "next"), NowMs + 5 * 60_000);
+                continue;
             }
+            newUrls += queued.Value;
+            var emptyMark = DiscoveryMark(query, "empty");
+            var emptyRuns = queued == 0 ? (await Store.GetMarkAsync(emptyMark) ?? 0) + 1 : 0;
+            await Store.SetMarkAsync(emptyMark, emptyRuns);
+            var minutes = queued > 0
+                ? Math.Max(1, options.Value.NewsDiscoveryProductiveIntervalMinutes)
+                : Math.Min(Math.Max(1, options.Value.NewsDiscoveryQuietMaxIntervalMinutes),
+                    Math.Max(1, options.Value.NewsDiscoveryProductiveIntervalMinutes) * (1L << (int)Math.Min(3, emptyRuns)));
+            await Store.SetMarkAsync(DiscoveryMark(query, "next"), NowMs + minutes * 60_000);
         }
         await Store.SetMarkAsync(DiscoveryAttemptMark, NowMs);
         return newUrls;
+    }
+
+    // A person's Pull latest (18-11-26): searches now for their extra queries first, then the
+    // configured ones, whatever each query's next-run time, up to ManualDiscoveryQueries. The pages
+    // found are queued at the top priority and fetched by the crawl loop under every usual rule
+    // (robots.txt, crawl delay, the daily allowance). Returns the searches run and pages queued.
+    // includeConfigured false searches only the extra queries (one story's own pull).
+    public async Task<(int Searches, int Queued)> DiscoverNowAsync(IReadOnlyList<string> extraQueries, bool includeConfigured = true,
+        CancellationToken ct = default)
+    {
+        if (!options.Value.ActiveNewsDiscovery || webSearch?.IsConfigured != true) return (0, 0);
+        var queries = extraQueries.Concat(includeConfigured ? options.Value.NewsDiscoveryQueries : [])
+            .Select(query => query.Trim())
+            .Where(query => query.Length is >= 2 and <= 500)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(Math.Max(1, options.Value.ManualDiscoveryQueries))
+            .ToList();
+        var publisherHosts = PublisherHosts();
+        var searches = 0;
+        var queued = 0;
+        foreach (var query in queries)
+        {
+            ct.ThrowIfCancellationRequested();
+            searches++;
+            queued += await SearchAndQueueAsync(query, publisherHosts, ct) ?? 0;
+        }
+        await Store.SetMarkAsync(DiscoveryAttemptMark, NowMs);
+        return (searches, queued);
+    }
+
+    private static HashSet<string> PublisherHosts() => OutletFeeds.Outlets
+        .Select(outlet => Uri.TryCreate(outlet.Url, UriKind.Absolute, out var uri) ? NormalizeHost(uri.Host) : null)
+        .OfType<string>()
+        .ToHashSet(StringComparer.Ordinal);
+
+    // One search: its answers from known publishers are queued. Null when the search failed.
+    private async Task<int?> SearchAndQueueAsync(string query, HashSet<string> publisherHosts, CancellationToken ct)
+    {
+        try
+        {
+            var results = await webSearch!.SearchRecentAsync(query, maxResults: 10, ct);
+            await Store.AddToCounterAsync(Today, DiscoverySearchCounter, 1);
+            await Store.AddToCounterAsync(Today, DiscoveryReturnedCounter, results.Count);
+            var entries = new List<(string, string, bool, int, int, int)>();
+            foreach (var result in results)
+            {
+                if (WebPageReader.Normalize(result.Url, new Uri("https://localhost/")) is not { } url || url.IsLoopback || IsSkipped(url.Host)) continue;
+                var host = NormalizeHost(url.Host);
+                if (!publisherHosts.Any(publisher => host == publisher || host.EndsWith("." + publisher, StringComparison.Ordinal)
+                        || publisher.EndsWith("." + host, StringComparison.Ordinal))) continue;
+                await Store.EnsureSiteAsync(url.Host, Home(url), NowMs, MinDelayMs);
+                entries.Add((url.AbsoluteUri, url.Host, false, 0, 1, 10));
+            }
+            var eligible = entries.DistinctBy(entry => entry.Item1, StringComparer.OrdinalIgnoreCase).ToList();
+            await Store.AddToCounterAsync(Today, DiscoveryEligibleCounter, eligible.Count);
+            var queued = await Store.EnqueueAsync(eligible, NowMs);
+            await Store.AddToCounterAsync(Today, DiscoveryResultCounter, queued);
+            return queued;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            logger.LogWarning(ex, "Web crawl active news search failed for {Query}", query);
+            await Store.AddToCounterAsync(Today, DiscoveryFailureCounter, 1);
+            return null;
+        }
     }
 
     private static string DiscoveryMark(string query, string suffix) =>

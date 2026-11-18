@@ -70,6 +70,10 @@ else
         <button type="button" data-story-jump="story-part-agreement">@EventDocument.AgreementHeading</button>
         <button type="button" data-story-jump="story-part-coverage">@EventDocument.CoverageHeading <span class="story-jump-count">@_story.Outlets.Count</span></button>
         <button type="button" data-story-jump="story-part-timeline">Timeline <span class="story-jump-count">@_timeline.Count</span></button>
+        @if (_username is not null)
+        {
+            <button type="button" data-story-jump="story-part-grouping">Grouping</button>
+        }
         <a class="story-jump-link" href="@($"admin/world-news/search?similar={Uri.EscapeDataString(_story.Event.Id)}")" title="Stories in the last week whose reports read like this one">
             <i class="bi bi-intersect me-1" aria-hidden="true"></i>Find similar
         </a>
@@ -692,6 +696,11 @@ else
                 </ul>
             }
         </section>
+
+        @if (_username is { } groupingUser)
+        {
+            <WorldNewsGrouping EventId="@e.Id" Username="@groupingUser" OnChanged="ReloadAfterGroupingAsync" />
+        }
     </article>
 }
 
@@ -891,6 +900,13 @@ else
     }
 
     private void AnalyseAgain() => _ = FollowAnalysisAsync(EventId);
+
+    // A grouping correction or a story pull changed the reports: show the story as it is now.
+    private async Task ReloadAfterGroupingAsync()
+    {
+        _filter = StoryFilter.Everything;
+        await LoadAsync();
+    }
 
     // Follows the analysis (it runs on the server and carries on if this closes). The story is
     // fetched again whenever the analysis moves to its next step, so it shows as soon as it's saved,

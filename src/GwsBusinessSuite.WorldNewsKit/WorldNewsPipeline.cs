@@ -55,6 +55,17 @@ public sealed record CycleReport(int Fetched, int Added, int Embedded, int NewEv
     public int Deduplicated => Math.Max(0, Fetched - Added);
 }
 
+// A person's Pull latest (18-11-26). Force reads the slow sources and the feeds resting after quiet
+// reads now (never one that refused the server or is failing). Queries are extra GDELT searches,
+// at most MaxQueries, run after the follow-ups whatever the slow-source gap.
+public sealed record ReadRequest(bool Force = false, IReadOnlyList<string>? Queries = null)
+{
+    public const int MaxQueries = 8;
+}
+
+// What Regroup did: merges made and situations linked.
+public sealed record RegroupResult(IReadOnlyList<EventMerge> Merges, int Linked);
+
 // One refresh: read every feed (Google News editions, then outlets' own feeds), store the new
 // reports, embed their headlines with the local model, and group them into events. Only
 // headlines are embedded, outlets' included: the grouping thresholds were tuned on headlines. Feed failures are noted and skipped so one bad edition never stops a
@@ -62,8 +73,11 @@ public sealed record CycleReport(int Fetched, int Added, int Embedded, int NewEv
 public sealed class WorldNewsPipeline(WorldNewsStore store, HttpClient http, GdeltDocClient gdelt, OllamaClient ollama,
     TimeProvider time, WorldNewsOptions options)
 {
-    public async Task<CycleReport> RunCycleAsync(CancellationToken ct)
+    public Task<CycleReport> RunCycleAsync(CancellationToken ct) => RunCycleAsync(null, ct);
+
+    public async Task<CycleReport> RunCycleAsync(ReadRequest? pull, CancellationToken ct)
     {
+        var force = pull?.Force == true;
         var notes = new List<string>();
         var fetched = 0;
         var added = 0;
@@ -74,7 +88,7 @@ public sealed class WorldNewsPipeline(WorldNewsStore store, HttpClient http, Gde
         {
             var editionKey = "google-news:" + edition.Url;
             var editionAt = time.GetUtcNow();
-            if (!FeedSchedule.IsDueAfter(store.LastFetched(editionKey), options.SlowSourceGap, editionAt)) continue;
+            if (!force && !FeedSchedule.IsDueAfter(store.LastFetched(editionKey), options.SlowSourceGap, editionAt)) continue;
             sourcesAttempted++;
             try
             {
@@ -97,7 +111,9 @@ public sealed class WorldNewsPipeline(WorldNewsStore store, HttpClient http, Gde
         var paused = options.PausedFeeds?.Invoke() ?? new HashSet<string>();
         var outlets = options.Outlets.Concat(options.AddedOutlets?.Invoke() ?? []).DistinctBy(outlet => outlet.Url)
             .Where(outlet => !paused.Contains(outlet.Url)).ToList();
-        var due = outlets.Where(outlet => FeedSchedule.ShouldRead(health.GetValueOrDefault(outlet.Url), readAt)).ToList();
+        var due = outlets.Where(outlet => force
+            ? FeedSchedule.ShouldReadForced(health.GetValueOrDefault(outlet.Url), readAt)
+            : FeedSchedule.ShouldRead(health.GetValueOrDefault(outlet.Url), readAt)).ToList();
         var outletReads = new (IReadOnlyList<WorldArticle>? Articles, string? Note, FeedHealth Health, int Status, string? ETag, string? Modified)[due.Count];
         await Parallel.ForEachAsync(Enumerable.Range(0, due.Count),
             new ParallelOptions { MaxDegreeOfParallelism = options.OutletConcurrency, CancellationToken = ct }, async (i, token) =>
@@ -150,7 +166,7 @@ public sealed class WorldNewsPipeline(WorldNewsStore store, HttpClient http, Gde
         {
             sourcesAttempted++;
             var wikiHealth = store.FeedHealth().GetValueOrDefault(WikipediaCurrentEvents.Url) ?? new FeedHealth(WikipediaCurrentEvents.Url);
-            if (FeedSchedule.ShouldRead(wikiHealth, readAt))
+            if (force ? FeedSchedule.ShouldReadForced(wikiHealth, readAt) : FeedSchedule.ShouldRead(wikiHealth, readAt))
             {
                 try
                 {
@@ -182,13 +198,15 @@ public sealed class WorldNewsPipeline(WorldNewsStore store, HttpClient http, Gde
 
         // Surging stories are followed with their own searches, at most three a read, after the
         // configured ones (GDELT allows one request every five seconds).
-        var followUps = (options.FollowUpQueries?.Invoke() ?? []).Take(WorldNewsKit.FollowUpQueries.MaxPerRead).ToList();
+        // A person's extra searches (Pull latest) come after them and are always run.
+        var followUps = (options.FollowUpQueries?.Invoke() ?? []).Take(WorldNewsKit.FollowUpQueries.MaxPerRead)
+            .Concat((pull?.Queries ?? []).Where(q => !string.IsNullOrWhiteSpace(q)).Take(ReadRequest.MaxQueries)).ToList();
         var followUpSet = followUps.ToHashSet(StringComparer.OrdinalIgnoreCase);
         foreach (var query in options.GdeltQueries.Concat(followUps).Distinct(StringComparer.OrdinalIgnoreCase))
         {
             var feed = "gdelt:" + query;
             var startedAt = time.GetUtcNow();
-            if (!followUpSet.Contains(query) && !FeedSchedule.IsDueAfter(store.LastFetched(feed), options.SlowSourceGap, startedAt)) continue;
+            if (!force && !followUpSet.Contains(query) && !FeedSchedule.IsDueAfter(store.LastFetched(feed), options.SlowSourceGap, startedAt)) continue;
             sourcesAttempted++;
             var from = (store.LastFetched(feed) ?? startedAt - options.FirstLookback) - TimeSpan.FromMinutes(15);
             var result = await gdelt.SearchAsync(query, from, ct);
@@ -278,14 +296,43 @@ public sealed class WorldNewsPipeline(WorldNewsStore store, HttpClient http, Gde
         var clustering = EventClusterer.Assign(store.EmbeddedUnassigned(), events, store.GroupHintEvents(since),
             options.JoinThreshold, options.EventWindow, () => Guid.NewGuid().ToString("N"), options.Grouping);
         store.SaveClustering(clustering);
-        var merges = EventClusterer.MergeTwins(events, clustering.Touched.ToHashSet(), options.MergeThreshold, options.Grouping);
-        store.ApplyMerges(merges);
-        // Events that reached a situation's size are placed in one (the first read after an update
-        // places every recent event, oldest first).
+        var apart = store.ApartPairs();
+        var merges = EventClusterer.MergeTwins(events, clustering.Touched.ToHashSet(), options.MergeThreshold, options.Grouping,
+            (a, b) => apart.Contains(GroupingPairs.Key(a, b)));
+        store.ApplyMerges(merges, "automatic", now);
+        return (clustering, merges.Count, Link(now));
+    }
+
+    // Regroup (18-11-26): compares every active event with every other, not just the ones a read
+    // touched, so stories that drifted together are joined. confirmed: pairs the AI judged one story.
+    public RegroupResult Regroup(IReadOnlySet<(string, string)>? confirmed = null, string actor = "automatic")
+    {
+        var now = time.GetUtcNow();
+        var events = store.ActiveEvents(now - options.EventWindow);
+        var apart = store.ApartPairs();
+        var merges = EventClusterer.MergeTwins(events, events.ToHashSet(), options.MergeThreshold, options.Grouping,
+            (a, b) => apart.Contains(GroupingPairs.Key(a, b)), confirmed);
+        store.ApplyMerges(merges, actor, now);
+        return new RegroupResult(merges, Link(now));
+    }
+
+    // Active pairs in the band just below the merge threshold that no one has judged yet.
+    public IReadOnlyList<CloseCall> CloseCalls(double band, int limit)
+    {
+        var events = store.ActiveEvents(time.GetUtcNow() - options.EventWindow);
+        var judged = store.JudgedPairs();
+        return EventClusterer.CloseCalls(events, options.MergeThreshold - band, options.MergeThreshold, limit, options.Grouping,
+            (a, b) => judged.Contains(GroupingPairs.Key(a, b)));
+    }
+
+    // Events that reached a situation's size are placed in one (the first read after an update
+    // places every recent event, oldest first).
+    private int Link(DateTimeOffset now)
+    {
         var situationSince = now - options.SituationWindow;
         var links = SituationLinker.Link(store.EventsToLink(situationSince, SituationLinker.MinArticles),
             store.ActiveSituations(situationSince), options.SituationThreshold, options.SituationWindow, () => Guid.NewGuid().ToString("N"));
         store.SaveLinks(links);
-        return (clustering, merges.Count, links.Count);
+        return links.Count;
     }
 }

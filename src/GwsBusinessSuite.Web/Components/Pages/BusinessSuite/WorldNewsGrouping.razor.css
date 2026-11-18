@@ -1,0 +1,117 @@
+/* The story's Grouping part: it sits in the story document, so it matches its parts' look. */
+.story-grouping {
+    scroll-margin-top: calc(var(--story-jump-top, 0px) + 4.5rem);
+}
+
+.story-grouping h2 {
+    font-size: 1.2rem;
+    font-weight: 700;
+    margin: 1.75rem 0 .6rem;
+    padding-bottom: .3rem;
+    border-bottom: 1px solid var(--gws-panel-border, var(--bs-border-color));
+}
+
+.story-quiet {
+    color: var(--gws-text-soft);
+    font-size: .9rem;
+    font-style: italic;
+}
+
+.story-grouping-actions,
+.story-grouping-editor-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: .5rem;
+}
+
+.story-grouping-message {
+    margin: .6rem 0 0;
+    font-size: .9rem;
+}
+
+.story-grouping-suggestions {
+    display: grid;
+    gap: .5rem;
+    margin-top: .75rem;
+}
+
+.story-grouping-suggestion {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: .5rem;
+    padding: .6rem .8rem;
+    border-radius: var(--neu-radius-sm, .75rem);
+    background: var(--neu-surface, var(--bs-body-bg));
+    box-shadow: var(--neu-inset-shadow, none);
+    font-size: .9rem;
+}
+
+.story-grouping-editor {
+    margin-top: .75rem;
+    padding: .8rem;
+    border-radius: var(--neu-radius-sm, .75rem);
+    background: var(--neu-surface, var(--bs-body-bg));
+    box-shadow: var(--neu-inset-shadow, none);
+}
+
+.story-grouping-reports {
+    list-style: none;
+    padding: 0;
+    margin: 0 0 .75rem;
+    max-height: 22rem;
+    overflow-y: auto;
+}
+
+.story-grouping-reports li + li {
+    border-top: 1px solid var(--gws-panel-border, var(--bs-border-color));
+}
+
+.story-grouping-reports label {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    column-gap: .6rem;
+    padding: .4rem 0;
+    cursor: pointer;
+}
+
+.story-grouping-reports input {
+    grid-row: span 2;
+    margin-top: .3rem;
+}
+
+.story-grouping-reports small,
+.story-grouping-history small,
+.story-grouping-when {
+    color: var(--gws-text-soft);
+}
+
+.story-grouping-target {
+    width: auto;
+    max-width: min(28rem, 100%);
+}
+
+.story-grouping-history {
+    margin-top: 1rem;
+    font-size: .9rem;
+}
+
+.story-grouping-history summary {
+    cursor: pointer;
+    font-weight: 600;
+}
+
+.story-grouping-history ol {
+    margin: .5rem 0 0;
+    padding-left: 1.2rem;
+}
+
+.story-grouping-history li {
+    margin-bottom: .35rem;
+}
+
+.story-grouping-when {
+    margin-right: .4rem;
+    font-variant-numeric: tabular-nums;
+}

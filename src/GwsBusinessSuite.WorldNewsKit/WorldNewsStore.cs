@@ -129,6 +129,7 @@ public sealed partial class WorldNewsStore
             """);
         // The desk's tables (N5-N15, 14-11-26) live in WorldNewsStore.Desk.cs.
         Execute(connection, DeskSchema);
+        Execute(connection, GroupingSchema);
         EnsureDeskSchema(connection);
         // Databases from before outlet feeds (21-10-26) have no snippet column.
         using var columns = connection.CreateCommand();
@@ -1169,9 +1170,11 @@ public sealed partial class WorldNewsStore
         transaction.Commit();
     }
 
-    public void ApplyMerges(IReadOnlyList<EventMerge> merges)
+    // actor and at go in each story's grouping history ("automatic" for a read's or Regroup's merges).
+    public void ApplyMerges(IReadOnlyList<EventMerge> merges, string actor = "automatic", DateTimeOffset? at = null)
     {
         if (merges.Count == 0) return;
+        var when = at ?? DateTimeOffset.UtcNow;
         using var connection = Open();
         using var transaction = connection.BeginTransaction();
         foreach (var merge in merges)
@@ -1197,6 +1200,7 @@ public sealed partial class WorldNewsStore
             command.Parameters.AddWithValue("$first", merge.Keep.FirstSeen.ToUnixTimeSeconds());
             command.Parameters.AddWithValue("$last", merge.Keep.LastSeen.ToUnixTimeSeconds());
             command.ExecuteNonQuery();
+            CarryGrouping(connection, merge, actor, when);
         }
         transaction.Commit();
     }
@@ -2266,6 +2270,8 @@ public sealed partial class WorldNewsStore
             DELETE FROM situations WHERE id NOT IN (SELECT situation_id FROM events WHERE situation_id IS NOT NULL);
             DELETE FROM situation_placements WHERE situation_id NOT IN (SELECT id FROM situations);
             DELETE FROM surge_alerts_sent WHERE situation_id NOT IN (SELECT id FROM situations);
+            DELETE FROM grouping_log WHERE event_id NOT IN (SELECT id FROM events);
+            DELETE FROM grouping_pairs WHERE event_a NOT IN (SELECT id FROM events) OR event_b NOT IN (SELECT id FROM events);
             """;
         command.Parameters.AddWithValue("$before", before.ToUnixTimeSeconds());
         command.ExecuteNonQuery();

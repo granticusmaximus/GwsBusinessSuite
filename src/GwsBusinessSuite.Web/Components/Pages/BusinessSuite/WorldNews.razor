@@ -22,6 +22,21 @@
             Description="What newsrooms around the world are reporting, each story's coverage grouped across languages.">
     <Meta>
         <p class="world-news-updated small mb-0" title="@News.Status">@UpdatedLine</p>
+        @if (News.PullStatus is { } pullStatus)
+        {
+            <p class="world-news-pull small mb-0" role="status">
+                <span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>@pullStatus
+            </p>
+        }
+        else if (PullNote is { } note)
+        {
+            <p class="world-news-pull small mb-0" role="status" title="@note.Detail">
+                <i class="bi bi-info-circle me-1" aria-hidden="true"></i>@note.Text
+                <button type="button" class="btn btn-link btn-sm p-0 ms-1 align-baseline" aria-label="Dismiss" @onclick="DismissPullNote">
+                    <i class="bi bi-x" aria-hidden="true"></i>
+                </button>
+            </p>
+        }
     </Meta>
     <Actions>
         <a class="btn btn-outline-secondary" href="admin/world-news/search" title="Find every story with similar reports, and the cyber attacks in the news now">
@@ -36,11 +51,17 @@
         <a class="btn btn-outline-secondary" href="admin/world-news/sources" title="Every feed's health, the crawl's numbers and where coverage is thin">
             <i class="bi bi-broadcast me-1" aria-hidden="true"></i>Sources
         </a>
-        <button type="button" class="btn btn-outline-secondary world-news-refresh" @onclick="ReadNow" disabled="@News.IsRefreshing"
-                aria-label="@(News.IsRefreshing ? "Reading the news" : "Read the news now")"
-                title="Read the news now. It also reads every 15 minutes on its own.">
-            <i class="bi bi-arrow-clockwise @(News.IsRefreshing ? "world-news-spin" : "")" aria-hidden="true"></i>
-            <span class="world-news-refresh-text">@(News.IsRefreshing ? "Reading…" : "Refresh")</span>
+        <button type="button" class="btn btn-outline-secondary world-news-refresh" @onclick="RegroupNow" disabled="@(News.IsRegrouping || News.IsPulling)"
+                aria-label="@(News.IsRegrouping ? "Regrouping stories" : "Regroup stories")"
+                title="Compare every active story with every other and join the ones about the same event. The AI checks the close calls.">
+            <i class="bi bi-diagram-3 @(News.IsRegrouping ? "world-news-spin" : "")" aria-hidden="true"></i>
+            <span class="world-news-refresh-text">@(News.IsRegrouping ? "Regrouping…" : "Regroup")</span>
+        </button>
+        <button type="button" class="btn btn-outline-secondary world-news-refresh" @onclick="PullNow" disabled="@(News.IsPulling || PullWait > TimeSpan.Zero)"
+                aria-label="@(News.IsPulling ? "Pulling the latest news" : "Pull the latest news")"
+                title="@PullTitle">
+            <i class="bi bi-arrow-clockwise @(News.IsPulling || News.IsRefreshing ? "world-news-spin" : "")" aria-hidden="true"></i>
+            <span class="world-news-refresh-text">@(News.IsPulling ? "Pulling…" : "Pull latest")</span>
         </button>
     </Actions>
     <Filters>
@@ -514,7 +535,7 @@ else if (_events is null)
 else if (_events.Count == 0)
 {
     <EmptyState Icon="bi-globe-europe-africa" Title="No stories yet"
-                Message="The server reads the news every 15 minutes. The first read takes a few minutes while every headline is grouped.">
+                Message="@($"The server reads the news every {ReadEvery}. The first read takes a few minutes while every headline is grouped.")">
         <button type="button" class="btn btn-sm btn-primary mt-2" @onclick="ReadNow" disabled="@News.IsRefreshing">
             <i class="bi bi-arrow-clockwise me-1" aria-hidden="true"></i>Read now
         </button>
@@ -1256,6 +1277,41 @@ else
 
     // A read takes from seconds to a few minutes; the page follows it through News.Changed.
     private void ReadNow() => _ = News.RefreshAsync(CancellationToken.None);
+
+    // Pull latest and Regroup run on the server whatever happens to this page; it follows them
+    // through News.Changed. A refusal (the cooldown, one already running) shows in the note.
+    private string? _pullRefusal;
+    private DateTimeOffset _pullNoteDismissed = DateTimeOffset.MinValue;
+
+    private TimeSpan PullWait => News.PullAvailableIn(DateTimeOffset.UtcNow);
+
+    private string ReadEvery => News.ReadInterval.TotalMinutes is var minutes && minutes == 1 ? "minute" : $"{minutes:0} minutes";
+
+    private string PullTitle => PullWait > TimeSpan.Zero
+        ? $"Pulled a moment ago. Pull again in {Math.Ceiling(PullWait.TotalMinutes):0} min. The news is also read every {ReadEvery} on its own."
+        : $"Read every source now and search for what's moving, then regroup. The news is also read every {ReadEvery} on its own.";
+
+    private (string Text, string? Detail)? PullNote
+    {
+        get
+        {
+            if (_pullRefusal is not null) return (_pullRefusal, null);
+            var pull = News.LastPull is { } p && p.At > _pullNoteDismissed ? p : null;
+            var regroup = News.LastRegroup is { } r && r.At > _pullNoteDismissed ? r : null;
+            if (regroup is not null && (pull is null || regroup.At > pull.At)) return ($"{regroup.Text} ({Time(regroup.At)})", null);
+            return pull is null ? null : ($"{pull.Text} ({Time(pull.At)})", pull.SearchedText);
+        }
+    }
+
+    private void PullNow() => _pullRefusal = News.StartPull(_username);
+
+    private void RegroupNow() => _pullRefusal = News.StartRegroup(_username);
+
+    private void DismissPullNote()
+    {
+        _pullRefusal = null;
+        _pullNoteDismissed = DateTimeOffset.UtcNow;
+    }
 
     private void OnNewsChanged() => _ = InvokeAsync(async () =>
     {

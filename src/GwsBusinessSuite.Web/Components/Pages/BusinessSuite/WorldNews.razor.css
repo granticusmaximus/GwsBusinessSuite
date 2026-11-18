@@ -17,6 +17,11 @@
     color: var(--gws-text-soft);
 }
 
+.world-news-pull {
+    color: var(--gws-text-soft);
+    max-width: 60ch;
+}
+
 .world-news-refresh {
     display: inline-flex;
     align-items: center;

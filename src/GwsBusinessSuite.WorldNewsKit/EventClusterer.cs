@@ -47,7 +47,17 @@ public sealed class NewsEvent
     }
 }
 
-public sealed record EventMerge(NewsEvent Keep, NewsEvent Drop);
+// Similarity and Reason say why the two were merged, for the story's grouping history.
+public sealed record EventMerge(NewsEvent Keep, NewsEvent Drop, double Similarity = 0, string Reason = "");
+
+// Two events in a fixed order, so a pair is the same key whichever way round it was found.
+public static class GroupingPairs
+{
+    public static (string, string) Key(string a, string b) => string.CompareOrdinal(a, b) <= 0 ? (a, b) : (b, a);
+}
+
+// Two events close enough to ask about (Regroup's AI check, 18-11-26).
+public sealed record CloseCall(NewsEvent A, NewsEvent B, double Similarity);
 
 public sealed record ClusterResult(IReadOnlyList<(string ArticleId, string EventId)> Assignments, IReadOnlyList<NewsEvent> Touched, int Created);
 
@@ -136,31 +146,62 @@ public static class EventClusterer
     }
 
     // Merges each changed event into a closer, larger twin (or a smaller twin into it), closest
-    // pairs first. The dropped event's reports move to the kept one.
+    // pairs first. The dropped event's reports move to the kept one. keepApart: pairs a person split
+    // or the AI judged different, never merged. confirmed: pairs the AI judged one story, merged
+    // whatever their similarity (18-11-26).
     public static IReadOnlyList<EventMerge> MergeTwins(List<NewsEvent> events, IReadOnlyCollection<NewsEvent> changed, double mergeThreshold,
-        GroupingRules? rules = null)
+        GroupingRules? rules = null, Func<string, string, bool>? keepApart = null, IReadOnlySet<(string, string)>? confirmed = null)
     {
-        var candidates = new List<(float Similarity, NewsEvent A, NewsEvent B)>();
+        var candidates = new List<(double Similarity, NewsEvent A, NewsEvent B, string Reason)>();
         foreach (var a in changed)
         foreach (var b in events)
         {
             if (ReferenceEquals(a, b) || (changed.Contains(b) && string.CompareOrdinal(a.Id, b.Id) > 0)) continue;
-            var similarity = Dot(a.Centroid, b.Centroid);
-            if (similarity >= mergeThreshold && rules?.Conflicts(a.Title, b.Title) != true) candidates.Add((similarity, a, b));
+            var similarity = (double)Dot(a.Centroid, b.Centroid);
+            var isConfirmed = confirmed?.Contains(GroupingPairs.Key(a.Id, b.Id)) == true;
+            if (!isConfirmed && similarity < mergeThreshold - (rules?.EvidenceBonus ?? 0)) continue;
+            if (keepApart?.Invoke(a.Id, b.Id) == true) continue;
+            if (isConfirmed)
+            {
+                candidates.Add((similarity, a, b, "the AI judged them one story; " + GroupingRules.Explain(similarity, a.Title, b.Title)));
+                continue;
+            }
+            var needed = rules?.MergeThreshold(mergeThreshold, similarity, a.Title, b.Title) ?? mergeThreshold;
+            if (similarity >= needed && rules?.Conflicts(a.Title, b.Title) != true)
+                candidates.Add((similarity, a, b, GroupingRules.Explain(similarity, a.Title, b.Title)));
         }
 
         var dropped = new HashSet<NewsEvent>();
         var merges = new List<EventMerge>();
-        foreach (var (_, a, b) in candidates.OrderByDescending(c => c.Similarity))
+        foreach (var (similarity, a, b, reason) in candidates.OrderByDescending(c => c.Similarity))
         {
             if (dropped.Contains(a) || dropped.Contains(b)) continue;
             var (keep, drop) = a.ArticleCount >= b.ArticleCount ? (a, b) : (b, a);
             keep.Absorb(drop);
             dropped.Add(drop);
-            merges.Add(new EventMerge(keep, drop));
+            merges.Add(new EventMerge(keep, drop, similarity, reason));
         }
         events.RemoveAll(dropped.Contains);
         return merges;
+    }
+
+    // Pairs of events with at least minArticles reports each, similar enough to be one story but
+    // below the merge threshold: the borderline cases worth a second opinion, closest first. Pairs
+    // naming different places, or already judged, are left out.
+    public static IReadOnlyList<CloseCall> CloseCalls(IReadOnlyList<NewsEvent> events, double low, double high, int limit,
+        GroupingRules? rules = null, Func<string, string, bool>? skip = null, int minArticles = 2)
+    {
+        var sized = events.Where(e => e.ArticleCount >= minArticles).ToList();
+        var calls = new List<CloseCall>();
+        for (var i = 0; i < sized.Count; i++)
+        for (var j = i + 1; j < sized.Count; j++)
+        {
+            var similarity = (double)Dot(sized[i].Centroid, sized[j].Centroid);
+            if (similarity < low || similarity >= high) continue;
+            if (rules?.Conflicts(sized[i].Title, sized[j].Title) == true || skip?.Invoke(sized[i].Id, sized[j].Id) == true) continue;
+            calls.Add(new CloseCall(sized[i], sized[j], similarity));
+        }
+        return calls.OrderByDescending(c => c.Similarity).Take(limit).ToList();
     }
 
     public static float[] Normalize(float[] vector)

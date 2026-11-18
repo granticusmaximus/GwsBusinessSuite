@@ -31,6 +31,11 @@ public static class FeedSchedule
     public static bool ShouldRead(FeedHealth? health, DateTimeOffset now) =>
         health?.SkipUntil is not { } until || now >= until;
 
+    // A person's Pull latest (18-11-26): a feed resting after quiet reads is read anyway, but one that
+    // refused the server or is backing off after failures keeps its pause (both count as failures).
+    public static bool ShouldReadForced(FeedHealth? health, DateTimeOffset now) =>
+        ShouldRead(health, now) || health!.Failures == 0;
+
     public static bool IsRefusal(int status) => status is 401 or 403 or 405 or 451;
 
     // For sources read without validators (Google News editions, GDELT searches) that keep their

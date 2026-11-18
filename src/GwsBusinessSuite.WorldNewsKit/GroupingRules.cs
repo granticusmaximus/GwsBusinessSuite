@@ -8,12 +8,37 @@ namespace GwsBusinessSuite.WorldNewsKit;
 // QuietPenalty: an event that has gone quiet needs a closer match to take a new report, rising
 // linearly from QuietAfter to the event window's end, so a fresh story doesn't drift into
 // yesterday's similar one.
-public sealed record GroupingRules(bool PlaceGuard = true, double QuietPenalty = 0.05)
+// EvidenceBonus: two events whose headlines share a distinctive number (a toll, a magnitude, a
+// flight) and name no different places merge this much below the merge threshold (18-11-26).
+public sealed record GroupingRules(bool PlaceGuard = true, double QuietPenalty = 0.05, double EvidenceBonus = 0.03)
 {
     public static readonly TimeSpan QuietAfter = TimeSpan.FromHours(12);
 
     public bool Conflicts(string titleA, string titleB) =>
         PlaceGuard && HeadlineCountries.Conflict(HeadlineCountries.In(titleA), HeadlineCountries.In(titleB));
+
+    // The similarity two events need to merge. Only worth the headline parsing near the threshold.
+    public double MergeThreshold(double threshold, double similarity, string titleA, string titleB) =>
+        EvidenceBonus > 0 && similarity >= threshold - EvidenceBonus && similarity < threshold && SharedNumbers(titleA, titleB).Count > 0
+        && !HeadlineCountries.Conflict(HeadlineCountries.In(titleA), HeadlineCountries.In(titleB))
+            ? threshold - EvidenceBonus
+            : threshold;
+
+    public static IReadOnlyList<string> SharedNumbers(string titleA, string titleB) =>
+        HeadlineNumbers.In(titleA).Intersect(HeadlineNumbers.In(titleB), StringComparer.Ordinal).Order(StringComparer.Ordinal).ToList();
+
+    // Why two headlines look like one story, in words: "similarity 0.87; both name 7.1 and Japan".
+    public static string Explain(double similarity, string titleA, string titleB)
+    {
+        var shared = SharedNumbers(titleA, titleB)
+            .Concat(HeadlineCountries.In(titleA).Intersect(HeadlineCountries.In(titleB), StringComparer.Ordinal).Order(StringComparer.Ordinal))
+            .ToList();
+        var why = $"similarity {similarity:0.00}";
+        return shared.Count == 0 ? why : $"{why}; both name {JoinAnd(shared)}";
+    }
+
+    private static string JoinAnd(IReadOnlyList<string> items) =>
+        items.Count == 1 ? items[0] : string.Join(", ", items.Take(items.Count - 1)) + " and " + items[^1];
 
     // The similarity a report needs to join an event last seen `gap` before it.
     public double Required(double threshold, TimeSpan gap, TimeSpan window)
@@ -22,6 +47,30 @@ public sealed record GroupingRules(bool PlaceGuard = true, double QuietPenalty =
         var share = Math.Min(1, (gap - QuietAfter) / (window - QuietAfter));
         return threshold + QuietPenalty * share;
     }
+}
+
+// A headline's distinctive numbers: two or more digits or a decimal ("47", "7.1", "1,200"), so a
+// toll or a magnitude, but not years (1900-2099) or a lone digit, which say little.
+public static partial class HeadlineNumbers
+{
+    public static IReadOnlySet<string> In(string headline)
+    {
+        var found = new HashSet<string>(StringComparer.Ordinal);
+        foreach (Match match in Number().Matches(headline))
+        {
+            var value = ThousandsSeparator().Replace(match.Value, "");
+            if (value.Length < 2 && !value.Contains('.')) continue;
+            if (value.Length == 4 && int.TryParse(value, out var year) && year is >= 1900 and <= 2099) continue;
+            found.Add(value);
+        }
+        return found;
+    }
+
+    [GeneratedRegex(@"(?<![\d.,])\d{1,3}(?:,\d{3})+(?![\d,])|(?<![\d.,])\d+(?:\.\d+)?(?![\d])")]
+    private static partial Regex Number();
+
+    [GeneratedRegex(@",(?=\d{3})")]
+    private static partial Regex ThousandsSeparator();
 }
 
 // The countries an English headline names, by name, short form or adjective. Other languages name
