@@ -62,9 +62,8 @@ public class AppDelegate : MauiUIApplicationDelegate
 			UIMenu.Create(string.Empty, null, UIMenuIdentifier.None, UIMenuOptions.DisplayInline, [back, forward]),
 			UIMenuIdentifier.View.GetConstant()!);
 		// View > Toggle Sidebar and Search (18-11-26), the toolbar's two buttons. Neither takes a key:
-		// macOS 12+ already has View > Show Sidebar on Ctrl+Cmd+S and ignores a second command on
-		// that key, so ToggleSidebarSystem below answers the system's toggleSidebar: instead. The
-		// page already owns Cmd+K, and a menu key would take it first.
+		// macOS 12+ ignores a second command on Ctrl+Cmd+S, and the page already owns Cmd+K, which
+		// a menu key would take first.
 		var toggleSidebar = UICommand.Create("Toggle Sidebar", null, new Selector("gwsToggleSidebar:"), null);
 		var search = UICommand.Create("Search…", null, new Selector("gwsSearch:"), null);
 		builder.InsertChildMenuAtStart(
@@ -103,14 +102,10 @@ public class AppDelegate : MauiUIApplicationDelegate
 	internal const string OpenSearchScript = "window.dispatchEvent(new CustomEvent('gws-open-search'))";
 
 	[Export("gwsToggleSidebar:")]
-	public void ToggleSidebar(NSObject sender) => RunInWorkspace(ToggleSidebarScript);
-
-	// The system's View > Show Sidebar (Ctrl+Cmd+S) sends this up the responder chain.
-	[Export("toggleSidebar:")]
-	public void ToggleSidebarSystem(NSObject sender) => RunInWorkspace(ToggleSidebarScript);
+	public void ToggleWorkspaceSidebar(NSObject sender) => RunInWorkspace(ToggleSidebarScript);
 
 	[Export("gwsSearch:")]
-	public void Search(NSObject sender) => RunInWorkspace(OpenSearchScript);
+	public void SearchWorkspace(NSObject sender) => RunInWorkspace(OpenSearchScript);
 
 	// The page's own search where it has one (World News, lists), else the app's command palette
 	// (app.js listens for gws-find).

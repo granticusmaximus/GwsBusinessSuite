@@ -111,8 +111,7 @@ public sealed class DesignSystemGuardTests
         File.ReadAllText(Path.Combine(mac, "MacWebViewCompatibility.cs")).Should().Contain("window.__gwsMacNativeChrome = true;");
         File.ReadAllText(Path.Combine(mac, "MacWindowToolbar.cs")).Should().Contain("\"toolbar-sidebar\"").And.Contain("\"toolbar-search\"");
         File.ReadAllText(Path.Combine(mac, "AppDelegate.cs")).Should()
-            .Contain("new CustomEvent('gws-toggle-sidebar')").And.Contain("new CustomEvent('gws-open-search')")
-            .And.Contain("[Export(\"toggleSidebar:\")]");
+            .Contain("new CustomEvent('gws-toggle-sidebar')").And.Contain("new CustomEvent('gws-open-search')");
 
         var appJs = File.ReadAllText(Path.Combine(Web, "wwwroot/app.js"));
         appJs.Should().Contain("window.addEventListener('gws-toggle-sidebar', toggleNavigation);")

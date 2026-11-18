@@ -1,0 +1,42 @@
+# Apple-style UI streamlining (18-11-26)
+
+Grant asked for the app to feel "like it was developed by the senior UI/UX Apple developer".
+Seven items were proposed; this pass does items 1 (Mac app feels native) and 4 (enforce the
+design system) in one go.
+
+## Items
+
+1. **Mac app feels native** - done (needs a Mac build to confirm).
+2. Simplify navigation (39 sidebar links across 7 workspaces) - to do.
+3. One main action per page (World News 30 buttons, Overwatch 137) - to do.
+4. **Enforce the design system** - done.
+5. Motion and feedback (20 bare spinners, mostly in buttons) - to do.
+6. Neumorphism pushback - Grant's call, not started.
+7. Detail and copy - to do.
+
+## What changed
+
+- `app.css` `:root`: `--gws-radius-xs/sm/md/lg/xl/pill`, `--gws-type-xs`..`5xl`, and the font
+  stack now starts with the system font (SF Pro on Apple devices, Inter elsewhere).
+- Every literal `font-size` (rem/px) and `border-radius` length in `app.css` and the scoped
+  `*.razor.css` files maps to those tokens (88 files). Sizes shift by up to ~1-2px.
+- 25 references to tokens that don't exist on admin pages (`--neu-border`, `--gws-accent`,
+  `--gws-text-muted`, ...) repointed to real ones; they were silently dropping declarations.
+- Mac app: toolbar Sidebar (leading) and Search (trailing) buttons; View > Toggle Sidebar and
+  Search...; the injected
+  script sets `__gwsMacNativeChrome`.
+- Web: `theme-init.js`/`app.js` set `data-gws-mac` (`native` or `app`). In the app the bar's brand
+  hides; `native` builds also hide the page's sidebar toggle and search; the status strip hides
+  until an item is warning or danger. `app.js` listens for `gws-toggle-sidebar` and `gws-open-search`.
+- `DesignSystemGuardTests`: type scale, radius scale, tokens that exist, a shadow ratchet (185)
+  and the Mac toolbar wiring.
+
+## Progress
+
+- [x] Tokens and consolidation
+- [x] Undefined token references fixed
+- [x] Mac toolbar, menu and page marker
+- [x] Guard tests
+- [x] Sentinel user guide (Mac app section)
+- [ ] `./scripts/verify-release.sh` and a Mac build - Windows can't run either; Grant to run on his Mac
+- [ ] Items 2, 3, 5, 6, 7
