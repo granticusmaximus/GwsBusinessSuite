@@ -80,6 +80,7 @@ public partial class MainPage : ContentPage
     protected override async void OnAppearing()
     {
         base.OnAppearing();
+        if (IsSentinelWindow) DebugLog("Sentinel window: OnAppearing");
 #if MACCATALYST
         OnWorkspaceViewHandlerChanged(WorkspaceView, EventArgs.Empty);
 #endif
@@ -131,6 +132,7 @@ public partial class MainPage : ContentPage
         if (IsSentinelWindow)
         {
             _resumingSession = _touchIdLock.IsSetUp;
+            DebugLog($"Sentinel window: loading {WorkspaceStartUrl} handler={(WorkspaceView.Handler is not null)}");
             BeginBlockingNavigation();
             WorkspaceView.Source = WorkspaceStartUrl;
             return;
