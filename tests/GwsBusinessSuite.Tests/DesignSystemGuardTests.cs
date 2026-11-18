@@ -48,7 +48,9 @@ public sealed class DesignSystemGuardTests
             "CreatePageModal.razor", "AssistantPanel.razor", "LegislationBriefPanel.razor", "ArticleEditorDetail.razor",
             "Automation.razor", "ContentStudio.razor", "DockerHealth.razor", "SentinelAiPanel.razor",
             "SentinelDatabaseRowPage.razor", "Settings.razor", "Wiki.razor", "WikiDatabaseEditor.razor",
-            "WorldNewsStoryView.razor", "SentinelPublicShare.razor"
+            "WorldNewsStoryView.razor", "SentinelPublicShare.razor",
+            // 18-11-26: Pull latest's status line (beside live text) and Regroup's button.
+            "WorldNews.razor", "WorldNewsGrouping.razor"
         ];
         var unreviewed = Files("*.razor")
             .Where(path => File.ReadAllText(path).Contains("spinner-border", StringComparison.Ordinal))
