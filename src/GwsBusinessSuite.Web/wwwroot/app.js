@@ -915,6 +915,9 @@
 			if (boxes.length > 0) { boxes[0].focus(); boxes[0].select(); }
 			else openCommand();
 		});
+		// The Mac app's toolbar Sidebar and Search buttons and View menu (18-11-26).
+		window.addEventListener('gws-toggle-sidebar', toggleNavigation);
+		window.addEventListener('gws-open-search', openCommand);
 	}
 
 	// Makes every modal in the admin portal draggable by its header, with zero per-modal
@@ -1069,8 +1072,18 @@
 		} catch (e) { /* storage unavailable - the default dark stays */ }
 	}
 
+	// The Mac app's marker (18-11-26), set first by theme-init.js and put back here after each
+	// enhanced navigation for the same reason as the theme. "native": this app build's toolbar has
+	// Sidebar and Search, so app.css hides the page's copies. "app": an older build without them.
+	function applyMacChrome() {
+		var mode = window.__gwsMacNativeChrome === true ? 'native'
+			: window.__gwsMacCatalystWebView === true ? 'app' : null;
+		if (mode) document.documentElement.setAttribute('data-gws-mac', mode);
+	}
+
 	function initializeAdminShell() {
 		applyStoredTheme();
+		applyMacChrome();
 		bindShellEventsOnce();
 		bindDraggableModalsOnce();
 		bindStatusStripOnce();

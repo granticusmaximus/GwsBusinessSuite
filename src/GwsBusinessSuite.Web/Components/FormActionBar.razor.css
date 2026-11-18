@@ -12,7 +12,7 @@
     background: color-mix(in srgb, var(--gws-panel-bg) 94%, transparent);
     backdrop-filter: blur(12px);
 }
-.gws-form-actions-hint { color: var(--gws-text-soft); font-size: .78rem; }
+.gws-form-actions-hint { color: var(--gws-text-soft); font-size: var(--gws-type-xs); }
 .gws-form-actions-buttons { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: .5rem; }
 
 @container gws-main (max-width: 575.98px) {

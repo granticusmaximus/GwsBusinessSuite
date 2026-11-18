@@ -18,4 +18,10 @@
         var stored = localStorage.getItem('gwsTheme');
         if (stored === 'light' || stored === 'dark') document.documentElement.setAttribute('data-theme', stored);
     } catch (e) { /* storage unavailable (private mode, etc.) - fall back to default dark */ }
+    // The Mac app's marker (18-11-26): its injected script set these flags at document start, so
+    // the page's own brand, sidebar toggle and search are hidden from the first paint. app.js
+    // (applyMacChrome) puts it back after enhanced navigation.
+    var mac = window.__gwsMacNativeChrome === true ? 'native'
+        : window.__gwsMacCatalystWebView === true ? 'app' : null;
+    if (mac) document.documentElement.setAttribute('data-gws-mac', mac);
 })();

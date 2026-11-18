@@ -1,7 +1,7 @@
 .world-news-dossier {
     margin-top: 1rem;
     padding: 1rem;
-    border-radius: .9rem;
+    border-radius: var(--gws-radius-lg);
     background: var(--gws-neu-raised, rgba(127, 127, 127, .08));
     box-shadow: var(--gws-neu-raised-shadow-sm, none);
 }
@@ -9,7 +9,7 @@
 .story-desk-heading {
     margin: 1rem 0 .5rem;
     color: var(--gws-text-strong);
-    font-size: .95rem;
+    font-size: var(--gws-type-base);
     font-weight: 650;
 }
 
@@ -36,7 +36,7 @@
     justify-content: space-between;
     gap: .65rem;
     padding-bottom: .65rem;
-    border-bottom: 1px solid var(--gws-neu-edge, rgba(127, 127, 127, .2));
+    border-bottom: 1px solid var(--gws-panel-border);
 }
 
 .dossier-item-main {
@@ -47,7 +47,7 @@
 
 .dossier-kind {
     color: var(--gws-text-soft);
-    font-size: .75rem;
+    font-size: var(--gws-type-xs);
     text-transform: uppercase;
     letter-spacing: .04em;
 }

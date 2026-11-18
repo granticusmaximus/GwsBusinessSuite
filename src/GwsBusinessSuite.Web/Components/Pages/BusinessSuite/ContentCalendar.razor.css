@@ -9,7 +9,7 @@
 
 .cc-weekday {
     padding: 0.35rem 0.5rem;
-    font-size: 0.75rem;
+    font-size: var(--gws-type-xs);
     font-weight: 600;
     text-transform: uppercase;
     color: var(--bs-secondary-color);
@@ -33,7 +33,7 @@
 .cc-today .cc-date { color: var(--bs-primary); font-weight: 700; }
 .cc-drop { outline: 2px dashed var(--bs-primary); outline-offset: -3px; }
 
-.cc-date { font-size: 0.8rem; }
+.cc-date { font-size: var(--gws-type-sm); }
 .cc-date-long { display: none; }
 
 .cc-item {
@@ -42,9 +42,9 @@
     padding: 0.15rem 0.35rem;
     border: 0;
     border-left: 3px solid currentColor;
-    border-radius: 0.2rem;
+    border-radius: var(--gws-radius-xs);
     background: var(--bs-secondary-bg);
-    font-size: 0.75rem;
+    font-size: var(--gws-type-xs);
     text-align: left;
     white-space: nowrap;
     overflow: hidden;
@@ -80,7 +80,7 @@
     .cc-day { min-height: 0; border: 0; border-bottom: 1px solid var(--bs-border-color); padding: 0.5rem 0; }
     .cc-date { font-weight: 600; }
     .cc-date-long { display: inline; }
-    .cc-item { font-size: 0.85rem; white-space: normal; }
+    .cc-item { font-size: var(--gws-type-md); white-space: normal; }
 }
 
 @media (pointer: coarse) {

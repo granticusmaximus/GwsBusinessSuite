@@ -25,7 +25,7 @@
     width: 3.25rem;
     height: 3.25rem;
     border-radius: 50%;
-    font-size: 1.5rem;
+    font-size: var(--gws-type-2xl);
     font-weight: 700;
     color: #fff;
     background: #475569;

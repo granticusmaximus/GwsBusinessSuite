@@ -1,4 +1,4 @@
-.desk-signoffs { margin-top: 1.25rem; padding-top: 1rem; border-top: 1px solid var(--neu-border, var(--bs-border-color)); }
+.desk-signoffs { margin-top: 1.25rem; padding-top: 1rem; border-top: 1px solid var(--gws-panel-border); }
 .desk-approval-kind { margin-top: 1rem; }
-.desk-approval-kind li { padding: .5rem 0; border-bottom: 1px solid var(--neu-border, var(--bs-border-color)); }
+.desk-approval-kind li { padding: .5rem 0; border-bottom: 1px solid var(--gws-panel-border); }
 .desk-approval-kind code { overflow-wrap: anywhere; }

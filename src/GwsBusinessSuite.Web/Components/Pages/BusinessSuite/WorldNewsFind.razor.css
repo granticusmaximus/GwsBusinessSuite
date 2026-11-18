@@ -5,24 +5,24 @@
     gap: 10px;
     margin: 0 0 12px;
     padding: 8px 8px 8px 16px;
-    border-radius: 999px;
+    border-radius: var(--gws-radius-pill);
     background: var(--gws-neu-surface);
     box-shadow: var(--gws-neu-inset-shadow);
 }
 .find-bar > .bi { color: var(--gws-text-soft); }
 .find-input { flex: 1 1 auto; min-width: 0; border: 0; background: transparent; box-shadow: none; }
 .find-input:focus { box-shadow: none; background: transparent; }
-.find-bar .btn { border-radius: 999px; }
+.find-bar .btn { border-radius: var(--gws-radius-pill); }
 .find-options { display: flex; flex-wrap: wrap; gap: 4px 16px; }
 .find-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px; }
 .find-chip {
     min-height: 2rem;
     padding: 0 .85rem;
     border: 0;
-    border-radius: 999px;
+    border-radius: var(--gws-radius-pill);
     background: var(--gws-neu-surface);
     color: var(--gws-text-soft);
-    font-size: .85rem;
+    font-size: var(--gws-type-md);
     font-weight: 600;
     box-shadow: var(--gws-neu-raised-shadow-sm);
     transition: color .15s ease, box-shadow .15s ease;
@@ -36,12 +36,12 @@
 .find-list > li:last-child { border-bottom: 0; }
 .find-title { display: block; font-weight: 600; color: var(--gws-text-strong); text-decoration: none; overflow-wrap: anywhere; }
 .find-title:hover { text-decoration: underline; }
-.find-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin-top: 4px; font-size: .82rem; color: var(--gws-text-soft); }
+.find-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin-top: 4px; font-size: var(--gws-type-sm); color: var(--gws-text-soft); }
 .find-badge {
     display: inline-block;
     padding: .05rem .55rem;
-    border-radius: 999px;
-    font-size: .75rem;
+    border-radius: var(--gws-radius-pill);
+    font-size: var(--gws-type-xs);
     font-weight: 600;
     background: var(--gws-neu-inset, rgba(127, 127, 127, .12));
     color: var(--gws-text-soft);
@@ -54,18 +54,18 @@
 .find-cves { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 .find-kev-hit { color: var(--bs-danger-text-emphasis); }
 .find-kev { margin: 0; padding-left: 1.1rem; display: grid; gap: .5rem; overflow-wrap: anywhere; }
-.find-kev-news { display: block; font-size: .85rem; }
+.find-kev-news { display: block; font-size: var(--gws-type-md); }
 
 @container gws-main (max-width: 588px) {
-    .find-bar { border-radius: var(--gws-radius-md, 10px); flex-wrap: wrap; padding: 8px; }
+    .find-bar { border-radius: var(--gws-radius-md); flex-wrap: wrap; padding: 8px; }
     .find-bar .btn { width: 100%; }
 }
 .find-loose { margin-top: 12px; }
 .find-loose > summary { cursor: pointer; color: var(--gws-text-soft); font-weight: 600; }
 .find-wider { display: grid; gap: 8px; }
-.find-wider-heading { margin: 12px 0 4px; font-size: 1rem; font-weight: 700; color: var(--gws-text-strong); }
+.find-wider-heading { margin: 12px 0 4px; font-size: var(--gws-type-base); font-weight: 700; color: var(--gws-text-strong); }
 .find-wider-heading:first-child { margin-top: 0; }
-.find-wider-heading small { margin-left: .4rem; font-size: .8rem; font-weight: 500; color: var(--gws-text-soft); }
+.find-wider-heading small { margin-left: .4rem; font-size: var(--gws-type-sm); font-weight: 500; color: var(--gws-text-soft); }
 .find-wide-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
 .find-wide-list > li { display: grid; gap: 2px; overflow-wrap: anywhere; }
-.find-snippet { font-size: .85rem; color: var(--gws-text-soft); }
+.find-snippet { font-size: var(--gws-type-md); color: var(--gws-text-soft); }

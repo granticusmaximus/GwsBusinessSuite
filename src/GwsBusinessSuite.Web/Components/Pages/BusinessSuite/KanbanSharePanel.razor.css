@@ -1,5 +1,5 @@
 .kb-share { width: min(34rem, calc(100vw - 2rem)); }
-.kb-share-note { margin: 0 0 .75rem; font-size: .8125rem; color: var(--gws-text-soft); }
+.kb-share-note { margin: 0 0 .75rem; font-size: var(--gws-type-sm); color: var(--gws-text-soft); }
 .kb-share-people { display: grid; gap: .4rem; }
 
 .kb-share-person {

@@ -67,6 +67,8 @@ internal sealed class MacWindowToolbar : NSToolbarDelegate
     private const string OfflineId = "gws.tab.offline";
     private const string ReloadId = "gws.reload";
     private const string DeviceLoginId = "gws.deviceLogin";
+    private const string SidebarId = "gws.sidebar";
+    private const string SearchId = "gws.search";
 
     // Standard macOS toolbar icon size; the bundled PNGs are rendered at 2x this (36x36) for a
     // crisp Retina result once NSImage.Size below scales the bitmap down to it.
@@ -106,11 +108,13 @@ internal sealed class MacWindowToolbar : NSToolbarDelegate
         : route.Contains("Sentinel", StringComparison.OrdinalIgnoreCase) ? SentinelGptId
         : WorkspaceId;
 
+    // Sidebar leads and Search trails, where every Mac app puts them (18-11-26). Both act on the
+    // workspace page (AppDelegate.RunInWorkspace), whose own top-bar copies hide in the app.
     public override string[] AllowedItemIdentifiers(NSToolbar toolbar) =>
-        [WorkspaceId, SentinelGptId, NotesId, CaptureId, OfflineId, NSToolbar.NSToolbarFlexibleSpaceItemIdentifier, DeviceLoginId, ReloadId];
+        [SidebarId, WorkspaceId, SentinelGptId, NotesId, CaptureId, OfflineId, NSToolbar.NSToolbarFlexibleSpaceItemIdentifier, SearchId, DeviceLoginId, ReloadId];
 
     public override string[] DefaultItemIdentifiers(NSToolbar toolbar) =>
-        [WorkspaceId, SentinelGptId, NotesId, CaptureId, OfflineId, NSToolbar.NSToolbarFlexibleSpaceItemIdentifier, DeviceLoginId, ReloadId];
+        [SidebarId, WorkspaceId, SentinelGptId, NotesId, CaptureId, OfflineId, NSToolbar.NSToolbarFlexibleSpaceItemIdentifier, SearchId, DeviceLoginId, ReloadId];
 
     // Selectable items (a segmented radio group of one) let NSToolbar draw the current tab as
     // pressed-in without any custom highlight logic - toolbar.SelectedItemIdentifier is all
@@ -126,6 +130,10 @@ internal sealed class MacWindowToolbar : NSToolbarDelegate
             CaptureId => BuildTabButton(CaptureId, "Capture", "CapturePage", "toolbar-capture"),
             OfflineId => BuildTabButton(OfflineId, "Offline", "OfflinePage", "toolbar-offline"),
             ReloadId => BuildActionButton(ReloadId, "Reload", "Reload the workspace", "toolbar-reload", () => MacToolbarActions.Reload?.Invoke()),
+            SidebarId => BuildActionButton(SidebarId, "Sidebar", "Show or hide the sidebar", "toolbar-sidebar",
+                () => AppDelegate.RunInWorkspace(AppDelegate.ToggleSidebarScript)),
+            SearchId => BuildActionButton(SearchId, "Search", "Search pages and records (⌘K)", "toolbar-search",
+                () => AppDelegate.RunInWorkspace(AppDelegate.OpenSearchScript)),
             DeviceLoginId => BuildDeviceLoginButton(),
             _ => null
         };

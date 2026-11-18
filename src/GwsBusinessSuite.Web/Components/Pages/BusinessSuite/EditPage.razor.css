@@ -12,7 +12,7 @@
 .cms-custom-css-editor {
     min-height: 140px;
     font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-    font-size: 0.82rem;
+    font-size: var(--gws-type-sm);
 }
 
 @container gws-main (max-width: 687.98px) {
@@ -30,11 +30,11 @@
     gap: 1rem;
     padding: 1.5rem;
     border: 1px dashed var(--gws-panel-border);
-    border-radius: 1rem;
+    border-radius: var(--gws-radius-lg);
     background: var(--gws-panel-bg);
 }
 
 .cms-block-preview-empty > i {
-    font-size: 2rem;
+    font-size: var(--gws-type-3xl);
     color: var(--bs-primary);
 }

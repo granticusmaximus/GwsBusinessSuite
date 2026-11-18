@@ -10,9 +10,9 @@
     background: var(--gws-panel-bg);
 }
 .gws-record-section-heading { display: flex; align-items: flex-start; gap: .65rem; min-width: 0; }
-.gws-record-section-heading > i { margin-top: .1rem; color: var(--gws-text-soft); font-size: 1rem; }
-.gws-record-section-heading h2 { margin: 0; color: var(--gws-text-strong); font-size: .95rem; font-weight: 700; }
-.gws-record-section-heading p { margin: .15rem 0 0; color: var(--gws-text-soft); font-size: .78rem; }
+.gws-record-section-heading > i { margin-top: .1rem; color: var(--gws-text-soft); font-size: var(--gws-type-base); }
+.gws-record-section-heading h2 { margin: 0; color: var(--gws-text-strong); font-size: var(--gws-type-base); font-weight: 700; }
+.gws-record-section-heading p { margin: .15rem 0 0; color: var(--gws-text-soft); font-size: var(--gws-type-xs); }
 .gws-record-section-actions { display: flex; flex: 0 0 auto; flex-wrap: wrap; align-items: center; gap: .4rem; }
 .gws-record-section-body { padding: var(--gws-card-pad); }
 .gws-record-section-body.is-flush { padding: 0; }

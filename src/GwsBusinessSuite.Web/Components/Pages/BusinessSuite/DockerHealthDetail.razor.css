@@ -4,9 +4,9 @@
     background: #0f172a;
     color: #cbd5e1;
     padding: 1rem;
-    border-radius: 6px;
+    border-radius: var(--gws-radius-sm);
     font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-    font-size: 0.78rem;
+    font-size: var(--gws-type-xs);
     white-space: pre-wrap;
     word-break: break-all;
     margin: 0;

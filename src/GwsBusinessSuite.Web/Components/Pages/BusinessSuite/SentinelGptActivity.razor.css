@@ -59,7 +59,7 @@
 .sga-what small {
     margin-top: .2rem;
     color: var(--gws-text-soft);
-    font-size: .75rem;
+    font-size: var(--gws-type-xs);
     text-transform: capitalize;
 }
 

@@ -14,7 +14,7 @@
     background: none;
     border: none;
     color: var(--gws-sidebar-text, #c7ccd6);
-    font-size: 0.9rem;
+    font-size: var(--gws-type-md);
     cursor: pointer;
     position: relative;
     width: 2.5rem;
@@ -23,7 +23,7 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    border-radius: var(--gws-radius-sm, 8px);
+    border-radius: var(--gws-radius-sm);
 }
 
 .notif-bell-btn:hover {
@@ -37,11 +37,11 @@
     right: -0.3rem;
     background: var(--gws-status-danger-fill, #dc2626);
     color: var(--gws-status-danger-on, #fff);
-    font-size: .75rem;
+    font-size: var(--gws-type-xs);
     font-weight: 700;
     line-height: 1;
     padding: 0.2rem 0.32rem;
-    border-radius: 999px;
+    border-radius: var(--gws-radius-pill);
     min-width: 1rem;
     text-align: center;
 }
@@ -56,7 +56,7 @@
     background: var(--gws-panel-bg, #1c1917);
     color: var(--gws-text-strong, #fafaf9);
     border: 1px solid var(--gws-panel-border, #292524);
-    border-radius: 8px;
+    border-radius: var(--gws-radius-sm);
     box-shadow: var(--gws-shadow-md, 0 12px 32px rgba(0, 0, 0, 0.45));
     z-index: 1000;
 }
@@ -68,7 +68,7 @@
     gap: 0.75rem;
     padding: 0.75rem 1rem;
     font-weight: 700;
-    font-size: 0.85rem;
+    font-size: var(--gws-type-md);
     border-bottom: 1px solid var(--gws-panel-border, #292524);
 }
 
@@ -77,7 +77,7 @@
     border: none;
     padding: 0;
     color: var(--gws-sidebar-accent, #f59e0b);
-    font-size: 0.75rem;
+    font-size: var(--gws-type-xs);
     font-weight: 600;
     cursor: pointer;
     white-space: nowrap;
@@ -89,7 +89,7 @@
 
 .notif-bell-empty {
     padding: 1.25rem 1rem;
-    font-size: 0.82rem;
+    font-size: var(--gws-type-sm);
     color: var(--gws-text-soft, #a8a29e);
 }
 
@@ -133,10 +133,10 @@
     min-height: 28px;
     padding: 0 0.6rem;
     border: 1px solid var(--gws-panel-border, #292524);
-    border-radius: 999px;
+    border-radius: var(--gws-radius-pill);
     background: transparent;
     color: var(--gws-text-soft, #a8a29e);
-    font-size: 0.75rem;
+    font-size: var(--gws-type-xs);
     font-weight: 600;
 }
 .notif-bell-chip span {
@@ -170,10 +170,10 @@
     width: 32px;
     height: 32px;
     border: 0;
-    border-radius: var(--gws-radius-sm, 8px);
+    border-radius: var(--gws-radius-sm);
     background: transparent;
     color: var(--gws-text-soft, #a8a29e);
-    font-size: 0.85rem;
+    font-size: var(--gws-type-md);
 }
 .notif-bell-action:hover,
 .notif-bell-back:hover,
@@ -191,10 +191,10 @@
     min-height: 32px;
     padding: 0 0.6rem;
     border: 1px solid var(--gws-panel-border, #292524);
-    border-radius: var(--gws-radius-sm, 8px);
+    border-radius: var(--gws-radius-sm);
     background: transparent;
     color: var(--gws-text-strong, #fafaf9);
-    font-size: 0.75rem;
+    font-size: var(--gws-type-xs);
     font-weight: 600;
 }
 .notif-bell-snooze {
@@ -209,10 +209,10 @@
     min-height: 32px;
     padding: 0 0.65rem;
     border: 1px solid var(--gws-panel-border, #292524);
-    border-radius: var(--gws-radius-sm, 8px);
+    border-radius: var(--gws-radius-sm);
     background: var(--gws-panel-bg, #1c1917);
     color: var(--gws-text-strong, #fafaf9);
-    font-size: 0.75rem;
+    font-size: var(--gws-type-xs);
     font-weight: 600;
 }
 .notif-bell-footer {
@@ -225,7 +225,7 @@
     border: 0;
     background: transparent;
     color: var(--gws-text-soft, #a8a29e);
-    font-size: 0.78rem;
+    font-size: var(--gws-type-xs);
     font-weight: 600;
     text-align: start;
 }
@@ -247,17 +247,17 @@
 }
 .notif-bell-item-title {
     font-weight: 700;
-    font-size: 0.82rem;
+    font-size: var(--gws-type-sm);
 }
 
 .notif-bell-item-message {
-    font-size: 0.78rem;
+    font-size: var(--gws-type-xs);
     color: var(--gws-text-soft, #a8a29e);
     margin-top: 0.1rem;
 }
 
 .notif-bell-item-time {
-    font-size: .75rem;
+    font-size: var(--gws-type-xs);
     color: var(--gws-text-soft, #a8a29e);
     margin-top: 0.2rem;
 }
@@ -282,7 +282,7 @@
     padding: .65rem .85rem;
     border-top: 1px solid var(--gws-panel-border);
     color: var(--gws-text-soft);
-    font-size: .8rem;
+    font-size: var(--gws-type-sm);
 }
 
 .notif-bell-push[hidden] { display: none; }
@@ -297,10 +297,10 @@
     min-height: 2rem;
     padding: .2rem .65rem;
     border: 1px solid var(--gws-panel-border);
-    border-radius: var(--gws-radius-sm, 6px);
+    border-radius: var(--gws-radius-sm);
     background: transparent;
     color: var(--gws-text-strong);
-    font-size: .78rem;
+    font-size: var(--gws-type-xs);
     font-weight: 600;
     white-space: nowrap;
 }

@@ -27,13 +27,13 @@
     width: 100%;
     aspect-ratio: 4 / 3;
     object-fit: cover;
-    border-radius: 6px;
+    border-radius: var(--gws-radius-sm);
     background: #fff;
 }
 
 .media-picker-item span {
     overflow: hidden;
-    font-size: .75rem;
+    font-size: var(--gws-type-xs);
     text-overflow: ellipsis;
     white-space: nowrap;
     color: var(--gws-text-soft);

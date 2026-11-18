@@ -27,7 +27,7 @@
     gap: .65rem;
     padding: .55rem .65rem;
     border: 0;
-    border-radius: 8px;
+    border-radius: var(--gws-radius-sm);
     background: transparent;
     color: var(--gws-text-soft);
     text-align: left;
@@ -36,10 +36,10 @@
 .gws-settings-nav-item:hover { background: var(--gws-panel-bg-2); color: var(--gws-text-strong); }
 .gws-settings-nav-item.active { background: var(--gws-panel-bg-2); color: var(--gws-text-strong); box-shadow: inset 3px 0 0 var(--gws-sidebar-accent); }
 .gws-settings-nav-item > i:first-child { color: var(--gws-sidebar-accent); text-align: center; }
-.gws-settings-nav-item > i:last-child { font-size: .75rem; }
+.gws-settings-nav-item > i:last-child { font-size: var(--gws-type-xs); }
 .gws-settings-nav-item span { display: flex; min-width: 0; flex-direction: column; }
-.gws-settings-nav-item strong { font-size: .84rem; }
-.gws-settings-nav-item small { margin-top: .1rem; color: var(--gws-text-soft); font-size: .75rem; }
+.gws-settings-nav-item strong { font-size: var(--gws-type-sm); }
+.gws-settings-nav-item small { margin-top: .1rem; color: var(--gws-text-soft); font-size: var(--gws-type-xs); }
 
 .gws-settings-content .card-body { padding: 1.4rem; }
 .gws-settings-section-head {
@@ -48,8 +48,8 @@
     gap: .8rem;
     margin-bottom: 1rem;
 }
-.gws-settings-section-head h2 { margin: 0; font-size: 1.05rem; font-weight: 700; }
-.gws-settings-section-head p { margin: .15rem 0 0; color: var(--gws-text-soft); font-size: .85rem; }
+.gws-settings-section-head h2 { margin: 0; font-size: var(--gws-type-base); font-weight: 700; }
+.gws-settings-section-head p { margin: .15rem 0 0; color: var(--gws-text-soft); font-size: var(--gws-type-md); }
 .gws-settings-section-icon {
     display: grid;
     flex: 0 0 2.25rem;
@@ -75,7 +75,7 @@
     background: color-mix(in srgb, var(--gws-panel-bg) 94%, transparent);
     backdrop-filter: blur(12px);
 }
-.gws-settings-actions span { color: var(--gws-text-soft); font-size: .75rem; }
+.gws-settings-actions span { color: var(--gws-text-soft); font-size: var(--gws-type-xs); }
 
 @container gws-main (max-width: 687.98px) {
     .gws-settings-layout { grid-template-columns: minmax(0, 720px); }

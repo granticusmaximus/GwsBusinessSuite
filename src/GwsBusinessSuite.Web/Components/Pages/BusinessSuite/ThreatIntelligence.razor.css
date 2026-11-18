@@ -89,6 +89,6 @@
 .threat-intel-result-bar {
     padding: .75rem 1rem;
     border: 1px solid var(--civic-line);
-    border-radius: .75rem;
+    border-radius: var(--gws-radius-md);
     background: var(--civic-soft);
 }

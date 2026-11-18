@@ -10,7 +10,7 @@
     background: #05080a;
     color: #7dffb0;
     font-family: "Share Tech Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
-    border-radius: 10px;
+    border-radius: var(--gws-radius-md);
     overflow: hidden;
     /* Fills the content area below the admin bar (app.css trims .gws-content's padding on this
        page); Fullscreen (gws-builder-mode) fills the whole window. */
@@ -66,7 +66,7 @@
     border: 1px solid rgba(125, 255, 176, 0.5);
     color: #7dffb0;
     font-family: inherit;
-    font-size: .75rem;
+    font-size: var(--gws-type-xs);
     letter-spacing: 0.04em;
     padding: 0.3rem 0.5rem;
     width: 240px;
@@ -86,7 +86,7 @@
     border: 1px solid rgba(125, 255, 176, 0.5);
     color: #7dffb0;
     font-family: inherit;
-    font-size: .75rem;
+    font-size: var(--gws-type-xs);
     letter-spacing: 0.05em;
     padding: 0.3rem 0.6rem;
     cursor: pointer;
@@ -97,12 +97,12 @@
 }
 
 .tg-search-status {
-    font-size: .75rem;
+    font-size: var(--gws-type-xs);
     opacity: 0.8;
 }
 
 .tg-hud-status {
-    font-size: 0.75rem;
+    font-size: var(--gws-type-xs);
     text-align: right;
     opacity: 0.85;
 }
@@ -113,7 +113,7 @@
     border: 1px solid rgba(125, 255, 176, 0.5);
     color: #7dffb0;
     font-family: inherit;
-    font-size: .75rem;
+    font-size: var(--gws-type-xs);
     letter-spacing: 0.05em;
     padding: 0.25rem 0.5rem;
     cursor: pointer;
@@ -143,9 +143,9 @@
     padding: 0;
     background: rgba(125, 255, 176, 0.85);
     border: 1px solid rgba(125, 255, 176, 0.9);
-    border-radius: 4px;
+    border-radius: var(--gws-radius-xs);
     color: #04120a;
-    font-size: 0.85rem;
+    font-size: var(--gws-type-md);
 }
 
 .tg-toggle-focus:hover {
@@ -183,7 +183,7 @@
 }
 
 .tg-boot-line {
-    font-size: 0.85rem;
+    font-size: var(--gws-type-md);
     letter-spacing: 0.08em;
 }
 
@@ -217,7 +217,7 @@
     display: flex;
     align-items: flex-start;
     gap: 0.6rem;
-    font-size: .75rem;
+    font-size: var(--gws-type-xs);
     padding: 0.6rem 0.8rem;
     border: 1px dashed rgba(125, 255, 176, 0.45);
     background: rgba(5, 8, 10, 0.6);
@@ -229,7 +229,7 @@
     background: none;
     border: none;
     color: #7dffb0;
-    font-size: 1rem;
+    font-size: var(--gws-type-base);
     line-height: 1;
     cursor: pointer;
     padding: 0;
@@ -306,7 +306,7 @@
     border: 1px solid rgba(125, 255, 176, 0.5);
     color: #7dffb0;
     font-family: inherit;
-    font-size: .75rem;
+    font-size: var(--gws-type-xs);
     padding: 0.15rem 0.4rem;
     cursor: pointer;
 }
@@ -321,7 +321,7 @@
 .tg-favorites-empty {
     padding: 0.6rem;
     opacity: 0.75;
-    font-size: .75rem;
+    font-size: var(--gws-type-xs);
     line-height: 1.4;
 }
 
@@ -350,7 +350,7 @@
     background: rgba(5, 8, 10, 0.9);
     color: #7dffb0;
     font-family: inherit;
-    font-size: .75rem;
+    font-size: var(--gws-type-xs);
 }
 
 .tg-route-form button { background: rgba(125, 255, 176, 0.15); cursor: pointer; }
@@ -391,7 +391,7 @@
     background: rgba(5, 8, 10, 0.9);
     color: #7dffb0;
     font-family: inherit;
-    font-size: .75rem;
+    font-size: var(--gws-type-xs);
 }
 
 .tg-area-actions { display: inline-flex; gap: 0.3rem; }
@@ -481,7 +481,7 @@
     border: 1px solid rgba(125, 255, 176, 0.5);
     color: #7dffb0;
     font-family: inherit;
-    font-size: 0.75rem;
+    font-size: var(--gws-type-xs);
     letter-spacing: 0.05em;
     cursor: pointer;
 }
@@ -512,7 +512,7 @@
     flex-direction: column;
     background: rgba(5, 8, 10, 0.9);
     border: 1px solid rgba(125, 255, 176, 0.4);
-    font-size: 0.75rem;
+    font-size: var(--gws-type-xs);
     box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
 }
 
@@ -558,7 +558,7 @@
     overflow-y: auto;
     background: rgba(5, 8, 10, 0.94);
     border: 1px solid rgba(125, 255, 176, 0.45);
-    font-size: 0.75rem;
+    font-size: var(--gws-type-xs);
     box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
 }
 
@@ -574,7 +574,7 @@
     background: none;
     border: none;
     color: #7dffb0;
-    font-size: 1.1rem;
+    font-size: var(--gws-type-lg);
     line-height: 1;
     min-width: 28px;
     min-height: 28px;
@@ -623,7 +623,7 @@
     gap: 0.35rem;
 }
 
-.tg-map-controls .tg-icon-btn { min-width: 38px; min-height: 38px; font-size: 0.9rem; }
+.tg-map-controls .tg-icon-btn { min-width: 38px; min-height: 38px; font-size: var(--gws-type-md); }
 .tg-map-controls .tg-toggle-focus { width: auto; height: auto; border-radius: 0; background: rgba(5, 8, 10, 0.82); color: #7dffb0; }
 .tg-map-controls .tg-toggle-focus:hover { background: rgba(125, 255, 176, 0.15); }
 
@@ -674,7 +674,7 @@
 }
 .tg-direction-step:hover,
 .tg-direction-step:focus-visible { background: rgba(125, 255, 176, 0.1); outline: none; }
-.tg-direction-step i { font-size: 1rem; line-height: 1.2; }
+.tg-direction-step i { font-size: var(--gws-type-base); line-height: 1.2; }
 .tg-direction-text { line-height: 1.4; }
 .tg-direction-step small { opacity: 0.75; white-space: nowrap; }
 
@@ -687,7 +687,7 @@
     border: 1px solid rgba(125, 255, 176, 0.5);
     background: rgba(5, 8, 10, 0.9);
     color: #7dffb0;
-    font-size: .75rem;
+    font-size: var(--gws-type-xs);
     text-decoration: none;
 }
 .tg-link-btn:hover { background: rgba(125, 255, 176, 0.15); color: #7dffb0; }
@@ -715,7 +715,7 @@
     background: rgba(5, 8, 10, 0.92);
     border: 1px solid #ffd166;
     color: #ffd166;
-    font-size: 0.75rem;
+    font-size: var(--gws-type-xs);
     max-width: calc(100% - 1.6rem);
 }
 .tg-pick-banner button {
@@ -770,7 +770,7 @@
     padding: 0.35rem 0.6rem;
     background: rgba(5, 8, 10, 0.75);
     border: 1px solid rgba(125, 255, 176, 0.4);
-    font-size: 0.75rem;
+    font-size: var(--gws-type-xs);
 }
 .tg-sv-compass {
     position: absolute;
@@ -788,7 +788,7 @@
     display: flex;
     justify-content: center;
     padding-top: 2px;
-    font-size: 0.8rem;
+    font-size: var(--gws-type-sm);
     font-weight: 700;
     color: #ff6b6b;
 }
@@ -800,7 +800,7 @@
     padding: 0.5rem 0.9rem;
     background: rgba(5, 8, 10, 0.85);
     border: 1px solid rgba(125, 255, 176, 0.5);
-    font-size: 0.8rem;
+    font-size: var(--gws-type-sm);
 }
 .tg-sv-credit {
     position: absolute;
@@ -859,7 +859,7 @@
     padding: 0.5rem 0.7rem;
     background: rgba(5, 8, 10, 0.9);
     border: 1px solid #c77dff;
-    font-size: 0.75rem;
+    font-size: var(--gws-type-xs);
 }
 .tg-tm-row { display: flex; align-items: center; gap: 0.5rem; }
 .tg-tm-slider { flex: 1 1 auto; min-width: 0; accent-color: #c77dff; }
@@ -893,10 +893,10 @@
     padding: 0.6rem 0.7rem;
     background: rgba(5, 8, 10, 0.94);
     border: 1px solid #4dabff;
-    font-size: 0.8rem;
+    font-size: var(--gws-type-sm);
 }
-.tg-drive-next { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.2rem 0.6rem; font-size: 1.05rem; }
-.tg-drive-next strong { color: #4dabff; font-size: 1.35rem; }
+.tg-drive-next { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.2rem 0.6rem; font-size: var(--gws-type-base); }
+.tg-drive-next strong { color: #4dabff; font-size: var(--gws-type-xl); }
 .tg-drive-meta { margin-top: 0.3rem; opacity: 0.85; }
 .tg-drive-warning { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.4rem; margin-top: 0.4rem; padding: 0.3rem 0.4rem; border: 1px solid #ff9f1c; color: #ff9f1c; }
 .tg-drive-ahead { margin-top: 0.3rem; color: #ffd166; overflow-wrap: anywhere; }
@@ -957,12 +957,12 @@
 
 /* City traffic summary (EXPLORE > TRAFFIC IN VIEW). Swatch colours match tactical-globe.js's
    volumeBands (a cool ramp: volume isn't congestion) and speedColour. */
-.tg-traffic { padding: .25rem .75rem .75rem; font-size: .75rem; }
+.tg-traffic { padding: .25rem .75rem .75rem; font-size: var(--gws-type-xs); }
 .tg-traffic-note { margin: .25rem 0 .5rem; opacity: .85; }
 .tg-traffic-subhead { display: flex; align-items: center; justify-content: space-between; gap: .5rem; margin: .75rem 0 .25rem; font-weight: 700; letter-spacing: .06em; opacity: .8; }
 .tg-traffic-facts { margin: .25rem 0; }
 .tg-traffic .tg-coverage-list { padding-left: 0; padding-right: 0; }
-.tg-traffic-swatch { display: inline-block; width: .8rem; height: .35rem; margin-right: .4rem; border-radius: 2px; vertical-align: middle; }
+.tg-traffic-swatch { display: inline-block; width: .8rem; height: .35rem; margin-right: .4rem; border-radius: var(--gws-radius-xs); vertical-align: middle; }
 .tg-vol-0 { background: #2b8a8a; }
 .tg-vol-1 { background: #20c1c1; }
 .tg-vol-2 { background: #4fa3ff; }
@@ -1002,5 +1002,5 @@
 .tg-sun-tool { display: grid; gap: 4px; margin-top: 6px; }
 .tg-sun-tool .tg-input {
     background: rgba(0, 0, 0, 0.35); color: inherit; border: 1px solid rgba(120, 255, 170, 0.35);
-    font: 11px monospace; padding: 4px 6px; border-radius: 3px; color-scheme: dark;
+    font: 11px monospace; padding: 4px 6px; border-radius: var(--gws-radius-xs); color-scheme: dark;
 }

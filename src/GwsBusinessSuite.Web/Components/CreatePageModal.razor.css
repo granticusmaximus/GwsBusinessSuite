@@ -26,12 +26,12 @@
 }
 
 .create-page-option i {
-    font-size: 1.6rem;
+    font-size: var(--gws-type-2xl);
     color: var(--gws-sidebar-accent);
 }
 
 .create-page-option span {
-    font-size: 0.85rem;
+    font-size: var(--gws-type-md);
     color: var(--gws-text-soft);
 }
 
@@ -102,7 +102,7 @@
     position: absolute;
     top: 0.5rem;
     right: 0.5rem;
-    font-size: 1.4rem;
+    font-size: var(--gws-type-2xl);
     color: var(--gws-sidebar-accent);
     background: var(--gws-panel-bg);
     border-radius: 50%;

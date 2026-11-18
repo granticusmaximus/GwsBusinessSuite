@@ -4,7 +4,7 @@
 }
 
 .story-grouping h2 {
-    font-size: 1.2rem;
+    font-size: var(--gws-type-xl);
     font-weight: 700;
     margin: 1.75rem 0 .6rem;
     padding-bottom: .3rem;
@@ -13,7 +13,7 @@
 
 .story-quiet {
     color: var(--gws-text-soft);
-    font-size: .9rem;
+    font-size: var(--gws-type-md);
     font-style: italic;
 }
 
@@ -27,7 +27,7 @@
 
 .story-grouping-message {
     margin: .6rem 0 0;
-    font-size: .9rem;
+    font-size: var(--gws-type-md);
 }
 
 .story-grouping-suggestions {
@@ -42,18 +42,18 @@
     align-items: center;
     gap: .5rem;
     padding: .6rem .8rem;
-    border-radius: var(--neu-radius-sm, .75rem);
-    background: var(--neu-surface, var(--bs-body-bg));
-    box-shadow: var(--neu-inset-shadow, none);
-    font-size: .9rem;
+    border-radius: var(--gws-radius-md);
+    background: var(--gws-neu-surface);
+    box-shadow: var(--gws-neu-inset-shadow);
+    font-size: var(--gws-type-md);
 }
 
 .story-grouping-editor {
     margin-top: .75rem;
     padding: .8rem;
-    border-radius: var(--neu-radius-sm, .75rem);
-    background: var(--neu-surface, var(--bs-body-bg));
-    box-shadow: var(--neu-inset-shadow, none);
+    border-radius: var(--gws-radius-md);
+    background: var(--gws-neu-surface);
+    box-shadow: var(--gws-neu-inset-shadow);
 }
 
 .story-grouping-reports {
@@ -94,7 +94,7 @@
 
 .story-grouping-history {
     margin-top: 1rem;
-    font-size: .9rem;
+    font-size: var(--gws-type-md);
 }
 
 .story-grouping-history summary {

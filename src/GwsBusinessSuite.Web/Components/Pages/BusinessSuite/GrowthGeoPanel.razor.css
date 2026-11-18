@@ -20,7 +20,7 @@
 .geo-heading small {
     display: block;
     color: var(--growth-muted);
-    font-size: .75rem;
+    font-size: var(--gws-type-xs);
     margin-top: .15rem;
 }
 
@@ -30,9 +30,9 @@
     gap: .35rem;
     flex: none;
     border: 1px solid var(--growth-line);
-    border-radius: 999px;
+    border-radius: var(--gws-radius-pill);
     padding: .35rem .55rem;
-    font-size: .75rem;
+    font-size: var(--gws-type-xs);
     font-weight: 750;
 }
 
@@ -61,7 +61,7 @@
     display: grid;
     place-items: center;
     flex: none;
-    border-radius: .75rem;
+    border-radius: var(--gws-radius-md);
     color: var(--growth-accent);
     background: rgba(245, 158, 11, .1);
 }
@@ -69,14 +69,14 @@
 .geo-empty p,
 .geo-warning {
     color: var(--growth-muted);
-    font-size: .75rem;
+    font-size: var(--gws-type-xs);
     line-height: 1.5;
     margin: .2rem 0 0;
 }
 
 .geo-empty code {
     color: var(--growth-ink);
-    font-size: .75rem;
+    font-size: var(--gws-type-xs);
 }
 
 .geo-warning {
@@ -118,7 +118,7 @@
     height: 1.9rem;
     padding: 0;
     flex: none;
-    border-radius: .55rem;
+    border-radius: var(--gws-radius-sm);
     border: 1px solid var(--growth-line);
     background: var(--growth-panel);
     color: var(--growth-muted);
@@ -159,20 +159,20 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-size: .78rem;
+    font-size: var(--gws-type-xs);
 }
 
 .geo-grid ::deep .breakdown-row div span {
     position: absolute;
     inset: -.2rem auto -.2rem -.3rem;
-    border-radius: .25rem;
+    border-radius: var(--gws-radius-xs);
     background: rgba(245, 158, 11, .08);
 }
 
 .geo-grid ::deep .breakdown-row small,
 .geo-grid ::deep .breakdown-row b {
     color: var(--growth-muted);
-    font-size: .75rem;
+    font-size: var(--gws-type-xs);
     font-weight: 500;
 }
 
@@ -185,7 +185,7 @@
     color: var(--growth-muted);
     margin: 0;
     padding: 1.25rem;
-    font-size: .8rem;
+    font-size: var(--gws-type-sm);
 }
 
 .geo-panel footer {
@@ -195,7 +195,7 @@
     color: var(--growth-muted);
     padding: .7rem 1rem;
     border-top: 1px solid var(--growth-line);
-    font-size: .75rem;
+    font-size: var(--gws-type-xs);
 }
 
 .geo-panel footer i {

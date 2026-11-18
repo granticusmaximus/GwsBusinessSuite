@@ -41,7 +41,7 @@
     width: min(68rem, calc(100vw - 4rem));
     height: 90vh;
     border: 1px solid var(--bs-border-color);
-    border-radius: .75rem;
+    border-radius: var(--gws-radius-md);
     transform: translateX(-50%);
 }
 
@@ -74,7 +74,7 @@
 
 .sentinel-row-page-title {
     margin: .15rem 0 0;
-    font-size: 1rem;
+    font-size: var(--gws-type-base);
     font-weight: 650;
     line-height: 1.35;
 }
@@ -87,7 +87,7 @@
 
 .sentinel-row-page-mode-label {
     color: var(--bs-secondary-color);
-    font-size: .75rem;
+    font-size: var(--gws-type-xs);
     font-weight: 600;
     letter-spacing: .04em;
     text-transform: uppercase;
@@ -134,14 +134,14 @@
 .sentinel-row-page-property-name {
     overflow: hidden;
     color: var(--bs-secondary-color);
-    font-size: .82rem;
+    font-size: var(--gws-type-sm);
     text-overflow: ellipsis;
     white-space: nowrap;
 }
 
 .sentinel-row-page-property-value {
     overflow: hidden;
-    font-size: .9rem;
+    font-size: var(--gws-type-md);
     text-overflow: ellipsis;
     white-space: nowrap;
 }

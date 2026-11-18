@@ -33,9 +33,9 @@
 }
 
 .gws-record-inspector-heading { display: flex; gap: .6rem; min-width: 0; }
-.gws-record-inspector-heading i { margin-top: .1rem; color: var(--gws-sidebar-accent); font-size: 1.25rem; }
-.gws-record-inspector-heading h2 { margin: 0; font-size: 1.1rem; font-weight: 700; overflow-wrap: anywhere; }
-.gws-record-inspector-heading p { margin: .15rem 0 0; color: var(--gws-text-soft); font-size: .875rem; }
+.gws-record-inspector-heading i { margin-top: .1rem; color: var(--gws-sidebar-accent); font-size: var(--gws-type-xl); }
+.gws-record-inspector-heading h2 { margin: 0; font-size: var(--gws-type-lg); font-weight: 700; overflow-wrap: anywhere; }
+.gws-record-inspector-heading p { margin: .15rem 0 0; color: var(--gws-text-soft); font-size: var(--gws-type-md); }
 .gws-record-inspector-tools { display: flex; flex-shrink: 0; gap: .35rem; }
 
 .gws-record-inspector-actions {

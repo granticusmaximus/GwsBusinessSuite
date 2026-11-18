@@ -5,10 +5,10 @@
     width: 100%;
     padding: var(--gws-step-2) var(--gws-step-3, 12px);
     border: 1px dashed color-mix(in srgb, var(--gws-panel-border) 80%, transparent);
-    border-radius: var(--gws-radius-sm, 8px);
+    border-radius: var(--gws-radius-sm);
     color: var(--gws-text-soft);
     background: transparent;
-    font-size: .875rem;
+    font-size: var(--gws-type-md);
     cursor: pointer;
 }
 
@@ -22,7 +22,7 @@
     display: grid;
     gap: var(--gws-step-2);
     padding: var(--gws-step-2);
-    border-radius: var(--gws-radius-sm, 8px);
+    border-radius: var(--gws-radius-sm);
     background: var(--gws-panel-bg-2);
 }
 
@@ -30,7 +30,7 @@
     display: grid;
     gap: 2px;
     color: var(--gws-text-soft);
-    font-size: .75rem;
+    font-size: var(--gws-type-xs);
 }
 
 .kb-addcol-row {

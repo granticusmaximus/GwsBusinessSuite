@@ -15,7 +15,7 @@
     display: grid;
     gap: 2px;
     color: var(--gws-text-soft);
-    font-size: .75rem;
+    font-size: var(--gws-type-xs);
 }
 
 .kb-coledit-swatches {

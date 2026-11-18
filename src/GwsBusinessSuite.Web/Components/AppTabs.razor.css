@@ -23,7 +23,7 @@
     color: var(--gws-text-soft);
     text-decoration: none;
     white-space: nowrap;
-    font-size: .9rem;
+    font-size: var(--gws-type-md);
 }
 
 /* Touch screens get a full 44px target (the responsive audit's minimum). */

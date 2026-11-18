@@ -13,7 +13,7 @@
 .news-report-original {
     margin-top: .5rem;
     color: var(--bs-secondary-color);
-    font-size: .85rem;
+    font-size: var(--gws-type-md);
 }
 
 .news-report-original summary {

@@ -44,14 +44,14 @@
     gap: .35rem;
     padding: .35rem;
     border: 1px solid color-mix(in srgb, var(--gws-panel-border) 55%, transparent);
-    border-radius: 1.05rem;
+    border-radius: var(--gws-radius-lg);
     background: var(--neu-surface);
     box-shadow: 7px 7px 17px var(--neu-shadow), -5px -5px 13px var(--neu-highlight);
 }
 
 .gws-neu-dashboard ::deep .gws-page-header-actions .btn {
     border-color: transparent;
-    border-radius: .8rem;
+    border-radius: var(--gws-radius-md);
     background: transparent;
     box-shadow: none;
     color: var(--gws-text-soft);
@@ -98,7 +98,7 @@
 .gws-neu-dashboard .gws-module-card,
 .gws-neu-dashboard ::deep .gws-kpi-tile {
     border-color: transparent;
-    border-radius: 1rem;
+    border-radius: var(--gws-radius-lg);
     background: linear-gradient(145deg, color-mix(in srgb, var(--neu-surface-raised) 96%, white), var(--neu-surface-raised));
     box-shadow: 8px 8px 18px var(--neu-shadow), -6px -6px 14px var(--neu-highlight);
 }
@@ -123,7 +123,7 @@
 .gws-neu-dashboard .gws-stat-icon,
 .gws-neu-dashboard .gws-module-icon {
     border: 1px solid color-mix(in srgb, currentColor 16%, transparent);
-    border-radius: .85rem;
+    border-radius: var(--gws-radius-md);
     box-shadow: inset 2px 2px 5px rgba(0, 0, 0, .16), inset -2px -2px 4px rgba(255, 255, 255, .06);
 }
 
@@ -151,7 +151,7 @@
 /* Two cards to a row on a phone: a smaller count, the description to two lines. */
 @container gws-main (max-width: 575.98px) {
     .gws-neu-dashboard .gws-attention-card .card-body { padding: .85rem; }
-    .gws-neu-dashboard .gws-attention-count { font-size: 1.6rem; }
+    .gws-neu-dashboard .gws-attention-count { font-size: var(--gws-type-2xl); }
     .gws-neu-dashboard .gws-attention-description {
         display: -webkit-box;
         overflow: hidden;

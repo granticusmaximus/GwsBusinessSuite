@@ -61,6 +61,15 @@ public class AppDelegate : MauiUIApplicationDelegate
 		builder.InsertChildMenuAtStart(
 			UIMenu.Create(string.Empty, null, UIMenuIdentifier.None, UIMenuOptions.DisplayInline, [back, forward]),
 			UIMenuIdentifier.View.GetConstant()!);
+		// View > Toggle Sidebar and Search (18-11-26), the toolbar's two buttons. Neither takes a key:
+		// macOS 12+ already has View > Show Sidebar on Ctrl+Cmd+S and ignores a second command on
+		// that key, so ToggleSidebarSystem below answers the system's toggleSidebar: instead. The
+		// page already owns Cmd+K, and a menu key would take it first.
+		var toggleSidebar = UICommand.Create("Toggle Sidebar", null, new Selector("gwsToggleSidebar:"), null);
+		var search = UICommand.Create("Search…", null, new Selector("gwsSearch:"), null);
+		builder.InsertChildMenuAtStart(
+			UIMenu.Create(string.Empty, null, UIMenuIdentifier.None, UIMenuOptions.DisplayInline, [toggleSidebar, search]),
+			UIMenuIdentifier.View.GetConstant()!);
 		var find = UIKeyCommand.Create(new NSString("Find…"), null, new Selector("gwsFind:"), "f", UIKeyModifierFlags.Command, null);
 		builder.ReplaceMenu(UIMenuIdentifier.Find.GetConstant()!,
 			UIMenu.Create(string.Empty, null, UIMenuIdentifier.None, UIMenuOptions.DisplayInline, [find]));
@@ -89,6 +98,20 @@ public class AppDelegate : MauiUIApplicationDelegate
 	[Export("gwsForward:")]
 	public void GoForward(NSObject sender) => RunInWorkspace("history.forward()");
 
+	// app.js listens for both (18-11-26).
+	internal const string ToggleSidebarScript = "window.dispatchEvent(new CustomEvent('gws-toggle-sidebar'))";
+	internal const string OpenSearchScript = "window.dispatchEvent(new CustomEvent('gws-open-search'))";
+
+	[Export("gwsToggleSidebar:")]
+	public void ToggleSidebar(NSObject sender) => RunInWorkspace(ToggleSidebarScript);
+
+	// The system's View > Show Sidebar (Ctrl+Cmd+S) sends this up the responder chain.
+	[Export("toggleSidebar:")]
+	public void ToggleSidebarSystem(NSObject sender) => RunInWorkspace(ToggleSidebarScript);
+
+	[Export("gwsSearch:")]
+	public void Search(NSObject sender) => RunInWorkspace(OpenSearchScript);
+
 	// The page's own search where it has one (World News, lists), else the app's command palette
 	// (app.js listens for gws-find).
 	[Export("gwsFind:")]
@@ -103,7 +126,8 @@ public class AppDelegate : MauiUIApplicationDelegate
 	}
 
 	// Switches to the Workspace tab if another is showing; its page sets EvaluateScript as it appears.
-	private static void RunInWorkspace(string script) => MainThread.BeginInvokeOnMainThread(async () =>
+	// Also the toolbar's Sidebar and Search buttons (MacWindowToolbar).
+	internal static void RunInWorkspace(string script) => MainThread.BeginInvokeOnMainThread(async () =>
 	{
 		if (MacToolbarActions.ActiveSentinelWindow is { } sentinel)
 		{

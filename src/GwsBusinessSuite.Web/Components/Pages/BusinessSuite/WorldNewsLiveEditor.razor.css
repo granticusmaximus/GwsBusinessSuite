@@ -1,6 +1,6 @@
-.desk-live { margin-top: 1.25rem; padding-top: 1rem; border-top: 1px solid var(--neu-border, var(--bs-border-color)); }
+.desk-live { margin-top: 1.25rem; padding-top: 1rem; border-top: 1px solid var(--gws-panel-border); }
 .desk-live-fields { display: grid; gap: .5rem; min-width: 0; margin-top: .75rem; }
 .desk-live-fields label { display: grid; gap: .25rem; }
 .desk-live-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; }
-.desk-live-list li { padding: .75rem 0; border-bottom: 1px solid var(--neu-border, var(--bs-border-color)); }
+.desk-live-list li { padding: .75rem 0; border-bottom: 1px solid var(--gws-panel-border); }
 .desk-live-text { white-space: pre-wrap; overflow-wrap: anywhere; margin: .25rem 0; }

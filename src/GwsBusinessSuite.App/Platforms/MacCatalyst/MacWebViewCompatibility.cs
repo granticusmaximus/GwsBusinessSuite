@@ -11,8 +11,11 @@ internal static class MacWebViewCompatibility
     // MacNativeOverwatchBridge and owns the pointer, wheel and click forwarding itself. (Until
     // 12-11-26 this script also forwarded gestures, through a MutationObserver that ran on every
     // DOM change of every page, posting each pointer move and wheel tick separately.)
+    // __gwsMacNativeChrome (18-11-26): this build's toolbar has Sidebar and Search, so the page's
+    // top bar drops its own copies (theme-init.js and app.js). An older app without it keeps them.
     internal const string Script = """
         window.__gwsMacCatalystWebView = true;
+        window.__gwsMacNativeChrome = true;
         """;
 
     public static void Configure(WKWebView webView)
