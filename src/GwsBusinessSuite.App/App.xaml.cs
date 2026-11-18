@@ -113,6 +113,8 @@ public partial class App : Microsoft.Maui.Controls.Application
 		var window = new Window(page) { Title = "Sentinel", MinimumWidth = 820, MinimumHeight = 600 };
 		_sentinelWindows.Add(window);
 		window.Destroying += (_, _) => _sentinelWindows.Remove(window);
+		window.Created += (_, _) => page.StartSentinelWindow();
+		window.Activated += (_, _) => page.StartSentinelWindow();
 		OpenWindow(window);
 	}
 #endif

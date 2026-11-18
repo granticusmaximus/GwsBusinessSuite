@@ -126,6 +126,18 @@ public partial class MainPage : ContentPage
         }
     }
 
+#if MACCATALYST
+    // A secondary Mac scene doesn't reliably raise OnAppearing, which left the Sentinel window
+    // blank. The window starts the load itself; _startedLoading keeps it to once.
+    internal void StartSentinelWindow()
+    {
+        if (!IsSentinelWindow || _startedLoading) return;
+        _startedLoading = true;
+        DebugLog("Sentinel window: started by window");
+        _ = StartWorkspaceAsync();
+    }
+#endif
+
     private async Task StartWorkspaceAsync()
     {
 #if MACCATALYST
