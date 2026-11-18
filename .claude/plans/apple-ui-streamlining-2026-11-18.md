@@ -26,7 +26,8 @@ design system) in one go.
   Search...; the injected
   script sets `__gwsMacNativeChrome`.
 - Web: `theme-init.js`/`app.js` set `data-gws-mac` (`native` or `app`). In the app the bar's brand
-  hides; `native` builds also hide the page's sidebar toggle and search; the status strip hides
+  hides; the page's sidebar toggle and search stay (hiding them removed the only way to collapse
+  the sidebar when the toolbar button was missing); the status strip hides
   until an item is warning or danger. `app.js` listens for `gws-toggle-sidebar` and `gws-open-search`.
 - `DesignSystemGuardTests`: type scale, radius scale, tokens that exist, a shadow ratchet (185)
   and the Mac toolbar wiring.

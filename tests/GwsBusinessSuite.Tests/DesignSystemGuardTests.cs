@@ -119,7 +119,7 @@ public sealed class DesignSystemGuardTests
         foreach (var script in new[] { appJs, File.ReadAllText(Path.Combine(Web, "wwwroot/js/theme-init.js")) })
             script.Should().Contain("window.__gwsMacNativeChrome === true ? 'native'").And.Contain("'data-gws-mac'");
         File.ReadAllText(Path.Combine(Web, "wwwroot/app.css")).Should()
-            .Contain(":root[data-gws-mac=\"native\"] .gws-admin-bar :is(.gws-sidebar-toggle, .gws-command-trigger) { display: none; }");
+            .NotContain("[data-gws-mac=\"native\"] .gws-admin-bar :is(.gws-sidebar-toggle", "the page's sidebar toggle must stay: the toolbar button is an extra, not a replacement");
     }
 
     private static IEnumerable<string> AdminSheets() =>
@@ -172,6 +172,15 @@ public sealed class DesignSystemGuardTests
             return unknown.Concat(neu).Distinct().Select(token => $"{Name(path)}: {token}");
         });
         missing.Should().BeEmpty("an undefined var() with no fallback silently drops the whole declaration");
+    }
+
+    [Fact]
+    public void AdminStyles_ShouldHonourReduceMotion_AndUseTheMotionTokens()
+    {
+        var css = File.ReadAllText(Path.Combine(Web, "wwwroot/app.css"));
+        css.Should().Contain("--gws-ease:").And.Contain("--gws-duration-fast:").And.Contain("--gws-duration-base:");
+        Regex.IsMatch(css, @"prefers-reduced-motion: reduce\) \{\s*\*, \*::before, \*::after \{ transition-duration: 0s !important;")
+            .Should().BeTrue("Reduce Motion turns transitions off app-wide");
     }
 
     [Fact]

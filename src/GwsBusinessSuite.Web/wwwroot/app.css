@@ -1254,11 +1254,11 @@ button.gws-nav-button { width: 100%; background: none; text-align: left; font-fa
 .gws-status-build { margin-inline-start: auto; font-family: var(--gws-font-mono); }
 
 /* Inside the Mac app (18-11-26; theme-init.js and app.js set data-gws-mac). The window's title bar
-   already names the app, so the bar's brand goes. "native" builds have Sidebar and Search in the
-   window toolbar, so the page's copies go too; an older app build ("app") keeps them. The status
+   already names the app, so the bar's brand goes. The page's own sidebar toggle and search stay
+   visible: the window toolbar's Sidebar and Search buttons are an extra, never a replacement
+   (hiding them left no way to collapse the sidebar when the toolbar button was missing). The status
    strip stays out of the way until something needs attention, as a Mac app's would. */
 :root[data-gws-mac] .gws-admin-bar-brand { display: none; }
-:root[data-gws-mac="native"] .gws-admin-bar :is(.gws-sidebar-toggle, .gws-command-trigger) { display: none; }
 :root[data-gws-mac]:not(:has(.gws-status-item:is([data-tone="warning"], [data-tone="danger"]))) { --gws-status-strip-height: 0px; }
 :root[data-gws-mac]:not(:has(.gws-status-item:is([data-tone="warning"], [data-tone="danger"]))) .gws-status-strip { display: none; }
 
