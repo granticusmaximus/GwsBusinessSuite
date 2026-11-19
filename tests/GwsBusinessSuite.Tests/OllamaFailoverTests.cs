@@ -32,7 +32,6 @@ public sealed class OllamaFailoverTests
     [Fact]
     public async Task AConnectionFailureOnTheMac_ShouldAnswerFromTheDroplet_AndMarkTheMacDown()
     {
-        using var route = OllamaComputeRouting.Use(OllamaComputeRoute.PreferMac);
         using var monitor = Monitor();
         var lost = monitor.PrimaryLostToken;
         var service = Service(new Fake("mac", new HttpRequestException("refused")), new Fake("droplet"), monitor);
@@ -46,7 +45,6 @@ public sealed class OllamaFailoverTests
     [Fact]
     public async Task AnErrorAnswerFromAMacThatsThere_ShouldUseTheDroplet_WithoutMarkingTheMacDown()
     {
-        using var route = OllamaComputeRouting.Use(OllamaComputeRoute.PreferMac);
         using var monitor = Monitor();
         var service = Service(new Fake("mac", new InvalidOperationException("model not found")), new Fake("droplet"), monitor);
 
@@ -57,7 +55,6 @@ public sealed class OllamaFailoverTests
     [Fact]
     public async Task TheCallersOwnCancellation_ShouldNotFallBack()
     {
-        using var route = OllamaComputeRouting.Use(OllamaComputeRoute.PreferMac);
         using var monitor = Monitor();
         using var cancelled = new CancellationTokenSource();
         await cancelled.CancelAsync();
@@ -71,7 +68,6 @@ public sealed class OllamaFailoverTests
     [Fact]
     public async Task Streams_ShouldFallBackBeforeTheFirstWord_ButNotAfter()
     {
-        using var route = OllamaComputeRouting.Use(OllamaComputeRoute.PreferMac);
         using var monitor = Monitor();
         var before = Service(new Fake("mac", new HttpRequestException("refused")), new Fake("droplet"), monitor);
         (await Collect(before.GenerateStreamAsync("m", "s", "u"))).Should().Equal("droplet");
@@ -82,9 +78,11 @@ public sealed class OllamaFailoverTests
             .Should().ThrowAsync<InvalidOperationException>().WithMessage(FailoverOllamaService.MidAnswerMessage);
     }
 
+    // 19-11-26 (Grant): "the macOS ollama models are used first, and the ai droplet is only as a
+    // backup". Every kind of request starts on the Mac, SentinelGPT's chat (its first round used to
+    // start on the droplet) and short ones included; the droplet answers only when the Mac can't.
     [Fact]
-    // 19-11-26 (Grant): the Mac does the work and the droplet is only the fallback, short requests included.
-    public async Task ShortRequests_ShouldGoToTheMacFirst_AndOnlyFallBackToTheDroplet()
+    public async Task EveryRequest_ShouldGoToTheMacFirst_AndTheDropletOnlyBacksItUp()
     {
         using var monitor = Monitor();
         var mac = new Fake("mac");
@@ -92,45 +90,34 @@ public sealed class OllamaFailoverTests
         var service = Service(mac, droplet, monitor);
 
         (await service.GenerateAsync("sentinelgpt", "short", "question")).Should().Be("mac");
-        mac.Calls.Should().Be(1);
-        droplet.Calls.Should().Be(0);
+        (await service.GenerateAsync("sentinelgpt", "s", "u", 8192)).Should().Be("mac");
+        (await Collect(service.GenerateStreamAsync("sentinelgpt", "s", "u"))).Should().Equal("mac");
+        (await Collect(service.GenerateStreamAsync("sentinelgpt", "s", "u", 200))).Should().Equal("mac");
+        (await service.ChatAsync("sentinelgpt", [new OllamaChatMessage("user", "hi")])).Content.Should().Be("mac");
+        (await service.ChatAsync("sentinelgpt", [new OllamaChatMessage("user", "hi")],
+            [new OllamaToolDefinition("search", "Search", "{}")])).Content.Should().Be("mac");
+        await service.WarmModelAsync("sentinelgpt");
+        (await service.GenerateImageAsync("x/z-image-turbo", "a map")).Should().Be("mac");
+        (await service.ListModelsAsync()).Should().Equal("mac");
 
-        using (OllamaComputeRouting.Use(OllamaComputeRoute.PreferDroplet))
-            (await service.GenerateAsync("sentinelgpt", "short", "question")).Should().Be("droplet", "a caller can still ask for the droplet");
+        droplet.Calls.Should().Be(0, "the droplet is only the backup");
+        mac.Calls.Should().Be(7, "generate, stream, chat and warm-up were all asked of the Mac");
 
         using var monitor2 = Monitor();
-        var fallback = Service(new Fake("mac", new HttpRequestException("refused")), new Fake("droplet"), monitor2);
-        (await fallback.GenerateAsync("sentinelgpt", "short", "question")).Should().Be("droplet");
+        var down = new Fake("droplet");
+        var fallback = Service(new Fake("mac", new HttpRequestException("refused")), down, monitor2);
+        (await fallback.ChatAsync("sentinelgpt", [new OllamaChatMessage("user", "hi")])).Content.Should().Be("droplet");
+        down.Calls.Should().Be(1);
     }
 
     [Fact]
-    public async Task ExplicitMacRoute_ShouldOverrideARequestsSize()
+    public void NothingCanAskForTheDropletFirst()
     {
-        using var monitor = Monitor();
-        var mac = new Fake("mac");
-        var droplet = new Fake("droplet");
-        var service = Service(mac, droplet, monitor);
-
-        using (OllamaComputeRouting.Use(OllamaComputeRoute.PreferMac))
-            (await service.GenerateAsync("sentinelgpt", "short", "question")).Should().Be("mac");
-
-        mac.Calls.Should().Be(1);
-        droplet.Calls.Should().Be(0);
-    }
-
-    [Fact]
-    public async Task AStuckPreferredDroplet_ShouldTimeOutAndFallBackToTheMac()
-    {
-        using var monitor = Monitor();
-        var mac = new Fake("mac");
-        var droplet = new Fake("droplet", waitUntilCancelled: true);
-        var service = Service(mac, droplet, monitor);
-
-        using (OllamaComputeRouting.Use(OllamaComputeRoute.PreferDroplet, TimeSpan.FromMilliseconds(25)))
-            (await service.GenerateAsync("sentinelgpt", "short", "question")).Should().Be("mac");
-
-        droplet.Calls.Should().Be(1);
-        mac.Calls.Should().Be(1);
+        var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../.."));
+        var failover = File.ReadAllText(Path.Combine(root, "src/GwsBusinessSuite.Infrastructure/Services/OllamaFailover.cs"));
+        failover.Should().NotContain("DropletFirst").And.NotContain("PreferDroplet");
+        File.Exists(Path.Combine(root, "src/GwsBusinessSuite.Application/Abstractions/OllamaComputeRouting.cs"))
+            .Should().BeFalse("the per-request route hint (PreferDroplet) was removed so no feature can start on the droplet");
     }
 
     [Fact]
@@ -271,6 +258,12 @@ public sealed class OllamaFailoverTests
             Calls++;
             return fail is null ? Task.FromResult<IReadOnlyList<float[]>>([[1f]]) : Task.FromException<IReadOnlyList<float[]>>(fail);
         }
+
+        public async Task<OllamaChatResponse> ChatAsync(string model, IReadOnlyList<OllamaChatMessage> messages,
+            IReadOnlyList<OllamaToolDefinition>? tools = null, CancellationToken ct = default) =>
+            new(await GenerateAsync(model, "", "", ct), []);
+
+        public async Task WarmModelAsync(string model, CancellationToken ct = default) => await GenerateAsync(model, "", "", ct);
 
         public Task<IReadOnlyCollection<string>> ListModelsAsync(CancellationToken ct = default) => Task.FromResult<IReadOnlyCollection<string>>([name]);
         public Task PullModelAsync(string model, CancellationToken ct = default) => Task.CompletedTask;

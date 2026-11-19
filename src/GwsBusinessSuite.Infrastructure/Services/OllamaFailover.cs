@@ -280,24 +280,19 @@ public sealed class FailoverOllamaService(
         "SentinelGPT's Mac stopped answering part-way through that answer. Ask again: the backup answers now.";
 
     public Task<string> GenerateAsync(string model, string systemPrompt, string userPrompt, CancellationToken ct = default) =>
-        RoutedAsync(PreferMac(systemPrompt.Length + userPrompt.Length),
-            (ollama, token) => ollama.GenerateAsync(model, systemPrompt, userPrompt, token), ct);
+        MacFirstAsync((ollama, token) => ollama.GenerateAsync(model, systemPrompt, userPrompt, token), ct);
 
     public Task<string> GenerateAsync(string model, string systemPrompt, string userPrompt, int numCtx, CancellationToken ct = default) =>
-        RoutedAsync(PreferMac(systemPrompt.Length + userPrompt.Length, contextSize: numCtx),
-            (ollama, token) => ollama.GenerateAsync(model, systemPrompt, userPrompt, numCtx, token), ct);
+        MacFirstAsync((ollama, token) => ollama.GenerateAsync(model, systemPrompt, userPrompt, numCtx, token), ct);
 
     public Task WarmModelAsync(string model, CancellationToken ct = default) =>
-        RoutedAsync(OllamaComputeRouting.Current != OllamaComputeRoute.PreferDroplet,
-            async (ollama, token) => { await ollama.WarmModelAsync(model, token); return true; }, ct);
+        MacFirstAsync(async (ollama, token) => { await ollama.WarmModelAsync(model, token); return true; }, ct);
 
     public IAsyncEnumerable<string> GenerateStreamAsync(string model, string systemPrompt, string userPrompt, CancellationToken ct = default) =>
-        RoutedStreamAsync(PreferMac(systemPrompt.Length + userPrompt.Length),
-            (ollama, token) => ollama.GenerateStreamAsync(model, systemPrompt, userPrompt, token), ct);
+        MacFirstStreamAsync((ollama, token) => ollama.GenerateStreamAsync(model, systemPrompt, userPrompt, token), ct);
 
     public IAsyncEnumerable<string> GenerateStreamAsync(string model, string systemPrompt, string userPrompt, int maxOutputTokens, CancellationToken ct = default) =>
-        RoutedStreamAsync(PreferMac(systemPrompt.Length + userPrompt.Length, outputTokens: maxOutputTokens),
-            (ollama, token) => ollama.GenerateStreamAsync(model, systemPrompt, userPrompt, maxOutputTokens, token), ct);
+        MacFirstStreamAsync((ollama, token) => ollama.GenerateStreamAsync(model, systemPrompt, userPrompt, maxOutputTokens, token), ct);
 
     public Task<IReadOnlyCollection<string>> ListModelsAsync(CancellationToken ct = default) =>
         MacFirstAsync((ollama, token) => ollama.ListModelsAsync(token), ct);
@@ -324,76 +319,12 @@ public sealed class FailoverOllamaService(
 
     public Task<OllamaChatResponse> ChatAsync(string model, IReadOnlyList<OllamaChatMessage> messages,
         IReadOnlyList<OllamaToolDefinition>? tools = null, CancellationToken ct = default) =>
-        RoutedAsync(PreferMac(messages.Sum(message => message.Content?.Length ?? 0), toolCount: tools?.Count ?? 0),
-            (ollama, token) => ollama.ChatAsync(model, messages, tools, token), ct);
+        MacFirstAsync((ollama, token) => ollama.ChatAsync(model, messages, tools, token), ct);
 
-    // The Mac does the work and the droplet is the fallback (Grant, 19-11-26). From 15-11 a request
-    // under 12,000 characters started on the droplet and moved to the Mac only if the droplet failed;
-    // a busy droplet doesn't fail, it crawls (3 tokens/s, every background job timing out) while the
-    // Mac sat idle. Only a caller that asks for the droplet (PreferDroplet) starts there now.
-    private static bool PreferMac(int inputSize, int outputTokens = 0, int contextSize = 0, int toolCount = 0) =>
-        OllamaComputeRouting.Current != OllamaComputeRoute.PreferDroplet;
-
-    private Task<T> RoutedAsync<T>(bool preferMac, Func<IOllamaService, CancellationToken, Task<T>> call, CancellationToken ct) =>
-        preferMac ? MacFirstAsync(call, ct) : DropletFirstAsync(call, ct);
-
-    private IAsyncEnumerable<string> RoutedStreamAsync(bool preferMac,
-        Func<IOllamaService, CancellationToken, IAsyncEnumerable<string>> call, CancellationToken ct) =>
-        preferMac ? MacFirstStreamAsync(call, ct) : DropletFirstStreamAsync(call, ct);
-
-    private async Task<T> DropletFirstAsync<T>(Func<IOllamaService, CancellationToken, Task<T>> call, CancellationToken ct)
-    {
-        using var preferredAttempt = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        if (OllamaComputeRouting.PreferredAttemptTimeout is { } timeout) preferredAttempt.CancelAfter(timeout);
-        try
-        {
-            return await call(secondary, preferredAttempt.Token);
-        }
-        catch (Exception ex) when (!ct.IsCancellationRequested && ex is not NotSupportedException && monitor.PrimaryUp)
-        {
-            logger.LogInformation(ex, "The AI droplet couldn't answer that request; SentinelGPT's Mac answers it");
-            using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, monitor.PrimaryLostToken);
-            return await call(primary, linked.Token);
-        }
-    }
-
-    private async IAsyncEnumerable<string> DropletFirstStreamAsync(
-        Func<IOllamaService, CancellationToken, IAsyncEnumerable<string>> call,
-        [EnumeratorCancellation] CancellationToken ct = default)
-    {
-        using var preferredAttempt = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        if (OllamaComputeRouting.PreferredAttemptTimeout is { } timeout) preferredAttempt.CancelAfter(timeout);
-        var stream = call(secondary, preferredAttempt.Token).GetAsyncEnumerator(preferredAttempt.Token);
-        var yielded = false;
-        var fellBack = false;
-        try
-        {
-            while (true)
-            {
-                bool more;
-                try { more = await stream.MoveNextAsync(); }
-                catch (Exception ex) when (!ct.IsCancellationRequested && ex is not NotSupportedException && monitor.PrimaryUp)
-                {
-                    logger.LogInformation(ex, "The AI droplet couldn't answer that request; SentinelGPT's Mac answers it");
-                    if (yielded) throw new InvalidOperationException("The AI droplet stopped part-way through that answer. Ask again: the Mac answers now.", ex);
-                    fellBack = true;
-                    break;
-                }
-                if (!more) break;
-                yielded = true;
-                yield return stream.Current;
-            }
-        }
-        finally
-        {
-            try { await stream.DisposeAsync(); }
-            catch (Exception ex) when (ex is HttpRequestException or IOException or OperationCanceledException) { }
-        }
-        if (!fellBack) yield break;
-        using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, monitor.PrimaryLostToken);
-        await foreach (var piece in call(primary, linked.Token).WithCancellation(linked.Token)) yield return piece;
-    }
-
+    // The Mac does the work and the droplet is only the backup (Grant, 19-11-26). Every request
+    // but embeddings starts on the Mac while it's up. From 15-11 small requests, SentinelGPT's first
+    // chat round and Trend Research started on the droplet instead; a busy droplet doesn't fail, it
+    // crawls (3 tokens/s) while the Mac sat idle. There's no way left to ask for the droplet first.
     private async Task<T> MacFirstAsync<T>(Func<IOllamaService, CancellationToken, Task<T>> call, CancellationToken ct)
     {
         if (monitor.PrimaryUp)

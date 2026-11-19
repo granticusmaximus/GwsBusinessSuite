@@ -63,3 +63,16 @@ Grant: "build a way to work the Ollama droplet to do better and be available", a
 - Note: `--prune` on 19-11 also removed the droplet's `sentinelgpt-gemma4` copy (6.3 GB, couldn't fit
   in RAM alongside the rest); the Mac has gemma4.
 - [ ] After deploy: Mac handles summaries/hot takes/overviews; droplet generate failures stop.
+
+## 19-11-26: Mac first, droplet only as backup (hardened)
+
+- [x] `OllamaService` sends `think: false` on every generate. The Mac's gemma4 `sentinelgpt`
+  reasoned before every answer ("Say OK." took 21 s), so jobs queued and timed out.
+- [x] `OllamaComputeRouting` (the `PreferDroplet` hint) was removed along with
+  `FailoverOllamaService`'s droplet-first paths. SentinelGPT's first chat round and Trend Research
+  used to start on the droplet; every request but embeddings now starts on the Mac.
+  `OllamaFailoverTests` covers every request kind, plus a guard that no droplet-first route exists.
+- [x] Mac checked: Ollama launches itself (`com.ollama.ollama`), and Tailscale is connected with
+  `serve` on 11434. On mains power the MacBook never sleeps (`sleep 0`, `womp 1`). On battery it
+  sleeps after a minute idle, and the droplet covers those times, as designed.
+- [x] AGENTS.md rule added.

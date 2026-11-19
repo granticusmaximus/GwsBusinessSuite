@@ -241,7 +241,6 @@ public sealed partial class SentinelAgentRunner
         var messages = new List<OllamaChatMessage> { new("system", system), new("user", user.ToString()) };
         for (var attempt = 0; attempt < 2; attempt++)
         {
-            using var computeRoute = OllamaComputeRouting.Use(OllamaComputeRoute.PreferMac);
             var reply = await request.Model.ChatAsync(request.ModelName, messages, null, cancellationToken);
             if (ParseJob(reply.Content, request.Message.Trim()) is { } job) return job;
             messages.Add(new OllamaChatMessage("assistant", reply.Content));
@@ -284,7 +283,6 @@ public sealed partial class SentinelAgentRunner
         var repeatedRounds = 0;
         for (var round = 0; round < roundLimit; round++)
         {
-            using var computeRoute = OllamaComputeRouting.Use(OllamaComputeRoute.PreferMac);
             var response = await request.Model.ChatAsync(request.ModelName, messages, definitions, cancellationToken);
             if (response.ToolCalls.Count == 0) return response.Content.Trim();
 

@@ -242,8 +242,6 @@ public sealed class ContentStudioService(
         string? modelOverride,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        using var computeRoute = OllamaComputeRouting.Use(OllamaComputeRoute.PreferMac);
-
         var scoredOffers = await offerScoringService.ScoreOffersAsync(request, maxOffers: AffiliateSlotTokens.Length, cancellationToken);
         var existingArticles = await GetExistingArticleLinksAsync(cancellationToken);
         var prompt = BuildPrompt(request, scoredOffers, existingArticles);
@@ -425,7 +423,6 @@ public sealed class ContentStudioService(
         string? modelOverride,
         CancellationToken cancellationToken)
     {
-        using var computeRoute = OllamaComputeRouting.Use(OllamaComputeRoute.PreferMac);
         var draft = await db.SeoArticleDrafts.FirstOrDefaultAsync(x => x.Id == request.DraftId, cancellationToken);
         if (draft is null)
         {

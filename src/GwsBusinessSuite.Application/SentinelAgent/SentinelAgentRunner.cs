@@ -114,12 +114,6 @@ public sealed partial class SentinelAgentRunner(IServiceScopeFactory scopes, Tim
             : EmergencyRoundCeiling;
         for (var round = 0; round < roundLimit && time.GetUtcNow() - directStarted < DirectTurnBudget && answer is null; round++)
         {
-            // A direct answer starts on the smaller droplet. Once the model has needed a tool
-            // round, the request is real agent work and the Mac's larger model takes over.
-            using var computeRoute = OllamaComputeRouting.Use(
-                round == 0 && string.IsNullOrWhiteSpace(request.Advice) && string.IsNullOrWhiteSpace(request.Attachments)
-                    ? OllamaComputeRoute.PreferDroplet
-                    : OllamaComputeRoute.PreferMac);
             var response = await request.Model.ChatAsync(request.ModelName, messages, definitions, cancellationToken);
             if (response.ToolCalls.Count == 0)
             {

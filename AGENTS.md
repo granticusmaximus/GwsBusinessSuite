@@ -147,6 +147,12 @@ Mac app (MAUI, Mac Catalyst):
     browser-local Ollama, no Mac relay. New AI features call `IOllamaService`. A panel that wants
     a local model makes its client with `BrowserLocalOllamaService.For(JS, ServerAi.Value, server)`,
     so the setting decides. The web droplet itself still runs no model.
+  - **Grant's Mac answers first; the AI droplet is only the backup** (19-11-26, Grant). With
+    `ServerAi__PrimaryOllamaUrl` set, `FailoverOllamaService` sends every request (generate,
+    stream, chat, warm-up, images) to the Mac over Tailscale and to the droplet only when the Mac
+    is down or can't answer. Embeddings stay on the droplet (one vector space). There's no
+    droplet-first option, so don't add one. The Mac's `sentinelgpt` is a thinking model (gemma4),
+    so requests send `think: false`.
   - Without those `.env` lines the mode is `None`: the Mac app's relays do the AI, and server-side
     AI calls fail with a clear message. The rest of this bullet applies only then.
     - Background work on **public data** can run on an Admin's signed-in Mac through SentinelGPT's
