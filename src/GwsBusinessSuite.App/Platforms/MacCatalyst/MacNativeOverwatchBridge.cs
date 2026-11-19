@@ -920,6 +920,19 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
     {
         private static readonly Dictionary<string, UIImage> Symbols = new(StringComparer.Ordinal);
 
+        // The group's label says what it holds ("7 conflict reports") and names the first few items,
+        // instead of MapKit's first title and "+6 more" (19-11-26). Members share a layer (ClusteringIdentifier).
+        public override MKClusterAnnotation CreateClusterAnnotation(MKMapView mapView, IMKAnnotation[] memberAnnotations)
+        {
+            var members = memberAnnotations.Select(owner.Resolve).OfType<NativeAnnotation>().ToList();
+            var cluster = new MKClusterAnnotation(memberAnnotations);
+            if (members.Count == 0) return cluster;
+            var (title, subtitle) = NativeShapes.ClusterLabel(members[0].Operation, members.Select(m => m.Title).ToList());
+            cluster.Title = title;
+            cluster.Subtitle = subtitle;
+            return cluster;
+        }
+
         public override MKAnnotationView GetViewForAnnotation(MKMapView mapView, IMKAnnotation annotation)
         {
             if (IsCluster(annotation))

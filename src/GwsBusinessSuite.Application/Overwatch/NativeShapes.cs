@@ -143,6 +143,43 @@ public static class NativeShapes
     // SF Symbols for the native Mac map. Prefer the item's actual subtype over a layer-wide generic
     // pin: hazards carry kind, incidents category, ships type, and aircraft their emergency state.
     // The bridge supplies a safe mappin fallback if a future runtime lacks one of these symbols.
+    // A group of pins the Mac map shows as one (19-11-26, Grant: grouped items need a better idea of
+    // what they are). MapKit's own label was the first pin's title and "+6 more"; this says what the
+    // group holds and names the first few different items.
+    public static (string Title, string Subtitle) ClusterLabel(string operation, IReadOnlyList<string?> memberTitles)
+    {
+        var noun = operation switch
+        {
+            "setConflict" => "conflict reports",
+            "setWorldNews" => "news stories",
+            "setNewsShading" => "countries in the news",
+            "setCameraPins" => "cameras",
+            "setHazards" => "hazards",
+            "setTrafficIncidents" => "traffic incidents",
+            "setAircraft" => "aircraft",
+            "setShips" => "ships",
+            "setWeatherWarnings" => "countries with weather warnings",
+            "setTravelAdvice" => "travel advisories",
+            "setFireHotspots" => "fire hotspots",
+            "setHumanitarian" => "humanitarian emergencies",
+            "setAirportStatus" => "airports with delays",
+            "setChokepoints" => "chokepoints",
+            "setConvergence" => "places where signals meet",
+            "setSatellites" => "satellites",
+            "setRoadWeather" => "road weather stations",
+            "setMessageSigns" => "road signs",
+            "setInternetOutages" => "internet outages",
+            "setMapNotes" => "notes",
+            _ => "pins",
+        };
+        var distinct = memberTitles.Where(t => !string.IsNullOrWhiteSpace(t)).Select(t => t!.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        const int Named = 3;
+        var subtitle = string.Join(" · ", distinct.Take(Named).Select(t => t.Length <= 48 ? t : t[..47].TrimEnd() + "…"))
+            + (distinct.Count > Named ? $" · +{distinct.Count - Named} more" : "");
+        return ($"{memberTitles.Count} {noun}", subtitle);
+    }
+
     public static MarkerStyle Marker(string operation, IReadOnlyDictionary<string, object?> item)
     {
         var kind = Text(item, "kind");

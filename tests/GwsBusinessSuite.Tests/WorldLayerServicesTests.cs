@@ -83,15 +83,16 @@ public sealed class WorldLayerServicesTests
     public void GdeltEvents_ShouldKeepCorroboratedConflict_AtANamedPlace_AsReported()
     {
         static string Row(string id, string root, string code, string quad, string sources, string articles, string geoType, string place,
-            string lat, string lon, string url, string isRoot = "1")
+            string lat, string lon, string url, string isRoot = "1", string actor1 = "", string actor2 = "")
         {
             var f = Enumerable.Repeat(string.Empty, 61).ToArray();
+            (f[6], f[16]) = (actor1, actor2);
             (f[0], f[25], f[26], f[28], f[29], f[32], f[33]) = (id, isRoot, code, root, quad, sources, articles);
             (f[51], f[52], f[56], f[57], f[59], f[60]) = (geoType, place, lat, lon, "20261107211500", url);
             return string.Join('\t', f);
         }
         var tsv = string.Join('\n',
-            Row("1", "19", "195", "4", "3", "12", "4", "Kharkiv, Kharkiv, Ukraine", "49.98", "36.25", "https://a.example/strike"),
+            Row("1", "19", "195", "4", "3", "12", "4", "Kharkiv, Kharkiv, Ukraine", "49.98", "36.25", "https://a.example/strike", actor1: "RUSSIA", actor2: "UKRAINE"),
             Row("2", "19", "195", "4", "1", "9", "4", "Kharkiv, Kharkiv, Ukraine", "49.99", "36.24", "https://b.example/strike"),
             Row("3", "18", "182", "4", "4", "20", "4", "Leeds, United Kingdom", "53.8", "-1.5", "https://c.example/assault"),
             Row("4", "19", "190", "4", "1", "2", "4", "Toronto, Ontario, Canada", "43.7", "-79.4", "https://d.example/thin"),
@@ -106,7 +107,8 @@ public sealed class WorldLayerServicesTests
         var pins = ConflictEventService.Reported(events);
         pins.Should().ContainSingle().Which.Should().Match<HazardFeature>(p => p.Kind == HazardKinds.Conflict
             && p.Title == "Air strike reported - Kharkiv, Kharkiv, Ukraine" && p.Severity == "major"
-            && p.Detail.StartsWith("2 events in 21 articles") && p.Detail.Contains("not confirmed"));
+            && p.Detail.StartsWith("Air strike by Russia against Ukraine in Kharkiv, Kharkiv, Ukraine.")
+            && p.Detail.Contains("2 reports in 21 news articles") && p.Detail.Contains("not confirmed"));
         ConflictEventService.LatestStamp("123 abc http://data.gdeltproject.org/gdeltv2/20261107211500.export.CSV.zip\n")
             .Should().Be(new DateTimeOffset(2026, 11, 7, 21, 15, 0, TimeSpan.Zero));
     }
@@ -133,7 +135,7 @@ public sealed class WorldLayerServicesTests
         var areas = ConflictEventService.Confirmed(events);
         areas.Should().ContainSingle("the Burundi event ended more than 90 days before the newest one").Which.Should().Match<HazardFeature>(a =>
             a.Kind == HazardKinds.ConflictConfirmed && a.Title == "Sudan: Government" && a.Severity == "major"
-            && a.Detail.StartsWith("35 deaths in 3 events, 01-09-26 to 25-09-26") && a.Detail.Contains("state-based, one-sided violence")
+            && a.Detail.StartsWith("Latest, 25-09-26") && a.Detail.Contains("35 deaths in 3 events from 01-09-26 to 25-09-26 (state-based, one-sided violence)")
             && a.Url == "https://ucdp.uu.se/conflict/333");
     }
 
@@ -220,5 +222,40 @@ public sealed class WorldLayerServicesTests
         SatelliteService.HasPublicData("25544").Should().BeTrue("the ISS");
         SatelliteService.HasPublicData("43013").Should().BeTrue("NOAA-20");
         SatelliteService.HasPublicData("48274").Should().BeFalse("China's station has no public data");
+    }
+
+    // 19-11-26 (Grant: say what happened without opening the link): a confirmed conflict pin reads as a
+    // sentence from UCDP's own fields, with readable names and no misleading time.
+    [Fact]
+    public void UcdpPins_ShouldSayWhatHappened_InWords()
+    {
+        var csv = string.Join('\n',
+            "conflict_name,conflict_new_id,type_of_violence,country,latitude,longitude,date_start,date_end,best,side_a,side_b,where_description,adm_1,deaths_civilians,source_headline,source_office",
+            "Iran: Government,123,1,Iran,29.5,60.8,2026-09-05 00:00:00.000,2026-09-05 00:00:00.000,2,Government of Iran,Jaish al-Adl,Kurin district of Zahedan County,Sistan and Baluchestan province,0,\"Iranian media report deadly clashes;Second headline\",BBC Monitoring;Other",
+            "XXX652 - Civilians,456,3,Syria,35.1,36.7,2026-09-01 00:00:00.000,2026-09-01 00:00:00.000,4,XXX652,Civilians,Hama,Hama governorate,4,,");
+
+        var events = ConflictEventService.ParseUcdp(new StringReader(csv));
+        events[1].Conflict.Should().Be("Unidentified armed group - Civilians");
+
+        ConflictEventService.Describe(events[0]).Should().Be(
+            "Latest, 05-09-26, Kurin district of Zahedan County (Sistan and Baluchestan province): fighting between Government of Iran and Jaish al-Adl. 2 killed. Reported as \"Iranian media report deadly clashes\" (BBC Monitoring).");
+        ConflictEventService.Describe(events[1]).Should().Be(
+            "Latest, 01-09-26, Hama (Hama governorate): Unidentified armed group attacked civilians. 4 killed, 4 of them civilians.");
+
+        var pins = ConflictEventService.Confirmed(events);
+        pins.Should().OnlyContain(p => p.ObservedAt == null, "UCDP dates have no time; the summary carries them");
+        pins.Single(p => p.Title.StartsWith("Iran")).Detail.Should().StartWith("Latest, 05-09-26")
+            .And.Contain("Here over the last 90 days: 2 deaths in 1 event on 05-09-26 (state-based violence).");
+    }
+
+    // A group of pins on the Mac map says what it holds and names the first few (19-11-26).
+    [Fact]
+    public void ClusterLabel_ShouldSayWhatTheGroupHolds()
+    {
+        var (title, subtitle) = GwsBusinessSuite.Application.Overwatch.NativeShapes.ClusterLabel("setConflict",
+            ["Russia - Ukraine", "Military force reported - Tehran", "Russia - Ukraine", "Air strike reported - Kharkiv", "Syria: Government", null]);
+        title.Should().Be("6 conflict reports");
+        subtitle.Should().Be("Russia - Ukraine · Military force reported - Tehran · Air strike reported - Kharkiv · +1 more");
+        GwsBusinessSuite.Application.Overwatch.NativeShapes.ClusterLabel("setSomethingNew", ["A", "B"]).Title.Should().Be("2 pins");
     }
 }

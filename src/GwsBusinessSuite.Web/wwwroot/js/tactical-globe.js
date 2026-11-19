@@ -3974,7 +3974,7 @@ window.tacticalGlobe = (function () {
             '<dl class="tg-incident-facts">' + facts.map(function (f) {
                 return '<dt>' + f[0] + '</dt><dd>' + escapeHtml(String(f[1]).toUpperCase()) + '</dd>';
             }).join('') + '</dl>' +
-            '<div>' + escapeHtml(hazard.detail || '') + '</div>' +
+            '<div class="tg-hazard-detail">' + escapeHtml(hazard.detail || '') + '</div>' +
             '<div class="tg-stream-panel-meta"><a href="' + escapeHtml(hazard.url) + '" target="_blank" rel="noopener noreferrer">OFFICIAL SOURCE</a></div>' +
             '</div>';
         panel.querySelector('.tg-stream-panel-close').addEventListener('click', closeIncidentPanel);
@@ -5117,9 +5117,13 @@ window.tacticalGlobe = (function () {
                     const p = item.payload || {};
                     const title = p.title || p.name || p.label || p.callsign || p.code || p.id || 'Untitled';
                     const where = p.place || p.country || '';
+                    // What each one is, before opening it (19-11-26): the first line of its summary.
+                    const about = String(p.detail || p.latest || p.summary || '').split('\n')[0];
+                    const line = about.length > 140 ? about.slice(0, 139) + '…' : about;
                     return '<li><button type="button" class="tg-native-choice" data-index="' + index + '">' +
                         '<strong>' + escapeHtml(nativeLayerNames[item.operation] || 'PIN') + '</strong> ' + escapeHtml(String(title)) +
                         (where ? ' <span class="tg-native-choice-place">' + escapeHtml(String(where)) + '</span>' : '') +
+                        (line && line !== title ? '<span class="tg-native-choice-about">' + escapeHtml(line) + '</span>' : '') +
                         '</button></li>';
                 }).join('') +
                 '</ul>' + (total > items.length ? '<div class="tg-stream-panel-meta">SHOWING ' + items.length + ' OF ' + total + '. ZOOM IN FOR THE REST.</div>' : '') +

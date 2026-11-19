@@ -162,7 +162,8 @@ public sealed partial class ConflictEventService(HttpClient httpClient, IMemoryC
         }
     }
 
-    public sealed record GdeltEvent(string Code, string Place, double Latitude, double Longitude, int Sources, int Articles, string Url, DateTimeOffset Seen);
+    public sealed record GdeltEvent(string Code, string Place, double Latitude, double Longitude, int Sources, int Articles, string Url, DateTimeOffset Seen,
+        string Actor1 = "", string Actor2 = "");
 
     // "<size> <md5> http://data.gdeltproject.org/gdeltv2/20261107211500.export.CSV.zip"
     public static DateTimeOffset? LatestStamp(string index)
@@ -189,7 +190,8 @@ public sealed partial class ConflictEventService(HttpClient httpClient, IMemoryC
                 || !double.TryParse(f[57], NumberStyles.Float, CultureInfo.InvariantCulture, out var lon)) continue;
             if (!DateTime.TryParseExact(f[59], "yyyyMMddHHmmss", CultureInfo.InvariantCulture,
                     DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var added)) continue;
-            events.Add(new GdeltEvent(f[26], f[52], lat, lon, Math.Max(sources, 1), Math.Max(articles, 1), f[60], new DateTimeOffset(added, TimeSpan.Zero)));
+            events.Add(new GdeltEvent(f[26], f[52], lat, lon, Math.Max(sources, 1), Math.Max(articles, 1), f[60], new DateTimeOffset(added, TimeSpan.Zero),
+                Actor(f[6]), Actor(f[16])));
         }
         return events;
     }
@@ -221,11 +223,16 @@ public sealed partial class ConflictEventService(HttpClient httpClient, IMemoryC
                 var newest = group.MaxBy(e => e.Seen)!;
                 var articles = group.Sum(e => e.Articles);
                 var place = newest.Place;
+                // 19-11-26 (Grant: say what's going on without opening the link): who against whom, in words.
+                var who = group.Where(e => e.Actor1.Length > 0).GroupBy(e => (e.Actor1, e.Actor2)).MaxBy(g => g.Sum(e => e.Articles))?.Key;
+                var what = who is { } pair
+                    ? $"{group.Key.Item1} by {pair.Actor1}{(pair.Actor2.Length > 0 && pair.Actor2 != pair.Actor1 ? $" against {pair.Actor2}" : "")} in {place}."
+                    : $"{group.Key.Item1} in {place}.";
                 return new HazardFeature(
                     string.Create(CultureInfo.InvariantCulture, $"gdelt-{group.Key.Item1}-{group.Key.Item2}-{group.Key.Item3}").Replace(' ', '-'),
                     HazardKinds.Conflict, $"{group.Key.Item1} reported - {place}",
-                    string.Create(CultureInfo.InvariantCulture,
-                        $"{group.Count()} {(group.Count() == 1 ? "event" : "events")} in {articles} {(articles == 1 ? "article" : "articles")} · machine-read from the news by GDELT, not confirmed"),
+                    what + "\n" + string.Create(CultureInfo.InvariantCulture,
+                        $"{group.Count()} {(group.Count() == 1 ? "report" : "reports")} in {articles} news {(articles == 1 ? "article" : "articles")} in the last day, machine-read by GDELT and not confirmed. The newest article is linked below."),
                     newest.Latitude, newest.Longitude, articles >= 20 ? "major" : articles >= 6 ? "moderate" : "minor", newest.Url, newest.Seen);
             })
             .OrderByDescending(f => f.ObservedAt)
@@ -242,7 +249,8 @@ public sealed partial class ConflictEventService(HttpClient httpClient, IMemoryC
             .FirstOrDefault();
 
     public sealed record UcdpEvent(string Conflict, string ConflictId, int Violence, string Country, double Latitude, double Longitude,
-        DateOnly Start, DateOnly End, int Deaths);
+        DateOnly Start, DateOnly End, int Deaths, string SideA = "", string SideB = "", string Where = "", string Region = "",
+        int CivilianDeaths = 0, string Headline = "", string Outlet = "");
 
     public static IReadOnlyList<UcdpEvent> ParseUcdp(TextReader reader)
     {
@@ -253,6 +261,10 @@ public sealed partial class ConflictEventService(HttpClient httpClient, IMemoryC
         var (conflict, conflictId, violence, country, lat, lon, start, end, best) = (Column("conflict_name"), Column("conflict_new_id"),
             Column("type_of_violence"), Column("country"), Column("latitude"), Column("longitude"), Column("date_start"), Column("date_end"), Column("best"));
         if (new[] { conflict, lat, lon, end, best }.Any(i => i < 0)) throw new IOException("UCDP: unexpected columns");
+        // What happened, in words (19-11-26): the sides, the place, civilian deaths, and the headline and
+        // outlet of the report UCDP coded it from. Optional: an older file without them still loads.
+        var (sideA, sideB, where, region, civilians, headline, outlet) = (Column("side_a"), Column("side_b"), Column("where_description"),
+            Column("adm_1"), Column("deaths_civilians"), Column("source_headline"), Column("source_office"));
         var events = new List<UcdpEvent>();
         while (rows.MoveNext())
         {
@@ -264,8 +276,11 @@ public sealed partial class ConflictEventService(HttpClient httpClient, IMemoryC
             var started = start >= 0 && DateOnly.TryParse(f[start].Split(' ')[0], CultureInfo.InvariantCulture, out var s) ? s : ended;
             int.TryParse(f[best], NumberStyles.Integer, CultureInfo.InvariantCulture, out var deaths);
             int.TryParse(violence >= 0 ? f[violence] : "", NumberStyles.Integer, CultureInfo.InvariantCulture, out var kind);
-            events.Add(new UcdpEvent(f[conflict], conflictId >= 0 ? f[conflictId] : "", kind, country >= 0 ? f[country] : "", latitude, longitude,
-                started, ended, deaths));
+            int.TryParse(civilians >= 0 ? f[civilians] : "", NumberStyles.Integer, CultureInfo.InvariantCulture, out var civilianDeaths);
+            string Text(int i) => i >= 0 ? f[i].Trim() : "";
+            events.Add(new UcdpEvent(Readable(f[conflict]), conflictId >= 0 ? f[conflictId] : "", kind, country >= 0 ? f[country] : "", latitude, longitude,
+                started, ended, deaths, Readable(Text(sideA)), Readable(Text(sideB)), Text(where), Text(region), civilianDeaths,
+                First(Text(headline)), First(Text(outlet))));
         }
         return events;
     }
@@ -287,20 +302,66 @@ public sealed partial class ConflictEventService(HttpClient httpClient, IMemoryC
                 var last = group.Max(e => e.End);
                 var kinds = string.Join(", ", group.Select(e => e.Violence switch { 1 => "state-based", 2 => "non-state", 3 => "one-sided", _ => null })
                     .Where(k => k is not null).Distinct());
-                var detail = string.Create(CultureInfo.InvariantCulture,
-                    $"{deaths:N0} {(deaths == 1 ? "death" : "deaths")} in {group.Count()} {(group.Count() == 1 ? "event" : "events")}, {first:dd-MM-yy} to {last:dd-MM-yy}")
-                    + (kinds.Length > 0 ? $" · {kinds} violence" : string.Empty) + " · UCDP candidate events, coded monthly";
+                var latest = group.OrderByDescending(e => e.End).ThenByDescending(e => e.Deaths).First();
+                var span = first == last ? $"on {first:dd-MM-yy}" : $"from {first:dd-MM-yy} to {last:dd-MM-yy}";
+                var detail = Describe(latest) + "\n" + string.Create(CultureInfo.InvariantCulture,
+                    $"Here over the last 90 days: {deaths:N0} {(deaths == 1 ? "death" : "deaths")} in {group.Count()} {(group.Count() == 1 ? "event" : "events")} {span}")
+                    + (kinds.Length > 0 ? $" ({kinds} violence)" : string.Empty) + ". Confirmed by UCDP (Uppsala University), which codes events monthly.";
                 return new HazardFeature(
                     string.Create(CultureInfo.InvariantCulture, $"ucdp-{group.Key.Item1}-{group.Key.Item2}"), HazardKinds.ConflictConfirmed,
                     $"{main.Conflict}{(group.First().Country is { Length: > 0 } country && !main.Conflict.Contains(country, StringComparison.OrdinalIgnoreCase) ? $" ({country})" : string.Empty)}",
                     detail, group.Average(e => e.Latitude), group.Average(e => e.Longitude),
                     deaths >= 25 ? "major" : deaths >= 5 ? "moderate" : "minor",
                     main.ConflictId.Length > 0 ? $"https://ucdp.uu.se/conflict/{Uri.EscapeDataString(main.ConflictId)}" : "https://ucdp.uu.se/",
-                    new DateTimeOffset(last.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero));
+                    // UCDP dates have no time: shown as a time they read as the evening before in the
+                    // Americas ("AS OF 31-08-26 20:00" for 01-09-26). The dates are in the summary instead.
+                    null);
             })
             .OrderByDescending(f => f.Severity switch { "major" => 2, "moderate" => 1, _ => 0 })
             .ToList();
     }
+
+    // One event in words: "05-09-26, Kurin district of Zahedan County (Sistan and Baluchestan province):
+    // fighting between the Government of Iran and Jaish al-Adl. 2 killed. Reported as "..." (BBC Monitoring)."
+    public static string Describe(UcdpEvent e)
+    {
+        var place = e.Where.Length > 0
+            ? e.Where + (e.Region.Length > 0 && !e.Where.Contains(e.Region, StringComparison.OrdinalIgnoreCase) ? $" ({e.Region})" : "")
+            : e.Region.Length > 0 ? e.Region : e.Country;
+        var what = (e.Violence, e.SideA.Length > 0, e.SideB.Length > 0) switch
+        {
+            (3, true, _) => $"{e.SideA} attacked civilians",
+            (1 or 2, true, true) => $"fighting between {e.SideA} and {e.SideB}",
+            _ => e.Conflict.Length > 0 ? $"violence in the {e.Conflict} conflict" : "political violence",
+        };
+        var killed = e.Deaths switch
+        {
+            0 => "No deaths recorded.",
+            _ => string.Create(CultureInfo.InvariantCulture, $"{e.Deaths:N0} killed")
+                 + (e.CivilianDeaths > 0 ? string.Create(CultureInfo.InvariantCulture, $", {e.CivilianDeaths:N0} of them civilians") : "") + ".",
+        };
+        var reported = e.Headline.Length > 0
+            ? $" Reported as \"{Shorten(e.Headline, 180)}\"{(e.Outlet.Length > 0 ? $" ({e.Outlet})" : "")}."
+            : "";
+        return string.Create(CultureInfo.InvariantCulture, $"Latest, {e.End:dd-MM-yy}, {place}: ") + what + ". " + killed + reported;
+    }
+
+    // UCDP names an armed group nobody has identified "XXX" and a number ("XXX652 - Civilians"):
+    // shown as words (19-11-26).
+    public static string Readable(string name) =>
+        UnidentifiedGroup().Replace(name, "Unidentified armed group");
+
+    [GeneratedRegex(@"\bXXX\d+\b")]
+    private static partial Regex UnidentifiedGroup();
+
+    // UCDP lists several sources with ";" between them; the first is enough for the summary.
+    private static string First(string list) => list.Split(';', 2)[0].Trim();
+
+    private static string Shorten(string text, int max) => text.Length <= max ? text : text[..(max - 1)].TrimEnd() + "…";
+
+    // GDELT's actor names are upper-case ("ISRAEL", "MILITARY"): shown in title case.
+    private static string Actor(string name) =>
+        string.IsNullOrWhiteSpace(name) ? "" : CultureInfo.InvariantCulture.TextInfo.ToTitleCase(name.Trim().ToLowerInvariant());
 
     // RFC 4180: quoted fields may hold commas, doubled quotes and line breaks (UCDP's source text does).
     public static IEnumerable<string[]> ReadCsv(TextReader reader)

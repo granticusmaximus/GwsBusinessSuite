@@ -882,3 +882,17 @@
 }
 .tg-incident-report:hover { background: rgba(125, 255, 176, 0.15); }
 @media (pointer: coarse) { .tg-incident-report { min-height: 44px; line-height: 2rem; } }
+
+/* A hazard's summary keeps its lines (19-11-26): what happened, then the totals or the list. */
+.tg-hazard-detail {
+    white-space: pre-line;
+}
+
+/* A grouped pin's list says what each item is (19-11-26). */
+.tg-native-choice-about {
+    display: block;
+    margin-top: 2px;
+    opacity: 0.8;
+    font-size: var(--gws-type-xs, 12px);
+    white-space: normal;
+}

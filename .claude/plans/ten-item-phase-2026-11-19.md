@@ -50,3 +50,10 @@ runs; see ai-droplet-availability-2026-11-19), and the six items that need Grant
       Operations/Tools/Trust), Support and Email Campaigns moved beside CRM. No link removed or renamed.
       `NavMenuSectionTests`; nav and rail browser tests pass.
 - [x] Paused 19-11-26 for Grant's report that SentinelGPT is too slow in World News: fixed (Mac-first routing, Tailscale restarted, hourly Mac-down warning); see ai-droplet-availability-2026-11-19.
+- [x] Grant 19-11-26 (screenshot): conflict windows said "4 deaths in 1 event ... coded monthly" and
+      groups said "+N more". `ConflictEventService.Describe`: the latest event in words from UCDP's
+      side_a/side_b, where_description/adm_1, deaths_civilians, source_headline/source_office; "XXXnnn"
+      shown as "Unidentified armed group"; UCDP pins no longer show a time (date-only data read as the
+      evening before). GDELT pins name the actors. Mac map clusters get "N conflict reports" plus the
+      first names (`NativeShapes.ClusterLabel`); the grouped list shows a summary line per item;
+      hazard panels keep line breaks (`.tg-hazard-detail`). Tests in WorldLayerServicesTests.
