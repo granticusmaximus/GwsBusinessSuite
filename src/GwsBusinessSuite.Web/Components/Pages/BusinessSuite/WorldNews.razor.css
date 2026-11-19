@@ -17,6 +17,11 @@
     color: var(--gws-text-soft);
 }
 
+.world-news-updated.is-behind {
+    color: var(--gws-status-warning-text);
+    max-width: 60ch;
+}
+
 .world-news-pull {
     color: var(--gws-text-soft);
     max-width: 60ch;

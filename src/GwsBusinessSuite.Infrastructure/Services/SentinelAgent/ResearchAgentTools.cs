@@ -11,7 +11,8 @@ namespace GwsBusinessSuite.Infrastructure.Services.SentinelAgent;
 // agent reads to get its facts right before it writes a page, a list or a card. App-wide search
 // and World News reach business data, so they're Admin only, as the command palette's records and
 // the admin-only World News context are. Web search and reading a page send only the query or the
-// address out (Ollama's web API, OllamaWeb:ApiKey); without a key those two aren't offered.
+// address out (the self-hosted SearXNG, then the server fetches the page; never Ollama's billed API
+// unless OllamaWeb:AllowPaidSearch); without web search configured those two aren't offered.
 public sealed class ResearchAgentTools(
     ISuiteSearchService suiteSearch,
     IOllamaWebSearchService? web = null,

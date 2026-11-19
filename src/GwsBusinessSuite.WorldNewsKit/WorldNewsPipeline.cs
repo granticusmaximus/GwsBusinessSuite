@@ -125,7 +125,9 @@ public sealed class WorldNewsPipeline(WorldNewsStore store, HttpClient http, Gde
                     var read = await ReadOutletAsync(outlet, state, token);
                     outletReads[i] = (read.Articles, null, state, read.Status, read.ETag, read.Modified);
                 }
-                catch (Exception ex) when (ex is HttpRequestException or XmlException or TaskCanceledException && !token.IsCancellationRequested)
+                // Any failure of one feed is that feed's problem, never the whole read's: an
+                // unexpected exception here used to abort every other feed too (19-11-26).
+                catch (Exception ex) when (ex is not OperationCanceledException || !token.IsCancellationRequested)
                 {
                     var status = ex is HttpRequestException { StatusCode: { } code } ? (int)code : (int?)null;
                     outletReads[i] = (null, $"{outlet.Name} ({outlet.Language}): {ex.Message}", FeedSchedule.AfterFailure(state, status, ex.Message, readAt), status ?? 0, null, null);

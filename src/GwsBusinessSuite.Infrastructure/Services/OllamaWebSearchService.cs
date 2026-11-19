@@ -8,8 +8,8 @@ using Microsoft.Extensions.Options;
 
 namespace GwsBusinessSuite.Infrastructure.Services;
 
-// SentinelGPT's web search and page fetch. With OllamaWeb:ApiKey it uses Ollama's web search; without
-// one (the default since 13-11-26) it searches a self-hosted SearXNG (OllamaWeb:SearxngUrl) and fetches
+// SentinelGPT's and World News' web search and page fetch. It searches a self-hosted SearXNG
+// (OllamaWeb:SearxngUrl, key-less, the default since 13-11-26) and fetches
 // pages itself through the "web-fetch" client, whose ConnectCallback refuses private addresses on every
 // connection (redirects and DNS rebinding included).
 public sealed class OllamaWebSearchService(
@@ -24,11 +24,41 @@ public sealed class OllamaWebSearchService(
 
     private readonly OllamaWebOptions _options = options.Value;
 
-    private bool UsesOllama => !string.IsNullOrWhiteSpace(_options.ApiKey);
+    // Ollama's billed web API, only when OllamaWeb:AllowPaidSearch is true (19-11-26): a key left in
+    // .env costs nothing.
+    private bool UsesOllama => _options.AllowPaidSearch && !string.IsNullOrWhiteSpace(_options.ApiKey);
 
-    private bool UsesSearxng => !UsesOllama && !string.IsNullOrWhiteSpace(_options.SearxngUrl);
+    private bool HasSearxng => !string.IsNullOrWhiteSpace(_options.SearxngUrl);
 
-    public bool IsConfigured => UsesOllama || UsesSearxng;
+    // SearXNG is used without a key, and in place of Ollama while Ollama is refusing this key.
+    private bool UsesSearxng => HasSearxng && (!UsesOllama || OllamaPaused);
+
+    public bool IsConfigured => UsesOllama || HasSearxng;
+
+    // 19-11-26: production's Ollama web search answered 402 (out of credit) to every search, every
+    // five minutes, so World News discovery found nothing although SearXNG was set up. A refusal of
+    // the key now hands searches and fetches to SearXNG for a while. Keyed by the API key, so a new
+    // key is tried straight away.
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, DateTimeOffset> OllamaPausedUntil = new();
+
+    private bool OllamaPaused =>
+        OllamaPausedUntil.TryGetValue(_options.ApiKey, out var until) && DateTimeOffset.UtcNow < until;
+
+    public static TimeSpan? PauseAfter(System.Net.HttpStatusCode status) => status switch
+    {
+        System.Net.HttpStatusCode.TooManyRequests => TimeSpan.FromMinutes(15),
+        System.Net.HttpStatusCode.PaymentRequired or System.Net.HttpStatusCode.Unauthorized
+            or System.Net.HttpStatusCode.Forbidden => TimeSpan.FromHours(6),
+        _ => null,
+    };
+
+    // True when Ollama refused the key and SearXNG can answer instead.
+    private bool HandOverToSearxng(HttpResponseMessage response)
+    {
+        if (!HasSearxng || PauseAfter(response.StatusCode) is not { } pause) return false;
+        OllamaPausedUntil[_options.ApiKey] = DateTimeOffset.UtcNow + pause;
+        return true;
+    }
 
     public Task<IReadOnlyList<OllamaWebSearchResult>> SearchAsync(
         string query,
@@ -72,6 +102,8 @@ public sealed class OllamaWebSearchService(
                 max_results = resultLimit
             });
         using var response = await http.SendAsync(request, ct);
+        if (HandOverToSearxng(response))
+            return await SearchSearxngAsync(normalizedQuery, resultLimit, recent ? "day" : null, ct);
         response.EnsureSuccessStatusCode();
 
         var result = await response.Content.ReadFromJsonAsync<WebSearchResponse>(cancellationToken: ct);
@@ -101,6 +133,7 @@ public sealed class OllamaWebSearchService(
 
         using var request = CreateRequest(HttpMethod.Post, "/api/web_fetch", new { url });
         using var response = await http.SendAsync(request, ct);
+        if (HandOverToSearxng(response)) return await FetchDirectAsync(url, ct);
         response.EnsureSuccessStatusCode();
 
         var result = await response.Content.ReadFromJsonAsync<WebFetchResponse>(cancellationToken: ct)

@@ -93,6 +93,19 @@ public partial class App : Microsoft.Maui.Controls.Application
 
 	protected override Window CreateWindow(IActivationState? activationState)
 	{
+#if MACCATALYST
+		// Scenes macOS makes itself (restoring last session's windows) never become a second main
+		// window: a restored Sentinel window comes back as Sentinel, on its page.
+		var state = activationState?.State is { } persisted
+			? persisted.ToDictionary(pair => pair.Key, pair => pair.Value)
+			: null;
+		if (SentinelWindowNavigation.IsSentinelScene(state, Windows.Any(w => w.Page is AppShell)))
+		{
+			string? query = null;
+			state?.TryGetValue(SentinelWindowNavigation.QueryKey, out query);
+			return BuildSentinelWindow(query);
+		}
+#endif
 		var window = new Window(new AppShell());
 #if MACCATALYST
 		// Small enough for the web app's tablet layout (the rail and a full-width page), never
@@ -104,7 +117,9 @@ public partial class App : Microsoft.Maui.Controls.Application
 	}
 
 #if MACCATALYST
-	internal void OpenSentinelWindow(string? query = null)
+	internal void OpenSentinelWindow(string? query = null) => OpenWindow(BuildSentinelWindow(query));
+
+	private Window BuildSentinelWindow(string? query)
 	{
 		var services = IPlatformApplication.Current?.Services
 			?? throw new InvalidOperationException("The application services are unavailable.");
@@ -113,10 +128,20 @@ public partial class App : Microsoft.Maui.Controls.Application
 		page.SentinelWindowQuery = query;
 		var window = new Window(page) { Title = "Sentinel", MinimumWidth = 820, MinimumHeight = 600 };
 		_sentinelWindows.Add(window);
-		window.Destroying += (_, _) => _sentinelWindows.Remove(window);
+		window.Destroying += (_, _) =>
+		{
+			_sentinelWindows.Remove(window);
+			page.StopSentinelWindow();
+		};
 		window.Created += (_, _) => page.StartSentinelWindow();
 		window.Activated += (_, _) => page.StartSentinelWindow();
-		OpenWindow(window);
+		// Saved with the scene, so quitting with this window open restores it as Sentinel.
+		window.Backgrounding += (_, args) =>
+		{
+			args.State[SentinelWindowNavigation.KindKey] = SentinelWindowNavigation.SentinelKind;
+			if (!string.IsNullOrEmpty(query)) args.State[SentinelWindowNavigation.QueryKey] = query;
+		};
+		return window;
 	}
 #endif
 }

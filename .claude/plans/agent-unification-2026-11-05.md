@@ -34,7 +34,7 @@ Grant: "Make this correct and unified", after an audit of gaps left by Claude, C
   traps, environment, and docs/tracking.
 - [x] `.github/copilot-instructions.md`: now points to AGENTS.md and repeats the five rules that
   broke production.
-- [ ] `CLAUDE.md` should import AGENTS.md (`@AGENTS.md`). The classifier blocked Claude from
+- [x] (19-11-26: done, CLAUDE.md starts with `@AGENTS.md`) `CLAUDE.md` should import AGENTS.md (`@AGENTS.md`). The classifier blocked Claude from
   editing its own instructions, so Grant makes this change.
 - [x] `KanbanPresence` is now a board-shaped view of `RecordPresenceTracker`, which gained an
   optional focus (the open card). There's one tracker, and tests for sharing it.

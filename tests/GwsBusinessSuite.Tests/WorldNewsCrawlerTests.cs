@@ -113,6 +113,56 @@ public sealed class WorldNewsCrawlerTests : IDisposable
         requests.Count.Should().Be(asked, "a refusing site isn't asked again for a day");
     }
 
+    // 19-11-26: production read no news for hours. A feed that had failed ~45 times in a row made
+    // AfterFailure overflow TimeSpan, which escaped the feed loop and failed every read.
+    [Fact]
+    public void Schedule_ShouldStayAtTheHourCap_ForAFeedThatHasFailedForDays()
+    {
+        var broken = new FeedHealth("https://x.example/rss", Failures: 5_000);
+
+        var after = FeedSchedule.AfterFailure(broken, 503, "HTTP 503", Now);
+
+        after.SkipUntil.Should().Be(Now.AddHours(1));
+        after.Failures.Should().Be(5_001);
+    }
+
+    [Fact]
+    public void Page_ShouldSayTheNewsIsBehind_WhenAReadFailedOrNoneRanForThreeIntervals()
+    {
+        var every = TimeSpan.FromMinutes(5);
+        GwsBusinessSuite.Infrastructure.Services.WorldNewsService.IsBehind(false, Now.AddMinutes(-6), every, Now).Should().BeFalse();
+        GwsBusinessSuite.Infrastructure.Services.WorldNewsService.IsBehind(false, null, every, Now).Should().BeFalse("not read yet isn't behind");
+        GwsBusinessSuite.Infrastructure.Services.WorldNewsService.IsBehind(false, Now.AddMinutes(-16), every, Now).Should().BeTrue();
+        GwsBusinessSuite.Infrastructure.Services.WorldNewsService.IsBehind(true, Now.AddMinutes(-1), every, Now).Should().BeTrue("the last read failed");
+    }
+
+    [Fact]
+    public async Task Pipeline_ShouldReadEveryOtherFeed_WhenOneFeedFailsInAnyWay()
+    {
+        var store = new WorldNewsStore(_dbPath);
+        var good = new NewsOutlet("Example", "English", "Turkey", "https://www.example.com/rss");
+        var longBroken = new NewsOutlet("Long broken", "English", "Turkey", "https://broken.example/rss");
+        var odd = new NewsOutlet("Odd", "English", "Turkey", "https://odd.example/rss");
+        store.SaveFeedHealth([new FeedHealth(longBroken.Url, Failures: 60)]);
+        var http = new HttpClient(new Handler(request => request.RequestUri!.Host switch
+        {
+            "www.example.com" => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(Rss, Encoding.UTF8) },
+            "odd.example" => throw new InvalidOperationException("an exception nobody planned for"),
+            _ => new HttpResponseMessage(HttpStatusCode.ServiceUnavailable),
+        }));
+        var time = new Clock(Now);
+        var pipeline = new WorldNewsPipeline(store, http, new GdeltDocClient(http, time), new OllamaClient(new Uri("http://localhost:11434/"), http),
+            time, new WorldNewsOptions { Editions = [], Outlets = [good, longBroken, odd] });
+
+        var report = await pipeline.RunCycleAsync(CancellationToken.None);
+
+        report.Added.Should().Be(1, "the working feed is read whatever the others do");
+        var health = store.FeedHealth();
+        health[longBroken.Url].SkipUntil.Should().Be(Now.AddHours(1));
+        health[odd.Url].Failures.Should().Be(1);
+        report.Notes.Should().Contain(note => note.StartsWith("Odd (English):"));
+    }
+
     private const string Rss = """
         <rss version="2.0"><channel><title>Example</title>
           <item><title>Floods in Istanbul</title><link>https://www.example.com/floods</link><pubDate>Thu, 13 Nov 2026 08:00:00 GMT</pubDate>

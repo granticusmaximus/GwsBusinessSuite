@@ -15,6 +15,19 @@
   `gws-native://sentinel-window?page=…`, which `MainPage.HandleNativeRequestAsync` turns into
   `App.OpenSentinelWindow(query)`. Browsers get a popup. `SentinelWindowNavigation.WindowUrl`
   keeps only GUID `page`/`database`/`row`. Unit and Playwright tests pass on Windows.
+- [x] 19-11-26 review fixes (Claude, on the Mac):
+  - Multiple scenes made UIKit add File > New Window (Cmd+N), which opened a second AppShell
+    window sharing the static `MacToolbarActions`. Removed in `AppDelegate.BuildMenu`
+    (`NewItem` on macOS 26+, `NewScene` before).
+  - A relaunch restored a Sentinel scene as a second main window. Sentinel windows now save
+    `gws.window=sentinel` (and their query) in `Backgrounding`; `App.CreateWindow` builds a
+    Sentinel window for a restored Sentinel scene, or for any scene made while a main window is
+    open (`SentinelWindowNavigation.IsSentinelScene`, unit-tested).
+  - `StartSentinelWindow` now subscribes to connectivity (offline notice), and
+    `StopSentinelWindow` (on `Destroying`) drops it and the active-window pointer.
+  - The Sentinel user guide had no section on the window (`docs/` doesn't sync from Windows):
+    "Sentinel in its own window" added.
+  - Mac Debug build 0 warnings; `verify-release.sh` PARTIAL with the full suite passing.
 - [ ] Mac smoke test: menu item, dashboard button and rail right-click each open the window
   (confirm WKWebView raises `Navigating` for the scripted `gws-native://` navigation), window loads Sentinel, main window unaffected. Send the
   `Sentinel window:` lines from `gws-mainpage-debug.log` if it is still blank.

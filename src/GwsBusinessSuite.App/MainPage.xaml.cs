@@ -136,7 +136,26 @@ public partial class MainPage : ContentPage
         if (!IsSentinelWindow || _startedLoading) return;
         _startedLoading = true;
         DebugLog("Sentinel window: started by window");
+        if (!_connectivitySubscribed)
+        {
+            Connectivity.Current.ConnectivityChanged += OnConnectivityChanged;
+            _connectivitySubscribed = true;
+        }
         _ = StartWorkspaceAsync();
+    }
+
+    // The window is closing: a closed window doesn't always raise OnDisappearing, so drop the
+    // app-wide subscriptions here or the page lives on, reacting to network changes.
+    internal void StopSentinelWindow()
+    {
+        if (_connectivitySubscribed)
+        {
+            Connectivity.Current.ConnectivityChanged -= OnConnectivityChanged;
+            _connectivitySubscribed = false;
+        }
+        _navigationTimeoutCts?.Cancel();
+        if (ReferenceEquals(MacToolbarActions.ActiveSentinelWindow, this)) MacToolbarActions.ActiveSentinelWindow = null;
+        DebugLog("Sentinel window: closed");
     }
 #endif
 

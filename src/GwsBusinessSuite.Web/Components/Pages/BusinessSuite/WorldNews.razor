@@ -21,7 +21,7 @@
 <PageHeader Title="World News" Icon="bi-globe-europe-africa"
             Description="What newsrooms around the world are reporting, each story's coverage grouped across languages.">
     <Meta>
-        <p class="world-news-updated small mb-0" title="@News.Status">@UpdatedLine</p>
+        <p class="world-news-updated small mb-0 @(IsBehind ? "is-behind" : null)" title="@News.Status" role="@(IsBehind ? "status" : null)">@UpdatedLine</p>
         @if (News.PullStatus is { } pullStatus)
         {
             <p class="world-news-pull small mb-0" role="status">
@@ -815,9 +815,13 @@ else
 
     private string SearchPlaceholder => _view == WorldNewsTab.Reports ? "Search every report" : "Search stories";
 
+    private bool IsBehind => !News.IsRefreshing && News.IsBehind(DateTimeOffset.UtcNow);
+
     private string UpdatedLine => News.IsRefreshing
         ? "Reading the news…"
-        : News.LastRefreshed is { } at ? $"Updated {Time(at)}" : "Not read yet";
+        : IsBehind
+            ? (News.LastRefreshed is { } last ? $"Not updating - last read {Time(last)}. " : "Not updating. ") + News.Status
+            : News.LastRefreshed is { } at ? $"Updated {Time(at)}" : "Not read yet";
 
     private static string Time(DateTimeOffset at) => WorldNewsBrowse.TimeLabel(at, DateTimeOffset.UtcNow);
 

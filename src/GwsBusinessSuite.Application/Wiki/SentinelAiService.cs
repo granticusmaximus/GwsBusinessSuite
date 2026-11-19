@@ -760,7 +760,7 @@ public sealed class SentinelAiService(
             if (!IsInternetConfigured)
             {
                 throw new InvalidOperationException(
-                    "Internet research is enabled for this chat, but OllamaWeb:ApiKey is not configured.");
+                    "Internet research is enabled for this chat, but web search is not configured. Set OllamaWeb__SearxngUrl (key-less).");
             }
 
             yield return new SentinelAiStreamChunk(string.Empty, null, "Researching the web");

@@ -33,7 +33,7 @@ in one pass rather than phases.
 - [x] UI: header buttons, pull summary line, `WorldNewsGrouping` on the story view
 - [x] Tests in `WorldNewsKitTests` (12 new, all pass on Windows)
 - [x] `docs/WORLD_NEWS_USER_GUIDE.md` (Pull Latest and Regroup section)
-- [ ] `./scripts/verify-release.sh` on the Mac (can't run on Windows)
+- [x] `./scripts/verify-release.sh` on the Mac. 19-11-26 (Claude, Mac): verify-release.sh PARTIAL, release build and full suite (incl. Playwright) pass; Mac Debug build 0 warnings.
 
 ## Handoff notes
 

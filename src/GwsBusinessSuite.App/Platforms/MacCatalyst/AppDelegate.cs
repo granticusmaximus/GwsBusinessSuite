@@ -39,6 +39,13 @@ public class AppDelegate : MauiUIApplicationDelegate
 	{
 		base.BuildMenu(builder);
 		if (builder.System != UIMenuSystem.MainSystem) return;
+		// Multiple scenes (for the Sentinel window) make UIKit add File > New Window (Cmd+N), which
+		// opened a second main window. "Open Sentinel in New Window" is the one way in (19-11-26).
+		builder.RemoveMenu((OperatingSystem.IsMacCatalystVersionAtLeast(26)
+			? UIMenuIdentifier.NewItem
+#pragma warning disable CA1422 // Before macOS 26 the item is NewScene; the branch above takes the new name.
+			: UIMenuIdentifier.NewScene).GetConstant()!);
+#pragma warning restore CA1422
 		var checkForUpdates = UICommand.Create("Check for Updates…", null, new Selector("gwsCheckForUpdates:"), null);
 		var setUpTouchId = UICommand.Create("Set Up Touch ID…", null, new Selector("gwsSetUpTouchId:"), null);
 		var signInWithTouchId = UICommand.Create("Sign In with Touch ID", null, new Selector("gwsSignInWithTouchId:"), null);

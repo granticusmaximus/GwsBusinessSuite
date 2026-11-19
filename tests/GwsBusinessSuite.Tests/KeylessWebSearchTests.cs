@@ -76,6 +76,7 @@ public sealed class KeylessWebSearchTests
         var service = new OllamaWebSearchService(http, Options.Create(new OllamaWebOptions
         {
             ApiKey = "test-key",
+            AllowPaidSearch = true,
             BaseUrl = "https://ollama.example/",
         }));
 

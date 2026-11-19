@@ -36,6 +36,19 @@ public sealed class SentinelWindowTests
     }
 
     [Fact]
+    public void Scene_IsTheMainWindow_OnlyWhenNoneIsOpenAndItWasntSavedAsSentinel()
+    {
+        var sentinel = new Dictionary<string, string?> { [SentinelWindowNavigation.KindKey] = SentinelWindowNavigation.SentinelKind };
+
+        SentinelWindowNavigation.IsSentinelScene(null, mainWindowOpen: false).Should().BeFalse("the first window is the app");
+        SentinelWindowNavigation.IsSentinelScene(new Dictionary<string, string?>(), mainWindowOpen: false).Should().BeFalse();
+        SentinelWindowNavigation.IsSentinelScene(null, mainWindowOpen: true)
+            .Should().BeTrue("a second main window would share the toolbar and menu callbacks");
+        SentinelWindowNavigation.IsSentinelScene(sentinel, mainWindowOpen: false)
+            .Should().BeTrue("a restored Sentinel window comes back as Sentinel even if it is restored first");
+    }
+
+    [Fact]
     public void WindowRoute_UsesTheExistingAuthorizedSentinelEditor()
     {
         typeof(Wiki).GetCustomAttributes<RouteAttribute>()

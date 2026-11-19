@@ -11,6 +11,18 @@ internal static class SentinelWindowNavigation
 {
     public const string WindowPath = "/admin/sentinel/window";
 
+    // Saved with a Sentinel window's scene so macOS restores it as Sentinel after a relaunch.
+    public const string KindKey = "gws.window";
+    public const string SentinelKind = "sentinel";
+    public const string QueryKey = "gws.sentinel.query";
+
+    // A scene macOS creates on its own (a restored window, or one more after the main window) is a
+    // Sentinel window unless it is the only one: the app never has two main windows, which would
+    // share the one set of toolbar and menu callbacks (19-11-26).
+    public static bool IsSentinelScene(IReadOnlyDictionary<string, string?>? state, bool mainWindowOpen) =>
+        mainWindowOpen
+        || (state is not null && state.TryGetValue(KindKey, out var kind) && kind == SentinelKind);
+
     // The Sentinel window's address, keeping only the page or database to open from the request
     // (gws-native://sentinel-window?page=...), so the page can't steer the window anywhere else.
     public static string WindowUrl(string baseUrl, string? query)

@@ -214,6 +214,14 @@ public sealed partial class WorldNewsService : IDisposable
     public string Status { get; private set; } = "Not read yet.";
     public DateTimeOffset? LastRefreshed { get; private set; }
     public bool IsRefreshing => _running.CurrentCount == 0;
+    public bool LastReadFailed { get; private set; }
+
+    // The page says plainly when the news isn't updating (19-11-26): every read failed for hours and
+    // the header still read "Updated <time>", with the error only in a tooltip.
+    public bool IsBehind(DateTimeOffset now) => IsBehind(LastReadFailed, LastRefreshed, ReadInterval, now);
+
+    public static bool IsBehind(bool lastReadFailed, DateTimeOffset? lastRead, TimeSpan readInterval, DateTimeOffset now) =>
+        lastReadFailed || (lastRead is { } at && now - at > readInterval * 3);
     public event Action? Changed;
     public event Action<string, WorldNewsAlert>? AlertCreated;
 
@@ -275,6 +283,7 @@ public sealed partial class WorldNewsService : IDisposable
             try { SnapshotLabels(DateTimeOffset.UtcNow); }
             catch (Exception ex) when (ex is Microsoft.Data.Sqlite.SqliteException or InvalidOperationException) { _logger.LogWarning(ex, "World News: label snapshot failed"); }
             LastRefreshed = DateTimeOffset.UtcNow;
+            LastReadFailed = false;
             Store.SetLastFetched(LastReadKey, LastRefreshed.Value);
             ClearLists();
             // While the Mac app writes summaries with its bigger local model, the server's small
@@ -304,6 +313,7 @@ public sealed partial class WorldNewsService : IDisposable
         catch (Exception ex)
         {
             _logger.LogError(ex, "World news read failed");
+            LastReadFailed = true;
             Status = "Couldn't read the news: " + ex.Message;
         }
         finally

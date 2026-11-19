@@ -46,9 +46,12 @@ public static class FeedSchedule
     public static FeedHealth AfterFailure(FeedHealth health, int? status, string error, DateTimeOffset now)
     {
         var failures = health.Failures + 1;
+        // The exponent is capped before the TimeSpan is made: 5 * 2^n minutes overflowed TimeSpan
+        // once a feed had failed ~45 times in a row (about two days at the hourly cap), and that
+        // threw on every read, so no news was read at all (19-11-26). 2^4 * 5 = 80 min > the cap.
         var pause = status is { } code && IsRefusal(code)
             ? RefusalPause
-            : failures < 2 ? TimeSpan.Zero : Min(TimeSpan.FromMinutes(5 * Math.Pow(2, failures - 2)), MaxFailureBackoff);
+            : failures < 2 ? TimeSpan.Zero : Min(TimeSpan.FromMinutes(5 * Math.Pow(2, Math.Min(failures - 2, 4))), MaxFailureBackoff);
         return health with
         {
             LastStatus = status, LastAttempt = now, LastError = error, Failures = failures,

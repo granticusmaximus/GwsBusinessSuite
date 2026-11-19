@@ -46,7 +46,7 @@ tags, the most fitting available icon per story, and the same on Overwatch's Wor
   - The World News and situation unit tests pass, including the new ones. The remaining failures
     there are the same on clean `HEAD`: CRLF prompts, SQLite file locks and the Chromium download.
   - The Overwatch and World News browser tests (63) pass through Edge.
-- [ ] Grant: `./scripts/verify-release.sh` on the Mac. It can't run on Windows.
+- [x] `./scripts/verify-release.sh` on the Mac. 19-11-26 (Claude, Mac): verify-release.sh PARTIAL, release build and full suite (incl. Playwright) pass; Mac Debug build 0 warnings. A stale editor save had removed the icon pins and panel subtype from the working tree's `tactical-globe.js`; `OverwatchPinRenderingTests` now guards both.
 - [ ] Watch production after deploy:
   - how long a read takes against the 5-minute interval;
   - a Google News 429 or refusal;
