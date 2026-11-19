@@ -84,4 +84,25 @@ public sealed class CameraAvailabilityTests
             .And.Contain("They don\\'t verify the report.")
             .And.Contain("SEEN WORKING ");
     }
+
+    // Phase 3: pins show what a camera offers by shape (not colour alone), the window says it in
+    // words, and LIVE VIDEO ONLY filters on the server so the Mac map gets it too.
+    [Fact]
+    public void OverwatchPins_ShouldShowWhatACameraOffers_AndFilterToLiveVideo()
+    {
+        var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../.."));
+        var js = File.ReadAllText(Path.Combine(root, "src/GwsBusinessSuite.Web/wwwroot/js/tactical-globe.js"));
+        var page = File.ReadAllText(Path.Combine(root, "src/GwsBusinessSuite.Web/Components/Pages/BusinessSuite/OverwatchGrid.razor"));
+
+        js.Should().Contain("function cameraPinImage(pin, selected)")
+            .And.Contain("image: cameraPinImage(pin, entry.selectedCameras.has(pin.id))",
+                "new camera pins take their shape from the camera")
+            .And.Contain("entity.billboard.image = cameraPinImage(entity._tacticalGlobeCamera, selected)",
+                "selecting a pin keeps its shape")
+            .And.Contain("tg-stream-panel-availability");
+        page.Should().Contain("mode = availability.Mode.ToString()")
+            .And.Contain("state = availability.State.ToString()")
+            .And.Contain("include: CameraFilter()")
+            .And.Contain("LIVE VIDEO ONLY [");
+    }
 }

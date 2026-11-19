@@ -87,6 +87,50 @@ window.tacticalGlobe = (function () {
     const pinBillboardImage = createPinBillboardImage('#05080a', 2);
     const pinBillboardImageSelected = createPinBillboardImage('#ffe066', 4);
 
+    // Camera pins by what the camera offers (19-11-26, camera availability phase 3), by shape so
+    // colour isn't the only cue (billboard.color stays the alert tint): a still image is the disc,
+    // live video a rounded square, and a camera found not working is hollow. The camera window
+    // says the same in words.
+    const cameraPinImages = new Map();
+    function cameraPinImage(pin, selected) {
+        const video = !!pin && pin.mode === 'LiveVideo';
+        const hollow = !!pin && pin.state === 'Unavailable';
+        if (!video && !hollow) return selected ? pinBillboardImageSelected : pinBillboardImage;
+        const key = (video ? 'video' : 'still') + (hollow ? '-hollow' : '') + (selected ? '-selected' : '');
+        let image = cameraPinImages.get(key);
+        if (image) return image;
+        const size = 28;
+        const outlineWidth = selected ? 4 : 2;
+        const canvas = document.createElement('canvas');
+        canvas.width = size;
+        canvas.height = size;
+        const ctx = canvas.getContext('2d');
+        const inset = outlineWidth / 2 + 1;
+        ctx.beginPath();
+        if (video) {
+            ctx.roundRect(inset, inset, size - inset * 2, size - inset * 2, 5);
+        } else {
+            ctx.arc(size / 2, size / 2, size / 2 - inset, 0, Math.PI * 2);
+        }
+        if (hollow) {
+            ctx.lineWidth = outlineWidth + 4;
+            ctx.strokeStyle = selected ? '#ffe066' : '#05080a';
+            ctx.stroke();
+            ctx.lineWidth = 3;
+            ctx.strokeStyle = '#ffffff';
+            ctx.stroke();
+        } else {
+            ctx.fillStyle = '#ffffff';
+            ctx.fill();
+            ctx.lineWidth = outlineWidth;
+            ctx.strokeStyle = selected ? '#ffe066' : '#05080a';
+            ctx.stroke();
+        }
+        image = canvas.toDataURL();
+        cameraPinImages.set(key, image);
+        return image;
+    }
+
     // World News pins carry their story's Bootstrap icon (18-11-26). Same white-fill pin, with the
     // glyph cut in near-black so the purple tint colours only the disc. Until the icon font has
     // loaded, a pin is the plain disc; setWorldNews redraws once it has.
@@ -1357,6 +1401,12 @@ window.tacticalGlobe = (function () {
                 // for anything that reads it straight off the entity, without touching Cesium's
                 // scene graph at all.
                 existing._tacticalGlobeCamera = pin;
+                // Its health or stream can change the pin's shape (cached images; Cesium only
+                // reloads when the image differs).
+                const image = cameraPinImage(pin, entry.selectedCameras.has(pin.id));
+                if (existing.billboard && existing.billboard.image && existing.billboard.image.getValue() !== image) {
+                    existing.billboard.image = image;
+                }
                 return;
             }
             const entity = entry.cameraDataSource.entities.add({
@@ -1366,7 +1416,7 @@ window.tacticalGlobe = (function () {
                     // bigger billboard is a genuinely bigger, easier click target, not just a
                     // cosmetic change - 14px was hard to land precisely, especially in areas with
                     // hundreds of nearby cameras (e.g. Austin, Georgia).
-                    image: pinBillboardImage,
+                    image: cameraPinImage(pin, entry.selectedCameras.has(pin.id)),
                     width: 14,
                     height: 14,
                     color: Cesium.Color.fromCssColorString('#7dffb0'),
@@ -4487,6 +4537,8 @@ window.tacticalGlobe = (function () {
             '<button type="button" class="tg-stream-panel-close" aria-label="Close">X</button>' +
             '</span>' +
             '</div>' +
+            (camera.modeLabel ? '<div class="tg-stream-panel-availability">' + escapeHtml((camera.modeLabel + ' · ' + camera.stateLabel +
+                ' · ' + (camera.sourceName || '')).toUpperCase()) + '</div>' : '') +
             '<div class="tg-stream-panel-body"></div>';
 
         const favoriteButton = panel.querySelector('.tg-stream-panel-favorite');
@@ -4814,7 +4866,7 @@ window.tacticalGlobe = (function () {
         // stays reserved for alert-severity tinting (see applyAlertHighlight) - a pin can be
         // selected and alert-highlighted at the same time without either clobbering the other,
         // exactly as before.
-        entity.billboard.image = selected ? pinBillboardImageSelected : pinBillboardImage;
+        entity.billboard.image = cameraPinImage(entity._tacticalGlobeCamera, selected);
     }
 
     function updateSelectionIndicator(entry) {

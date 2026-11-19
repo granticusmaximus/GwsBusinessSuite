@@ -521,6 +521,10 @@
                         title="Hide cameras found frozen, stale or offline (checked when opened, and every 10 minutes for favorites)" @onclick="ToggleHideUnhealthyAsync">
                     HEALTHY ONLY [@(_hideUnhealthy ? "ON" : "OFF")]
                 </button>
+                <button type="button" data-tg-toggle="live-video" class="tg-toggle @(_liveVideoOnly ? "tg-toggle-on" : "")"
+                        title="Show only cameras with live video (square pins). Still-image cameras are round; hollow pins were found not working." @onclick="ToggleLiveVideoOnlyAsync">
+                    LIVE VIDEO ONLY [@(_liveVideoOnly ? "ON" : "OFF")]
+                </button>
                 <button type="button" data-tg-toggle="select" class="tg-toggle @(_selectModeOn ? "tg-toggle-on" : "")" title="Select multiple cameras for the watch wall (S)" @onclick="ToggleSelectModeAsync">
                     SELECT [@(_selectModeOn ? "ON" : "OFF")]
                 </button>
@@ -1595,6 +1599,7 @@
     private bool _radarOn;
     private bool _alertsOn;
     private bool _hideUnhealthy;
+    private bool _liveVideoOnly;
     private bool _hazardsOn;
     private bool _signsOn;
     private bool _roadWeatherOn;
@@ -1824,8 +1829,12 @@
         }
     }
 
-    private object ToPinPayload(CameraFeed camera) => new
+    private object ToPinPayload(CameraFeed camera)
     {
+        var health = CameraHealthService.GetKnown(camera.Id);
+        var availability = CameraAvailability.For(camera, health);
+        return new
+        {
         id = camera.Id,
         name = camera.Name,
         lat = camera.Latitude,
@@ -1835,11 +1844,35 @@
         sourceName = camera.SourceName,
         sourceAttributionUrl = camera.SourceAttributionUrl,
         isFavorite = _favoriteCameraIds.Contains(camera.Id),
-        health = CameraHealthService.GetKnown(camera.Id)?.Status.ToString() ?? nameof(CameraHealthStatus.Unknown)
-    };
+        health = health?.Status.ToString() ?? nameof(CameraHealthStatus.Unknown),
+        // What the camera offers and whether it works: the pin's shape and the window's line.
+        mode = availability.Mode.ToString(),
+        state = availability.State.ToString(),
+        modeLabel = availability.ModeLabel,
+        stateLabel = availability.StateLabel
+        };
+    }
 
     private bool IsKnownUnhealthy(string cameraId) =>
         CameraHealthService.GetKnown(cameraId)?.Status is CameraHealthStatus.Frozen or CameraHealthStatus.Stale or CameraHealthStatus.Offline;
+
+    // HEALTHY ONLY hides cameras found not working; LIVE VIDEO ONLY keeps video streams.
+    private Func<CameraFeed, bool>? CameraFilter() => (_hideUnhealthy, _liveVideoOnly) switch
+    {
+        (false, false) => null,
+        (true, false) => c => !IsKnownUnhealthy(c.Id),
+        (false, true) => c => c.StreamKind == CameraStreamKind.Hls,
+        _ => c => c.StreamKind == CameraStreamKind.Hls && !IsKnownUnhealthy(c.Id),
+    };
+
+    private async Task ToggleLiveVideoOnlyAsync()
+    {
+        _liveVideoOnly = !_liveVideoOnly;
+        if (_hasSettledOnce)
+        {
+            await OnGlobeViewChanged(_lastBbox.North, _lastBbox.South, _lastBbox.East, _lastBbox.West);
+        }
+    }
 
     private async Task ToggleHideUnhealthyAsync()
     {
@@ -1993,7 +2026,7 @@
                 try
                 {
                     result = await CameraDirectoryService.GetCamerasForViewAsync(bounds,
-                        include: _hideUnhealthy ? c => !IsKnownUnhealthy(c.Id) : null,
+                        include: CameraFilter(),
                         cancellationToken: cameraCancellation.Token);
                 }
                 catch (OperationCanceledException) when (cameraCancellation.IsCancellationRequested)
@@ -2751,7 +2784,7 @@
     private bool _helpOpen;
 
     private int ActiveLayerCount =>
-        new[] { _radarOn, _alertsOn, _incidentsOn, _worldNewsOn, _hazardsOn, _signsOn, _roadWeatherOn, _aircraftOn, _airQualityOn, _shipsOn, _outagesOn, _internetOn, _convergenceOn, _airportsOn, _wmoOn, _auroraOn, _satellitesOn, _cityTrafficOn, _liveFlowOn, _hideUnhealthy, _selectModeOn, _travelOn, _firesOn, _conflictOn, _humanitarianOn }.Count(on => on);
+        new[] { _radarOn, _alertsOn, _incidentsOn, _worldNewsOn, _hazardsOn, _signsOn, _roadWeatherOn, _aircraftOn, _airQualityOn, _shipsOn, _outagesOn, _internetOn, _convergenceOn, _airportsOn, _wmoOn, _auroraOn, _satellitesOn, _cityTrafficOn, _liveFlowOn, _hideUnhealthy, _liveVideoOnly, _selectModeOn, _travelOn, _firesOn, _conflictOn, _humanitarianOn }.Count(on => on);
 
     private async Task SelectPanelTabAsync(string tab, bool keepOpen = false)
     {

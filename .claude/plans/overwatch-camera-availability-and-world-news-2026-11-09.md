@@ -108,6 +108,13 @@ occurred.
 - Already in place before this plan's later phases (found 19-11-26, not rebuilt): server-side
   health checks with a 90 s minimum interval per camera (`CameraHealthService`), the camera panel's
   health badge and source link, and the "hide frozen, stale and offline" camera filter.
+- [x] 19-11-26: phase 3 items 1-3 in part. Camera pins take their shape from `CameraAvailability`
+  (round = still image, rounded square = live video, hollow = not working; `cameraPinImage` in
+  tactical-globe.js, shape not colour since billboard.color is the alert tint), and reshape when a
+  health check changes them. The camera window shows mode · state · source. **LIVE VIDEO ONLY**
+  filters server-side (`CameraFilter`), so the Mac map gets it too, though the native MapKit pins
+  don't take the shapes yet. Guard in `CameraAvailabilityTests`.
 - [ ] Still open: persisted provider policy and capability records (phases 1-2; health is
-  in-memory and restarts empty), capability-specific pin symbols and the extra filters (phase 3
-  items 1, 2, 4), the opt-in submission workflow, and Mac/PWA manual checks.
+  in-memory and restarts empty), native MapKit pin shapes, the provider/region filters and
+  viewport camera list (phase 3 items 2, 4), the opt-in submission workflow, and Mac/PWA manual
+  checks.

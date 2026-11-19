@@ -157,6 +157,15 @@
     flex-shrink: 0;
 }
 
+/* What the camera offers and whether it works (19-11-26), under the camera window's title. */
+.tg-stream-panel-availability {
+    padding: 0.2rem 0.5rem;
+    font-size: max(0.65rem, 12px);
+    letter-spacing: 0.04em;
+    opacity: 0.8;
+    flex-shrink: 0;
+}
+
 .tg-stream-panel-health {
     margin-top: 0.4rem;
     padding: 0.25rem 0.5rem;
