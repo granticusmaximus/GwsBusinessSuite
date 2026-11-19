@@ -339,6 +339,31 @@ public sealed class WorldNewsKitTests : IDisposable
             .Should().BeEmpty("half the reports isn't an outlier");
     }
 
+    // 19-11-26: the hourly re-check splits stories merged before the place guard caught them, but
+    // leaves a story a person has corrected alone.
+    [Fact]
+    public void RecentMergeCheck_ShouldSplitAWronglyMergedStory_ButNotOneAPersonCorrected()
+    {
+        var store = new WorldNewsStore(_dbPath);
+        WorldArticle[] Story(string prefix) =>
+        [
+            Article(prefix + "s1", "Floods in Spain kill 10", "English", Now),
+            Article(prefix + "s2", "Spain floods: toll rises", "English", Now),
+            Article(prefix + "s3", "Spanish towns cut off by floods", "English", Now),
+            Article(prefix + "p1", "Portugal braces for storm", "English", Now),
+        ];
+        SeedEvent(store, "merged", Story("a"), [1f, 0f]);
+        SeedEvent(store, "kept", Story("b"), [0f, 1f]);
+        store.SplitReports("kept", ["bs3"], null, "grant", Now).Should().NotBeNull("a person corrects this story first");
+
+        RecentMergeCheck.Run(store, Now).Should().Be(1);
+
+        store.ArticlesForEvent("merged").Select(a => a.Id).Should().NotContain("ap1");
+        store.GroupingHistory("merged").Should().Contain(h => h.Action == "split" && h.Actor == RecentMergeCheck.Actor);
+        store.ArticlesForEvent("kept").Select(a => a.Id).Should().Contain("bp1", "a person's decision on a story stands");
+        RecentMergeCheck.Run(store, Now).Should().Be(0, "nothing is left to split");
+    }
+
     [Fact]
     public void Store_ShouldKeepASplitApart_ThroughRegroupAndLaterMerges_AndLogEachStep()
     {

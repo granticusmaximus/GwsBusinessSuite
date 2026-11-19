@@ -55,9 +55,12 @@ tags, the most fitting available icon per story, and the same on Overwatch's Wor
 
 ## Deferred
 
-- An hourly re-check of the last 48 hours to split events that were already merged wrongly.
-  The rules only affect new joins.
-- Counting copied wire stories once when sizing pins.
+- [x] 19-11-26: an hourly re-check of the last 48 hours splits events already merged wrongly
+  (`RecentMergeCheck`: the story page's split suggestions applied automatically, up to 25 an hour;
+  stories a person corrected are skipped; off with the place guard). Test in `WorldNewsKitTests`.
+- [x] 19-11-26: copied wire stories count once when sizing pins. `WorldNewsMapSignal.IndependentCount`
+  (`SourceIndependence` across the situation's events, cached with its details) sizes the pin, and
+  the panel adds "N INDEPENDENT" when that's fewer than the outlets.
 - Publication-delay metrics: how late each source is against `PublishedAt`.
 - Ollama refinement of keyword tags (low-confidence tags only).
 - A subtype filter on the Overwatch layer.

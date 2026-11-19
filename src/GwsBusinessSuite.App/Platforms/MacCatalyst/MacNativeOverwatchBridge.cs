@@ -971,31 +971,85 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
             }
         }
 
+        // Flat discs like the web globe's pins (19-11-26), in place of MapKit's balloons: a disc in
+        // the layer's colour with its symbol, centred on the point (a balloon sat above it, which is
+        // why HitTest measures drawn frames). Groups are a green disc with the count.
         public override MKAnnotationView GetViewForAnnotation(MKMapView mapView, IMKAnnotation annotation)
         {
             if (IsCluster(annotation))
             {
                 LabelCluster(annotation);
-                var clusterView = mapView.DequeueReusableAnnotation("gws-cluster") as MKMarkerAnnotationView
-                    ?? new MKMarkerAnnotationView(annotation, "gws-cluster");
+                var clusterView = mapView.DequeueReusableAnnotation("gws-cluster-disc") ?? new MKAnnotationView(annotation, "gws-cluster-disc");
                 clusterView.Annotation = annotation;
                 clusterView.CanShowCallout = false;
-                clusterView.MarkerTintColor = Tone(NativeShapes.MarkerTone.Green);
-                clusterView.GlyphImage = null;
-                clusterView.GlyphTintColor = Hex(NativeShapes.GlyphHex);
-                clusterView.GlyphText = ClusterCount(annotation).ToString(CultureInfo.InvariantCulture);
+                clusterView.Image = CountDisc((int)ClusterCount(annotation));
+                clusterView.CollisionMode = MKAnnotationViewCollisionMode.Circle;
                 return clusterView;
             }
-            if (annotation is not NativeAnnotation native) return new MKMarkerAnnotationView(annotation, null);
-            var view = mapView.DequeueReusableAnnotation("gws-native") as MKMarkerAnnotationView ?? new MKMarkerAnnotationView(annotation, "gws-native");
+            if (annotation is not NativeAnnotation native) return new MKAnnotationView(annotation, null) { Image = Disc(new NativeShapes.MarkerStyle("mappin", NativeShapes.MarkerTone.Gray)) };
+            var view = mapView.DequeueReusableAnnotation("gws-disc") ?? new MKAnnotationView(annotation, "gws-disc");
             view.Annotation = native; view.CanShowCallout = false; view.ClusteringIdentifier = native.Operation;
             var style = NativeShapes.Marker(native.Operation, native.Payload);
             view.DisplayPriority = style.Prominent ? MKFeatureDisplayPriority.DefaultHigh : MKFeatureDisplayPriority.DefaultLow;
-            view.MarkerTintColor = MarkerColor(style.Tone);
-            view.GlyphTintColor = NativeShapes.DarkGlyph(style.Tone) ? Hex(NativeShapes.GlyphHex) : UIColor.White;
-            view.GlyphText = null;
-            view.GlyphImage = Symbol(style.Symbol);
+            view.CollisionMode = MKAnnotationViewCollisionMode.Circle;
+            view.Image = Disc(style);
             return view;
+        }
+
+        private static readonly Dictionary<string, UIImage> Discs = new(StringComparer.Ordinal);
+
+        // The disc for a style, drawn once and kept: the colour fill, a near-black rim like the
+        // web's pin outline, and the symbol in the glyph colour.
+        private static UIImage Disc(NativeShapes.MarkerStyle style)
+        {
+            var key = $"{style.Symbol}|{style.Tone}|{style.Prominent}";
+            if (Discs.TryGetValue(key, out var cached)) return cached;
+            var size = style.Prominent ? 30.0 : 24.0;
+            var glyph = NativeShapes.DarkGlyph(style.Tone) ? Hex(NativeShapes.GlyphHex) : UIColor.White;
+            var image = new UIGraphicsImageRenderer(new CoreGraphics.CGSize(size, size)).CreateImage(_ =>
+            {
+                var ring = UIBezierPath.FromOval(new CoreGraphics.CGRect(1, 1, size - 2, size - 2));
+                Tone(style.Tone).SetFill();
+                ring.Fill();
+                ring.LineWidth = 1.5f;
+                Hex(NativeShapes.GlyphHex).SetStroke();
+                ring.Stroke();
+                var configured = Symbol(style.Symbol).ApplyConfiguration(UIImageSymbolConfiguration.Create((nfloat)(size * 0.42), UIImageSymbolWeight.Semibold));
+                var symbol = (configured ?? Symbol(style.Symbol)).ApplyTintColor(glyph, UIImageRenderingMode.AlwaysOriginal);
+                var w = symbol.Size.Width;
+                var h = symbol.Size.Height;
+                symbol.Draw(new CoreGraphics.CGRect((size - w) / 2, (size - h) / 2, w, h));
+            });
+            Discs[key] = image;
+            return image;
+        }
+
+        // A group: a green disc, wider for a bigger count, with the number in the glyph colour.
+        private static UIImage CountDisc(int count)
+        {
+            var text = count.ToString(CultureInfo.InvariantCulture);
+            var key = "count|" + text;
+            if (Discs.TryGetValue(key, out var cached)) return cached;
+            var size = text.Length switch { <= 1 => 28.0, 2 => 32.0, 3 => 36.0, _ => 42.0 };
+            var attributes = new UIStringAttributes
+            {
+                Font = UIFont.BoldSystemFontOfSize((nfloat)(size * 0.4)),
+                ForegroundColor = Hex(NativeShapes.GlyphHex),
+            };
+            var label = new NSString(text);
+            var image = new UIGraphicsImageRenderer(new CoreGraphics.CGSize(size, size)).CreateImage(_ =>
+            {
+                var ring = UIBezierPath.FromOval(new CoreGraphics.CGRect(1, 1, size - 2, size - 2));
+                Tone(NativeShapes.MarkerTone.Green).SetFill();
+                ring.Fill();
+                ring.LineWidth = 2f;
+                Hex(NativeShapes.GlyphHex).SetStroke();
+                ring.Stroke();
+                var measured = label.GetSizeUsingAttributes(attributes);
+                label.DrawString(new CoreGraphics.CGRect((size - measured.Width) / 2, (size - measured.Height) / 2, measured.Width, measured.Height), attributes);
+            });
+            Discs[key] = image;
+            return image;
         }
 
         private static UIImage Symbol(string name)
@@ -1006,8 +1060,6 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
             Symbols[name] = image;
             return image;
         }
-
-        private static UIColor MarkerColor(NativeShapes.MarkerTone tone) => Tone(tone);
 
         public override MKOverlayRenderer OverlayRenderer(MKMapView mapView, IMKOverlay overlay) => overlay switch
         {

@@ -2889,7 +2889,8 @@ window.tacticalGlobe = (function () {
         (signals || []).forEach(function (signal) {
             // Bigger for wider coverage (3 outlets ~12px, 50+ ~30px); faded once a story goes quiet.
             // An icon pin is at least 18px so its glyph stays readable.
-            const outletSize = Math.min(30, 8 + Math.log2(Math.max(2, Number(signal.outletCount) || 2)) * 4);
+            // Sized by independent sources (wire copies count once, 19-11-26), else outlets.
+            const outletSize = Math.min(30, 8 + Math.log2(Math.max(2, Number(signal.independentCount) || Number(signal.outletCount) || 2)) * 4);
             const size = iconsReady && signal.icon ? Math.max(18, outletSize) : outletSize;
             const color = Cesium.Color.fromCssColorString('#c77dff').withAlpha(signal.active === false ? 0.45 : 1);
             const billboard = {
@@ -2972,8 +2973,10 @@ window.tacticalGlobe = (function () {
             (signal.subtype && signal.tagLabel ? signal.tagLabel.toUpperCase() + ' · ' : '') +
             (signal.thinCoverage ? 'LOCAL REPORTING ONLY, NOT YET CONFIRMED ELSEWHERE · ' : '') +
             (signal.active === false ? 'QUIET · ' : '')) + escapeHtml(signal.place || signal.country) + ' · ' +
-            escapeHtml(String(signal.eventCount)) + ' EVENTS · ' + escapeHtml(String(signal.outletCount)) +
-            ' OUTLETS · UPDATED ' + escapeHtml(signal.lastSeen) + '</div>' +
+            escapeHtml(String(signal.eventCount)) + ' EVENTS · ' + escapeHtml(String(signal.outletCount)) + ' OUTLETS' +
+            (signal.independentCount > 0 && signal.independentCount < signal.outletCount
+                ? ' · ' + escapeHtml(String(signal.independentCount)) + ' INDEPENDENT' : '') +
+            ' · UPDATED ' + escapeHtml(signal.lastSeen) + '</div>' +
             (sources ? '<ul class="tg-world-news-sources">' + sources + '</ul>' : '') +
             '<div class="tg-world-news-actions">' +
             // The latest event's story page: the claim, the outlets, what each leaves out and what

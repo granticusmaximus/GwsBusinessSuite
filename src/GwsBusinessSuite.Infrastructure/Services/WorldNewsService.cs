@@ -282,6 +282,9 @@ public sealed partial class WorldNewsService : IDisposable
             // Labels into the tamper-evident ledger, at most hourly (World News trust plan A7/A8).
             try { SnapshotLabels(DateTimeOffset.UtcNow); }
             catch (Exception ex) when (ex is Microsoft.Data.Sqlite.SqliteException or InvalidOperationException) { _logger.LogWarning(ex, "World News: label snapshot failed"); }
+            // Stories merged wrongly before the place guard caught them are split, hourly (RecentMergeCheck).
+            try { RecheckRecentMerges(DateTimeOffset.UtcNow); }
+            catch (Exception ex) when (ex is Microsoft.Data.Sqlite.SqliteException or InvalidOperationException) { _logger.LogWarning(ex, "World News: merge re-check failed"); }
             LastRefreshed = DateTimeOffset.UtcNow;
             LastReadFailed = false;
             Store.SetLastFetched(LastReadKey, LastRefreshed.Value);
@@ -847,6 +850,18 @@ public sealed partial class WorldNewsService : IDisposable
             }
         }
         return (found, found.Count == 0 ? $"No working RSS feed or news sitemap found on {page.Host}." : null);
+    }
+
+    private DateTimeOffset _lastMergeCheck = DateTimeOffset.MinValue;
+
+    // Off with the place guard (WorldNews:Grouping:PlaceGuard=false), since it applies the same rule.
+    public int RecheckRecentMerges(DateTimeOffset now)
+    {
+        if (_options.Grouping is not { PlaceGuard: true } || now - _lastMergeCheck < RecentMergeCheck.Every) return 0;
+        _lastMergeCheck = now;
+        var splits = RecentMergeCheck.Run(Store, now);
+        if (splits > 0) _logger.LogInformation("World News: the hourly re-check split {Count} wrongly merged stories", splits);
+        return splits;
     }
 
     // A7/A8: once an hour, the current label of the last day's biggest stories goes into the

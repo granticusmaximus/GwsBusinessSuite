@@ -100,7 +100,8 @@ and zoom lag. Causes found and fixed:
 - [x] Colours: `NativeShapes.ToneHex` is the web palette; the bridge's pins, clusters, areas and
   lines use it (no `UIColor.System*` left). `DarkGlyph` puts the web's near-black glyph on the
   bright tones. Guarded in `NativeShapesTests.MacMapPalette_ShouldMatchTheWebGlobe`.
-- [ ] Not done: the web's flat pin discs in place of MapKit's balloon markers. Replacing the
-  annotation views would change the hit-testing and reselect behaviour the native map harness
-  covers, so it wants its own pass with an on-screen check.
+- [x] 19-11-26: flat pin discs like the web's in place of MapKit's balloons. `Disc(style)` (colour
+  fill, near-black rim, SF Symbol in the glyph colour, cached per style) and `CountDisc(count)` for
+  groups, on plain `MKAnnotationView`s with circular collision. HitTest already measures drawn
+  frames, and a disc is centred on its point, so clicks land where they look. Guards updated.
 - [ ] Grant: look at it on screen after `open gws`.

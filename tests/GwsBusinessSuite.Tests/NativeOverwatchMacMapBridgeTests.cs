@@ -35,7 +35,7 @@ public sealed class NativeOverwatchMacMapBridgeTests
         bootstrap.Should().NotContain("shaderSource");
         bootstrap.Should().NotContain("gwsRendererDiagnostics");
         bridge.Should().Contain("MKMapView");
-        bridge.Should().Contain("MKMarkerAnnotationView");
+        bridge.Should().Contain("new MKAnnotationView(annotation, \"gws-disc\")");
         bridge.Should().Contain("MKPolyline");
         bridge.Should().Contain("MKPolygon");
         bridge.Should().Contain("ClusteringIdentifier");
@@ -112,8 +112,10 @@ public sealed class NativeOverwatchMacMapBridgeTests
         bridge.Should().NotContain("_map.AddAnnotation(annotation)");
         bridge.Should().NotContain("_map.AddOverlay(overlay)");
         bridge.Should().Contain("style.Prominent ? MKFeatureDisplayPriority.DefaultHigh : MKFeatureDisplayPriority.DefaultLow");
-        bridge.Should().Contain("view.GlyphImage = Symbol(style.Symbol)");
-        bridge.Should().Contain("view.GlyphText = null");
+        // 19-11-26: flat discs like the web's pins, centred on the point, in place of MapKit's balloons.
+        bridge.Should().Contain("view.Image = Disc(style)")
+            .And.Contain("clusterView.Image = CountDisc(")
+            .And.NotContain("MKMarkerAnnotationView");
     }
 
     [Fact]
@@ -153,7 +155,7 @@ public sealed class NativeOverwatchMacMapBridgeTests
             .And.Contain("NativeOverwatchOperations.Selectable.Contains(pin.Operation)");
         bridge.Should().Contain("_map.ShowAnnotations(members, true)")
             .And.Contain("annotation is MKClusterAnnotation cluster")
-            .And.Contain("ClusterCount(annotation).ToString(CultureInfo.InvariantCulture)");
+            .And.Contain("CountDisc((int)ClusterCount(annotation))");
         // MapKit can hand a cluster over as a plain IMKAnnotation wrapper; a bare type check missed
         // it, so clusters drew red ("7", "+6 more") and ignored clicks (12-11-26).
         bridge.Should().Contain("native.IsKindOfClass(ClusterClass)")

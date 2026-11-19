@@ -33,7 +33,10 @@ public sealed record WorldNewsMapSignal(
     // Subtype, icon and how sure the tag is (SituationSubtypes, 18-11-26).
     SituationTag? Tag = null,
     // On the map by the thin-coverage allowance: local reporting only, not yet confirmed elsewhere.
-    bool ThinCoverage = false)
+    bool ThinCoverage = false,
+    // Independent sources across the situation (SourceIndependence: wire copies and same-owner
+    // outlets count once, 19-11-26). Pins are sized by this, not by outlets. 0 = not worked out.
+    int IndependentCount = 0)
 {
     public string Country => Location.Country;
     public double Latitude => Location.Latitude;
@@ -294,7 +297,8 @@ public sealed class WorldNewsMapService(WorldNewsStore store, WorldNewsMapCache?
     private WorldNewsLocation? NamedCached(SituationOverview situation) =>
         Cached($"named:{situation.Id}:{situation.Title}|{situation.Latest}", () => Named(situation));
 
-    private sealed record Details(string? Summary, IReadOnlyList<WorldNewsMapSource> Sources, WorldNewsLocation Location, string? EventId = null);
+    private sealed record Details(string? Summary, IReadOnlyList<WorldNewsMapSource> Sources, WorldNewsLocation Location, string? EventId = null,
+        int Independent = 0);
 
     private WorldNewsMapSignal Project(SituationOverview situation, WorldNewsLocation location,
         IReadOnlyDictionary<string, (int Outlets, int OutletsBefore)> growth)
@@ -314,12 +318,15 @@ public sealed class WorldNewsMapService(WorldNewsStore store, WorldNewsMapCache?
             situation.LastSeen >= DateTimeOffset.UtcNow - SituationLinker.QuietAfter,
             SituationSurge.IsSurging(outlets, before) ? SituationSurge.Message(outlets, before) : null,
             kind == SituationKinds.Cyber ? CyberStatus.Of([situation.Title, situation.Latest, summary, .. sources.Select(source => source.Title)]) : null,
-            details.EventId, tag, ThinCoverage: !QualifiesForMap(situation));
+            details.EventId, tag, ThinCoverage: !QualifiesForMap(situation), IndependentCount: details.Independent);
     }
 
     private Details LoadDetails(SituationOverview situation, WorldNewsLocation location)
     {
-        var latestEvent = store.EventsForSituation(situation.Id).OrderByDescending(e => e.LastSeen).FirstOrDefault();
+        var events = store.EventsForSituation(situation.Id);
+        var latestEvent = events.OrderByDescending(e => e.LastSeen).FirstOrDefault();
+        // 26 outlets running one Reuters story are one source: the pin is sized by independent ones.
+        var independent = SourceIndependence.Assess(events.SelectMany(e => store.ArticlesForEvent(e.Id)).ToList()).Independent;
         var summary = latestEvent is null ? null : store.LatestSummary(latestEvent.Id)?.Text;
         var sources = latestEvent is null ? [] : store.ArticlesForEvent(latestEvent.Id)
             .DistinctBy(a => a.Outlet, StringComparer.OrdinalIgnoreCase)
@@ -334,7 +341,7 @@ public sealed class WorldNewsMapService(WorldNewsStore store, WorldNewsMapCache?
         if (location.Precision == WorldNewsPrecision.Country && summary is not null
             && Locate(situation.Title, situation.Latest, summary) is { City: not null } sharper && sharper.CountryCode == location.CountryCode)
             location = sharper;
-        return new Details(summary, mappedSources, location, latestEvent?.Id);
+        return new Details(summary, mappedSources, location, latestEvent?.Id, independent);
     }
 
     public static WorldNewsLocation? Locate(string title, string latest, string? detail = null) =>

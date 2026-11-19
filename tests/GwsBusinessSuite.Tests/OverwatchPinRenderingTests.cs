@@ -66,4 +66,16 @@ public sealed class OverwatchPinRenderingTests
             .And.Contain("drill.map(pickIdentifier).find(isActionable)",
                 "a decorative primitive on top of a pin must not prevent the actionable object from opening");
     }
+
+    // 19-11-26: 26 outlets running one wire story are one source, so pins are sized by independent
+    // sources (SourceIndependence) and the panel says how many there are.
+    [Fact]
+    public void WorldNewsPins_ShouldBeSizedByIndependentSources()
+    {
+        var js = File.ReadAllText(Path.Combine(RepoRoot, "src/GwsBusinessSuite.Web/wwwroot/js/tactical-globe.js"));
+        var map = File.ReadAllText(Path.Combine(RepoRoot, "src/GwsBusinessSuite.Infrastructure/Services/WorldNewsMapService.cs"));
+        js.Should().Contain("Number(signal.independentCount) || Number(signal.outletCount)")
+            .And.Contain("' INDEPENDENT'");
+        map.Should().Contain("SourceIndependence.Assess(events.SelectMany(e => store.ArticlesForEvent(e.Id)).ToList()).Independent");
+    }
 }
