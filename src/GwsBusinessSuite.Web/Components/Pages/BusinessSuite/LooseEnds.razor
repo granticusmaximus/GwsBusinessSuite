@@ -1,0 +1,82 @@
+@page "/admin/loose-ends"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = "AdminOnly")]
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.Extensions.Options
+@using GwsBusinessSuite.Application.Operations
+@using GwsBusinessSuite.Infrastructure.Services
+@using GwsBusinessSuite.Web.Services
+@inject LooseEndsService Service
+@inject IOptions<DatabaseBackupOptions> BackupOptions
+
+@* Loose ends (19-11-26): what slipped, each linked to where it's fixed, plus the last restore drill. *@
+
+<PageTitle>Loose ends</PageTitle>
+
+<PageHeader Title="Loose ends" Icon="bi-list-check" Description="Follow-ups, invoices, tickets and deals that slipped, oldest first.">
+    <Actions>
+        <button type="button" class="btn btn-outline-secondary" disabled="@_busy" @onclick="LoadAsync"><i class="bi bi-arrow-clockwise me-1" aria-hidden="true"></i>Refresh</button>
+    </Actions>
+</PageHeader>
+
+@if (_drill is { } drill)
+{
+    <p class="loose-drill @(drill.Passed ? "is-ok" : "is-bad")" role="status">
+        <i class="bi @(drill.Passed ? "bi-shield-check" : "bi-shield-exclamation") me-1" aria-hidden="true"></i>
+        @(drill.Passed ? "Last restore drill passed" : "Last restore drill FAILED") @drill.At.ToLocalGwsDateTime(): @drill.Summary
+    </p>
+}
+else
+{
+    <p class="loose-drill" role="status"><i class="bi bi-shield me-1" aria-hidden="true"></i>No restore drill yet. One runs with the next backup.</p>
+}
+
+@if (_ends is null)
+{
+    <LoadingIndicator Message="Looking for loose ends…" />
+}
+else if (_ends.Count == 0)
+{
+    <EmptyState Icon="bi-check2-circle" Title="Nothing has slipped" Message="No overdue follow-ups, invoices, unanswered tickets or quiet deals." />
+}
+else
+{
+    @foreach (var group in _ends.GroupBy(e => e.Kind))
+    {
+        <section class="card border-0 shadow-sm mb-3" aria-label="@group.Key">
+            <div class="card-header"><strong>@group.Key</strong> <span class="text-muted">(@group.Count())</span></div>
+            <ul class="list-group list-group-flush">
+                @foreach (var end in group)
+                {
+                    <li class="list-group-item d-flex justify-content-between align-items-start gap-2">
+                        <div>
+                            <div class="fw-semibold">@end.Title</div>
+                            <div class="small text-muted">@end.Detail</div>
+                        </div>
+                        <a class="btn btn-sm btn-outline-secondary" href="@end.Link">Open</a>
+                    </li>
+                }
+            </ul>
+        </section>
+    }
+    <p class="small text-muted">Not covered yet: mail waiting on a reply (mail isn't stored in the app) and domain or certificate expiry (nothing tracks them).</p>
+}
+
+@code {
+    private IReadOnlyList<LooseEnd>? _ends;
+    private RestoreDrillRecord? _drill;
+    private bool _busy;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _busy = true;
+        try
+        {
+            _drill = RestoreDrill.Read(BackupOptions.Value.Path);
+            _ends = await Service.ListAsync();
+        }
+        finally { _busy = false; }
+    }
+}

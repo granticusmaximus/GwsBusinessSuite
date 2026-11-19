@@ -1216,6 +1216,10 @@ public static class DependencyInjection
         services.AddScoped<ICameraFavoritesService, CameraFavoritesService>();
         // Camera sources' terms reviews and the on/off switch the camera directory reads (19-11-26).
         services.AddSingleton<CameraSourceReviewService>();
+        // Loose ends (19-11-26): follow-ups, invoices, tickets and deals that slipped.
+        services.AddScoped<LooseEndsService>();
+        services.AddScoped<CashFlowService>();
+        services.AddScoped<ArticleRefreshService>();
         services.AddSingleton<ICameraSourceSwitch>(sp => sp.GetRequiredService<CameraSourceReviewService>());
         // Threat Intelligence page. OtxApiKey/FocsecApiKey are optional, self-registered keys
         // (same "absent disables just that section" shape as CameraIntelOptions) - RDAP and the

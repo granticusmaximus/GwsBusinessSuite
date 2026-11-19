@@ -11,6 +11,7 @@
 @inject IMissionControlService MissionControlService
 @inject AuthenticationStateProvider AuthenticationStateProvider
 @inject IJSRuntime JS
+@inject GwsBusinessSuite.Infrastructure.Services.LooseEndsService LooseEndsService
 @inject ILogger<Home> Logger
 
 <PageTitle>Dashboard · GWS Business Suite</PageTitle>
@@ -23,11 +24,20 @@
     <Actions>
         @if (IsAdmin)
         {
-            @* sentinel-window.js opens it: a new app window in the Mac app, a popup in a browser. *@
-            <a class="btn btn-outline-secondary" href="/admin/sentinel/window" data-gws-sentinel-window
-               title="Open Sentinel on its own, in a new window">
-                <i class="bi bi-window-plus me-1" aria-hidden="true"></i>Open Sentinel in New Window
-            </a>
+            <div class="dropdown">
+                <button class="btn btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false"
+                        aria-label="More pages and tools">
+                    <i class="bi bi-three-dots me-1" aria-hidden="true"></i>More@(_looseEnds is > 0 ? $" ({_looseEnds})" : "")
+                </button>
+                <ul class="dropdown-menu dropdown-menu-end">
+                    @* Loose ends (19-11-26): what slipped, with its count. *@
+                    <li><a class="dropdown-item" href="/admin/loose-ends" title="Follow-ups, invoices, tickets and deals that slipped"><i class="bi bi-list-check me-2" aria-hidden="true"></i>Loose ends@(_looseEnds is > 0 ? $" ({_looseEnds})" : "")</a></li>
+                    <li><a class="dropdown-item" href="/admin/cash-flow" title="Money expected in over the next 13 weeks"><i class="bi bi-graph-up me-2" aria-hidden="true"></i>Cash-flow forecast</a></li>
+                    <li><a class="dropdown-item" href="/admin/article-refresh" title="Articles losing readers or a year out of date"><i class="bi bi-arrow-repeat me-2" aria-hidden="true"></i>Articles to refresh</a></li>
+                    @* sentinel-window.js opens it: a new app window in the Mac app, a popup in a browser. *@
+                    <li><a class="dropdown-item" href="/admin/sentinel/window" data-gws-sentinel-window title="Open Sentinel on its own, in a new window"><i class="bi bi-window-plus me-2" aria-hidden="true"></i>Open Sentinel in New Window</a></li>
+                </ul>
+            </div>
         }
         <a class="btn btn-primary" href="/admin/article-editor"><i class="bi bi-pencil-square me-1" aria-hidden="true"></i>Manage posts</a>
         @if (IsNativeApp)
@@ -265,6 +275,8 @@
         }
     }
 
+    private int? _looseEnds;
+
     protected override async Task OnInitializedAsync()
     {
         var authenticationState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
@@ -272,6 +284,11 @@
         IsNativeApp = authenticationState.User.HasClaim(claim => claim.Type == "amr" && claim.Value is "device-secret" or "device-key");
 
         var summary = await SummaryService.GetAsync(includeAdminMetrics: IsAdmin);
+        if (IsAdmin)
+        {
+            try { _looseEnds = (await LooseEndsService.ListAsync()).Count; }
+            catch (InvalidOperationException) { _looseEnds = null; }
+        }
         _pendingDrafts = summary.PendingDrafts;
         _pendingComments = summary.PendingComments;
         _dueFollowUps = summary.DueFollowUps;

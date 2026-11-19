@@ -1,0 +1,101 @@
+@page "/admin/cash-flow"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = "AdminOnly")]
+@using Microsoft.AspNetCore.Authorization
+@using GwsBusinessSuite.Application.Operations
+@using GwsBusinessSuite.Infrastructure.Services
+@inject CashFlowService Service
+
+@* Cash-flow forecast (19-11-26): money expected in over the next 13 weeks, with a "what if they
+   pay late" option. Money out isn't modelled; the page says so. *@
+
+<PageTitle>Cash-flow forecast</PageTitle>
+
+<PageHeader Title="Cash-flow forecast" Icon="bi-graph-up" Description="Money expected in over the next 13 weeks, from sent invoices and open deals.">
+    <Actions>
+        <a class="btn btn-outline-secondary" href="admin/billing"><i class="bi bi-receipt me-1" aria-hidden="true"></i>Billing</a>
+    </Actions>
+</PageHeader>
+
+<section class="card border-0 shadow-sm mb-3" aria-label="What if">
+    <div class="card-body d-flex flex-wrap gap-2 align-items-end">
+        <div>
+            <label class="form-label small mb-1" for="cf-client">What if</label>
+            <select id="cf-client" class="form-select form-select-sm" @bind="_client" @bind:after="LoadAsync">
+                <option value="">Everyone</option>
+                @foreach (var (id, name) in _clients.OrderBy(c => c.Value))
+                {
+                    <option value="@id">@name</option>
+                }
+            </select>
+        </div>
+        <div>
+            <label class="form-label small mb-1" for="cf-late">pays</label>
+            <select id="cf-late" class="form-select form-select-sm" @bind="_lateDays" @bind:after="LoadAsync">
+                <option value="0">as usual</option>
+                <option value="15">15 days late</option>
+                <option value="30">30 days late</option>
+                <option value="60">60 days late</option>
+            </select>
+        </div>
+    </div>
+</section>
+
+@if (_result is null)
+{
+    <LoadingIndicator Message="Working out the forecast…" />
+}
+else
+{
+    var most = Math.Max(1m, _result.Weeks.Max(w => w.Total));
+    <p class="text-muted small">
+        Expected in 13 weeks: <strong>@((_result.FromInvoices + _result.FromDeals).ToString("C0"))</strong>
+        (@_result.FromInvoices.ToString("C0") from sent invoices, @_result.FromDeals.ToString("C0") from open deals by stage).
+        @if (_result.OverdueInvoices > 0) { <span>@_result.OverdueInvoices invoice@(_result.OverdueInvoices == 1 ? " is" : "s are") already overdue and counted from this week. </span> }
+        Money going out isn't shown: the app holds no expense or recurring-cost records.
+    </p>
+    <section class="card border-0 shadow-sm mb-3" aria-label="Week by week">
+        <ul class="list-group list-group-flush">
+            @foreach (var week in _result.Weeks)
+            {
+                <li class="list-group-item" @key="week.Start">
+                    <div class="d-flex justify-content-between gap-2">
+                        <span class="cf-week">Week of @week.Start.ToGwsDate()</span>
+                        <strong>@week.Total.ToString("C0")</strong>
+                    </div>
+                    <div class="cf-bar" role="img" aria-label="@($"{week.FromInvoices:C0} from invoices, {week.FromDeals:C0} from deals")">
+                        <span class="cf-bar-invoices" style="width: @Percent(week.FromInvoices, most)%"></span><span class="cf-bar-deals" style="width: @Percent(week.FromDeals, most)%"></span>
+                    </div>
+                    @if (week.Total == 0 && week.Start > DateTimeOffset.UtcNow.AddDays(-7))
+                    {
+                        <div class="small cf-thin">Nothing expected this week.</div>
+                    }
+                    @foreach (var item in week.Items)
+                    {
+                        <div class="small text-muted">@item.Label · @item.Amount.ToString("C0") · @item.Basis</div>
+                    }
+                </li>
+            }
+        </ul>
+    </section>
+    <p class="small text-muted"><span class="cf-key cf-bar-invoices"></span> sent invoices <span class="cf-key cf-bar-deals ms-2"></span> open deals (weighted by stage)</p>
+}
+
+@code {
+    private CashFlowResult? _result;
+    private IReadOnlyDictionary<Guid, string> _clients = new Dictionary<Guid, string>();
+    private string _client = "";
+    private int _lateDays;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        var (result, clients) = await Service.ForecastAsync(Guid.TryParse(_client, out var id) ? id : null, _lateDays);
+        _result = result;
+        _clients = clients;
+    }
+
+    private static string Percent(decimal value, decimal most) =>
+        (value / most * 100m).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);
+}

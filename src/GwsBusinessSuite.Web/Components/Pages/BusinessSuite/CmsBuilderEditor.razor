@@ -144,13 +144,30 @@
                 <i class="bi bi-box-arrow-up-right me-1"></i>Preview
             </a>
         }
-        <button class="btn btn-primary" @onclick="() => SaveAsync(publish: true)"
+        <button class="btn btn-primary" @onclick="PublishClickedAsync"
                 disabled="@(_isBusy || _page is null || _layoutParseFailed || !CanPublish)">
             <i class="bi bi-cloud-upload me-1"></i>@PublishButtonText
         </button>
     </div>
 </div>
 
+@* Checks before a page goes live (19-11-26): what Publish found, with the choice to fix or go ahead. *@
+@if (_publishReview is { Count: > 0 } review)
+{
+    <div class="alert alert-warning mb-3" role="alert" aria-labelledby="publish-review-title">
+        <strong id="publish-review-title"><i class="bi bi-clipboard-check me-1" aria-hidden="true"></i>Before this page goes live</strong>
+        <ul class="mb-2 mt-1">
+            @foreach (var issue in review)
+            {
+                <li><strong>@issue.Check:</strong> @issue.Message</li>
+            }
+        </ul>
+        <div class="d-flex gap-2">
+            <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => _publishReview = null">Go back and fix</button>
+            <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@_isBusy" @onclick="PublishAnywayAsync">Publish anyway</button>
+        </div>
+    </div>
+}
 @if (!string.IsNullOrWhiteSpace(_errorMessage))
 {
     <div class="alert alert-danger d-flex align-items-start gap-2 mb-3">
@@ -3224,6 +3241,31 @@ else
         {
             _isLoading = false;
         }
+    }
+
+    // ── Checks before publishing (19-11-26) ───────────────────────────────
+    // A normal page is reviewed as it will render; a header or footer region has no headings of its own.
+    private IReadOnlyList<GwsBusinessSuite.Application.CmsBuilder.PrePublishIssue>? _publishReview;
+
+    private async Task PublishClickedAsync()
+    {
+        if (_page is null) return;
+        var issues = _page.Region is not null ? []
+            : GwsBusinessSuite.Application.CmsBuilder.PrePublishReview.Review(
+                GwsBusinessSuite.Application.CmsBuilder.CmsBlockHtmlRenderer.Render(_layout), _page.Title, _page.MetaDescription);
+        if (issues.Count > 0)
+        {
+            _publishReview = issues;
+            return;
+        }
+        _publishReview = null;
+        await SaveAsync(publish: true);
+    }
+
+    private async Task PublishAnywayAsync()
+    {
+        _publishReview = null;
+        await SaveAsync(publish: true);
     }
 
     // ── Save ──────────────────────────────────────────────────────────────

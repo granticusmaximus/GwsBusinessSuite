@@ -1,0 +1,8 @@
+/* SentinelGPT's suggestions keep their line breaks ("- " one per line). */
+.refresh-suggestions {
+    white-space: pre-line;
+    padding: 0.5rem 0.75rem;
+    border-left: 3px solid var(--gws-sidebar-accent);
+    background: var(--gws-panel-bg-2);
+    border-radius: var(--gws-radius-xs);
+}

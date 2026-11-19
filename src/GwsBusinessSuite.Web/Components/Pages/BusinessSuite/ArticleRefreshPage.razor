@@ -1,0 +1,88 @@
+@page "/admin/article-refresh"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = "AdminOnly")]
+@implements IDisposable
+@using Microsoft.AspNetCore.Authorization
+@using GwsBusinessSuite.Application.Articles
+@using GwsBusinessSuite.Infrastructure.Services
+@inject ArticleRefreshService Service
+@inject ILogger<ArticleRefreshPage> Logger
+
+@* Articles that need a refresh (19-11-26): falling views or a year untouched, with SentinelGPT's
+   suggested changes on request. Nothing is changed for you; open the article to edit it. *@
+
+<PageTitle>Articles to refresh</PageTitle>
+
+<PageHeader Title="Articles to refresh" Icon="bi-arrow-repeat" Description="Published articles losing readers or a year out of date, with suggested updates.">
+    <Actions>
+        <a class="btn btn-outline-secondary" href="admin/article-editor"><i class="bi bi-pencil-square me-1" aria-hidden="true"></i>Articles</a>
+    </Actions>
+</PageHeader>
+
+@if (_candidates is null)
+{
+    <LoadingIndicator Message="Checking articles…" />
+}
+else if (_candidates.Count == 0)
+{
+    <EmptyState Icon="bi-check2-circle" Title="Nothing needs a refresh" Message="No published article is losing readers fast or over a year untouched." />
+}
+else
+{
+    <section class="card border-0 shadow-sm mb-3" aria-label="Articles to refresh">
+        <ul class="list-group list-group-flush">
+            @foreach (var candidate in _candidates)
+            {
+                <li class="list-group-item" @key="candidate.Id">
+                    <div class="d-flex justify-content-between align-items-start gap-2">
+                        <div>
+                            <div class="fw-semibold">@candidate.Title</div>
+                            <div class="small text-muted">Published @candidate.PublishedAt.ToLocalGwsDate() · @candidate.Reason</div>
+                        </div>
+                        <div class="d-flex gap-2 flex-shrink-0">
+                            <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@(_busyId is not null)" @onclick="() => SuggestAsync(candidate.Id)">
+                                @if (_busyId == candidate.Id) { <InlineProgress CssClass="me-1" /> }Suggest updates
+                            </button>
+                            <a class="btn btn-sm btn-outline-secondary" href="@($"admin/article-editor/{candidate.Id}")">Edit</a>
+                        </div>
+                    </div>
+                    @if (_suggestions.TryGetValue(candidate.Id, out var text))
+                    {
+                        <div class="refresh-suggestions small mt-2">@text</div>
+                        <div class="small text-muted">Suggested by SentinelGPT. Check each one before changing the article.</div>
+                    }
+                </li>
+            }
+        </ul>
+    </section>
+}
+
+@code {
+    private IReadOnlyList<RefreshCandidate>? _candidates;
+    private readonly Dictionary<Guid, string> _suggestions = [];
+    private Guid? _busyId;
+    private readonly CancellationTokenSource _cts = new();
+
+    protected override async Task OnInitializedAsync() => _candidates = await Service.CandidatesAsync(_cts.Token);
+
+    private async Task SuggestAsync(Guid id)
+    {
+        _busyId = id;
+        try
+        {
+            _suggestions[id] = await Service.SuggestAsync(id, _cts.Token) ?? "SentinelGPT didn't suggest anything for this one.";
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !_cts.IsCancellationRequested)
+        {
+            Logger.LogInformation(ex, "Article refresh: no suggestions for {Article}", id);
+            _suggestions[id] = "SentinelGPT couldn't answer just now. Try again in a minute.";
+        }
+        finally { _busyId = null; }
+    }
+
+    public void Dispose()
+    {
+        _cts.Cancel();
+        _cts.Dispose();
+    }
+}

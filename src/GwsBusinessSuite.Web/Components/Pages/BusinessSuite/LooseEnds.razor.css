@@ -1,0 +1,9 @@
+/* The restore drill line: the words say pass or fail; the colour only repeats it. */
+.loose-drill {
+    padding: 0.5rem 0.75rem;
+    border-radius: var(--gws-radius-sm);
+    background: var(--gws-panel-bg-2);
+}
+
+.loose-drill.is-ok { color: var(--gws-status-success-text); }
+.loose-drill.is-bad { color: var(--gws-status-danger-text); font-weight: 600; }

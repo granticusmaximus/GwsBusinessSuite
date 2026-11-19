@@ -428,6 +428,39 @@ public sealed class DatabaseBackupService(
     }
 }
 
+// The last restore drill (19-11-26): a backup restored into a throwaway copy and checked end to end
+// (VerifyBackupAsync). Kept beside the backups as restore-drill.json.
+public sealed record RestoreDrillRecord(DateTimeOffset At, string Archive, bool Passed, string Summary);
+
+public static class RestoreDrill
+{
+    public static readonly TimeSpan Every = TimeSpan.FromDays(7);
+    // Past this, the health check says the drill is overdue.
+    public static readonly TimeSpan OverdueAfter = TimeSpan.FromDays(14);
+    public const string FileName = "restore-drill.json";
+
+    public static bool IsDue(RestoreDrillRecord? last, DateTimeOffset now) => last is null || !last.Passed || now - last.At >= Every;
+
+    public static string Summarize(BackupVerificationResult result) =>
+        $"{result.FileCount:N0} files, {result.SentinelPageCount:N0} Sentinel pages, {result.AuditEventCount:N0} audit events, " +
+        $"{result.ActiveAdministratorCount} admin(s) with MFA, {result.MediaFileCount:N0} media files; migrations replayed.";
+
+    public static RestoreDrillRecord? Read(string backupsPath)
+    {
+        var path = System.IO.Path.Combine(backupsPath, FileName);
+        try { return File.Exists(path) ? JsonSerializer.Deserialize<RestoreDrillRecord>(File.ReadAllText(path)) : null; }
+        catch (Exception ex) when (ex is JsonException or IOException) { return null; }
+    }
+
+    public static void Write(string backupsPath, RestoreDrillRecord record)
+    {
+        Directory.CreateDirectory(backupsPath);
+        var path = System.IO.Path.Combine(backupsPath, FileName);
+        File.WriteAllText(path + ".tmp", JsonSerializer.Serialize(record));
+        File.Move(path + ".tmp", path, overwrite: true);
+    }
+}
+
 public sealed record BackupVerificationResult(string ArchivePath, DateTimeOffset CreatedAtUtc,
     int FileCount, int RecordingFileCount, int ActiveAdministratorCount, int SentinelPageCount, int AuditEventCount,
     int ProtectedSecretsChecked, bool IsValid, string? MigrationRehearsalFrom = null,
@@ -453,8 +486,9 @@ public sealed class DatabaseBackupBackgroundService(
             try
             {
                 using var scope = scopeFactory.CreateScope();
-                await scope.ServiceProvider.GetRequiredService<DatabaseBackupService>()
-                    .CreateBackupAsync(stoppingToken);
+                var backups = scope.ServiceProvider.GetRequiredService<DatabaseBackupService>();
+                var archive = await backups.CreateBackupAsync(stoppingToken);
+                await RunRestoreDrillAsync(backups, archive, stoppingToken);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
@@ -469,6 +503,27 @@ public sealed class DatabaseBackupBackgroundService(
             await Task.Delay(
                 TimeSpan.FromHours(Math.Clamp(_options.IntervalHours, 1, 168)),
                 stoppingToken);
+        }
+    }
+
+    // A backup is only proven once it's been restored (19-11-26): weekly, the backup just made is
+    // restored into a throwaway copy and checked end to end; a failure alerts and is retried with the
+    // next backup.
+    private async Task RunRestoreDrillAsync(DatabaseBackupService backups, string archive, CancellationToken ct)
+    {
+        var now = DateTimeOffset.UtcNow;
+        if (!RestoreDrill.IsDue(RestoreDrill.Read(_options.Path), now)) return;
+        try
+        {
+            var result = await backups.VerifyBackupAsync(archive, ct);
+            RestoreDrill.Write(_options.Path, new RestoreDrillRecord(now, Path.GetFileName(archive), true, RestoreDrill.Summarize(result)));
+            logger.LogInformation("Restore drill passed for {Archive}: {Summary}", archive, RestoreDrill.Summarize(result));
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            RestoreDrill.Write(_options.Path, new RestoreDrillRecord(now, Path.GetFileName(archive), false, ex.Message));
+            logger.LogError(ex, "Restore drill failed for {Archive}", archive);
+            await alerts.NotifyFailureAsync("backup-restore-drill", "The weekly restore drill failed: the latest backup couldn't be restored and checked.", ex, ct);
         }
     }
 }

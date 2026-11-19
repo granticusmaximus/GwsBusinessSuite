@@ -1,0 +1,23 @@
+/* Each week's bar: invoices then weighted deals, scaled to the biggest week. The amounts are in the
+   text beside it and in the bar's label, so the colours only repeat them. */
+.cf-bar {
+    display: flex;
+    height: 0.5rem;
+    margin: 0.35rem 0;
+    border-radius: var(--gws-radius-pill);
+    background: var(--gws-panel-bg-2);
+    overflow: hidden;
+}
+
+.cf-bar-invoices { background: var(--gws-sidebar-accent); }
+.cf-bar-deals { background: color-mix(in srgb, var(--gws-sidebar-accent) 40%, transparent); }
+
+.cf-key {
+    display: inline-block;
+    width: 0.75rem;
+    height: 0.75rem;
+    border-radius: var(--gws-radius-xs);
+    vertical-align: middle;
+}
+
+.cf-thin { color: var(--gws-status-warning-text); }
