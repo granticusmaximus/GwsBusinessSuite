@@ -339,6 +339,48 @@ public sealed class OllamaServiceTests
         asked.Should().Equal("sentinelgpt", "llama3.2", "muse-glimmer:latest");
     }
 
+    // 19-11-26: callers asked for 4096, 8192 and 16384, and Ollama reloads the model whenever the
+    // context changes (18 reloads in 40 minutes on the AI droplet). With ContentStudio:ContextLength
+    // every request asks for the same size.
+    [Fact]
+    public async Task EveryRequest_ShouldAskForThePinnedContext_SoOllamaNeverReloadsTheModel()
+    {
+        var contexts = new List<(string Path, int? NumCtx)>();
+        var handler = new RecordingHandler(request =>
+        {
+            var path = request.RequestUri!.AbsolutePath;
+            if (path == "/api/tags")
+                return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("""{"models":[{"name":"sentinelgpt:latest"}]}""") };
+            using var body = System.Text.Json.JsonDocument.Parse(request.Content!.ReadAsStringAsync().GetAwaiter().GetResult());
+            contexts.Add((path, body.RootElement.TryGetProperty("options", out var o) && o.TryGetProperty("num_ctx", out var c) ? c.GetInt32() : null));
+            var answer = path == "/api/chat"
+                ? """{"message":{"role":"assistant","content":"ok"},"done":true}"""
+                : body.RootElement.TryGetProperty("stream", out var s) && s.GetBoolean()
+                    ? "{\"response\":\"ok\",\"done\":false}\n{\"done\":true}\n"
+                    : """{"response":"ok","done":true}""";
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(answer) };
+        });
+        OllamaService Service(int? pinned) => new(new HttpClient(handler) { BaseAddress = new Uri("http://localhost:11434") }, new OllamaWorkloadScheduler(),
+            new OllamaPerformanceTracker(), new RecordingLogger<OllamaService>(),
+            Microsoft.Extensions.Options.Options.Create(new GwsBusinessSuite.Application.ContentStudio.ContentStudioOptions { Model = "sentinelgpt", ContextLength = pinned }));
+
+        var pinned = Service(8192);
+        await pinned.GenerateAsync("sentinelgpt", "system", "prompt");
+        await pinned.GenerateAsync("sentinelgpt", "system", "prompt", 16_384);
+        await pinned.GenerateAsync("sentinelgpt", "system", "prompt", 4096);
+        await foreach (var _ in pinned.GenerateStreamAsync("sentinelgpt", "system", "prompt")) { }
+        await foreach (var _ in pinned.GenerateStreamAsync("sentinelgpt", "system", "prompt", 200)) { }
+        await pinned.WarmModelAsync("sentinelgpt");
+        await pinned.ChatAsync("sentinelgpt", [new OllamaChatMessage("user", "hi")]);
+
+        contexts.Should().HaveCount(7).And.OnlyContain(c => c.NumCtx == 8192);
+
+        contexts.Clear();
+        await Service(null).GenerateAsync("sentinelgpt", "system", "prompt", 16_384);
+        await Service(null).ChatAsync("sentinelgpt", [new OllamaChatMessage("user", "hi")]);
+        contexts.Select(c => c.NumCtx).Should().Equal([16_384, 16_384], "without the setting each caller's size is sent as before");
+    }
+
     private static OllamaService CreateService(
         HttpMessageHandler handler,
         ILogger<OllamaService> logger,

@@ -40,6 +40,9 @@ services:
       # would override .env.
       # Optional live internet research for SentinelGPT. Keep the actual key in the
       # gitignored .env file as OLLAMA_WEB_API_KEY, never in this Compose file.
+      # One context size for every request to the AI droplet, matching its OLLAMA_CONTEXT_LENGTH and
+      # sentinelgpt's num_ctx (scripts/setup-ai-droplet.sh): a different size reloads the model (19-11-26).
+      ContentStudio__ContextLength: ${OLLAMA_CONTEXT_LENGTH:-8192}
       OllamaWeb__ApiKey: ${OLLAMA_WEB_API_KEY:-}
       # Billed by Ollama: ignored unless this is true (19-11-26, Grant: no charges). SearXNG does the searching.
       OllamaWeb__AllowPaidSearch: ${OLLAMA_WEB_ALLOW_PAID_SEARCH:-false}

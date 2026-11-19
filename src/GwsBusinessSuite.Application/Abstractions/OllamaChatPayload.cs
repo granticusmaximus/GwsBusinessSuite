@@ -8,7 +8,7 @@ namespace GwsBusinessSuite.Application.Abstractions;
 // wherever the model runs.
 public static class OllamaChatPayload
 {
-    public static JsonObject Build(string model, IReadOnlyList<OllamaChatMessage> messages, IReadOnlyList<OllamaToolDefinition>? tools, string keepAlive)
+    public static JsonObject Build(string model, IReadOnlyList<OllamaChatMessage> messages, IReadOnlyList<OllamaToolDefinition>? tools, string keepAlive, int numCtx = 16_384)
     {
         var messagesArray = new JsonArray();
         foreach (var message in messages)
@@ -56,7 +56,7 @@ public static class OllamaChatPayload
             // reasoning models that think anyway (they accept it without erroring) - verified
             // against llama3.2, qwen2.5-coder, and deepseek-r1 there; kept here rather than
             // gated on a per-model capability lookup for the same reason.
-            ["options"] = new JsonObject { ["num_ctx"] = 16_384, ["temperature"] = 0.2 },
+            ["options"] = new JsonObject { ["num_ctx"] = numCtx, ["temperature"] = 0.2 },
             ["think"] = false
         };
         if (tools is { Count: > 0 })

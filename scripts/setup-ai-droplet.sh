@@ -16,6 +16,9 @@
 #   2. Models: only what fits in RAM. llama3.2 (chat, summaries), embeddinggemma (World News
 #      headlines), and sentinelgpt rebuilt from the repo's profile on llama3.2 with an 8K
 #      context. --prune removes anything else (gemma4 is 6.3 GB on an 8 GB box).
+#      The web app sends the same context with every request (ContentStudio__ContextLength in
+#      docker-compose.yml, 8192): a request with a different num_ctx makes Ollama reload the model.
+#      Change all three together.
 #   3. A watchdog on the droplet itself (the web app's watchdog only restarts a local container):
 #      every minute it asks Ollama for its version; three misses in a row, or five minutes of
 #      heavy memory stalls, restart it. At most one restart per 10 minutes, logged as

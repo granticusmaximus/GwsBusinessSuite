@@ -21,6 +21,10 @@ public sealed class OllamaService(
     // Asked once per instance (a request's worth of calls); a tags request is milliseconds against
     // a generation's seconds.
     private Task<IReadOnlyCollection<string>>? _installed;
+
+    // ContentStudio:ContextLength: every request asks for the same context, so Ollama never reloads
+    // the model to change it (19-11-26). Null keeps each caller's own size.
+    private int? PinnedContext => options?.Value.ContextLength is > 0 and var length ? length : null;
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> WarnedModels = new(StringComparer.OrdinalIgnoreCase);
 
     // The model setting (Settings > AI) is shared with the Mac app, whose own Ollama has models the
@@ -66,6 +70,7 @@ public sealed class OllamaService(
     private async Task<string> GenerateCoreAsync(string model, string systemPrompt, string userPrompt, int? numCtx, CancellationToken ct)
     {
         model = await ResolveModelAsync(model, ct);
+        numCtx = PinnedContext ?? numCtx;
         object payload = numCtx is { } contextSize
             ? new
             {
@@ -112,12 +117,10 @@ public sealed class OllamaService(
 
     public async Task WarmModelAsync(string model, CancellationToken ct = default)
     {
-        var payload = new
-        {
-            model,
-            stream = false,
-            keep_alive = modelKeepAlive
-        };
+        // Loaded at the pinned context, so the first real request doesn't reload it.
+        object payload = PinnedContext is { } warmContext
+            ? new { model, stream = false, keep_alive = modelKeepAlive, options = new { num_ctx = warmContext } }
+            : new { model, stream = false, keep_alive = modelKeepAlive };
 
         var queueTimer = Stopwatch.StartNew();
         await using var workloadLease = await workloadScheduler.AcquireAsync(ct);
@@ -165,7 +168,10 @@ public sealed class OllamaService(
         [EnumeratorCancellation] CancellationToken ct)
     {
         model = await ResolveModelAsync(model, ct);
-        object payload = maxOutputTokens is { } outputLimit
+        var streamOptions = new Dictionary<string, object>();
+        if (maxOutputTokens is { } outputLimit) streamOptions["num_predict"] = outputLimit;
+        if (PinnedContext is { } streamContext) streamOptions["num_ctx"] = streamContext;
+        object payload = streamOptions.Count > 0
             ? new
             {
                 model,
@@ -173,7 +179,7 @@ public sealed class OllamaService(
                 system = systemPrompt,
                 prompt = userPrompt,
                 keep_alive = modelKeepAlive,
-                options = new { num_predict = outputLimit }
+                options = streamOptions
             }
             : new
             {
@@ -306,7 +312,7 @@ public sealed class OllamaService(
         CancellationToken ct = default)
     {
         model = await ResolveModelAsync(model, ct);
-        var payload = OllamaChatPayload.Build(model, messages, tools, modelKeepAlive);
+        var payload = OllamaChatPayload.Build(model, messages, tools, modelKeepAlive, PinnedContext ?? 16_384);
 
         try
         {

@@ -34,4 +34,15 @@ Grant: "build a way to work the Ollama droplet to do better and be available", a
       llama3.2-based (2.0 GB). Result: 4.2 tokens/s on live requests (was 0.10), `memory.events
       high` +0 over 20 s (was 1.47 M), memory pressure ~0%, swap 11 MB (was 4,095), 3.4 GB free;
       production `/health/ready` 200 again.
-- [ ] Next deploy (Grant's push) goes through; watch `journalctl -t gws-ollama-watchdog` for restarts.
+- [x] 9bd76edf deployed (14:38). Reads no longer fail, discovery runs on SearXNG (no 402s), but no
+      read finished in 17 min: every background generation was cancelled at 34 s-2 min (Ollama
+      logs 500) and the llama3.2 runner started 18 times in 40 min. `/api/ps` sampling showed
+      sentinelgpt reloading from 16384 to 8192 context: callers send num_ctx 4096 (localization,
+      SEO), 8192 (SentinelAI, summarizer), 16384 (World News English and analysis, chat payloads),
+      and Ollama reloads the model on every change. Prompt reading was 9-20 tokens/s as a result.
+- [x] `ContentStudio:ContextLength` (compose: `OLLAMA_CONTEXT_LENGTH`, default 8192) pins num_ctx on
+      every OllamaService path (generate, stream, warm, chat via `OllamaChatPayload.Build(numCtx)`);
+      matches the droplet's OLLAMA_CONTEXT_LENGTH and sentinelgpt num_ctx. Largest prompts seen
+      ~2,400 tokens. Test: `EveryRequest_ShouldAskForThePinnedContext_SoOllamaNeverReloadsTheModel`.
+- [ ] After deploy: runner starts stop (`journalctl -u ollama | grep -c "starting llama-server"`),
+      World News reads finish, Today shows today's stories, future-dated reports gone.
