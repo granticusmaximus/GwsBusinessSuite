@@ -218,7 +218,7 @@ public static partial class OutletFeeds
             var seenAt = published is { } at && at < now ? at : now;
             var snippet = ArticleNormalizer.CleanSnippet(Child(item, "description", "summary", "content")?.Value, title);
             articles.Add(new WorldArticle(ArticleNormalizer.IdFor(link), link, title, outlet.Name, outlet.Language, outlet.Country,
-                seenAt, outlet.Feed, Snippet: snippet));
+                seenAt, outlet.Feed, Snippet: snippet) { FetchedAt = published is { } dated && dated < now ? now : null });
         }
         return articles;
     }
@@ -237,7 +237,7 @@ public static partial class OutletFeeds
             var published = ParseDate(Child(news, "publication_date")?.Value);
             if (title.Length == 0 || published is null || published < now - SitemapWindow) continue;
             articles.Add(new WorldArticle(ArticleNormalizer.IdFor(uri.AbsoluteUri), uri.AbsoluteUri, title, outlet.Name, outlet.Language, outlet.Country,
-                published.Value < now ? published.Value : now, outlet.Feed));
+                published.Value < now ? published.Value : now, outlet.Feed) { FetchedAt = published.Value < now ? now : null });
         }
         return articles;
     }

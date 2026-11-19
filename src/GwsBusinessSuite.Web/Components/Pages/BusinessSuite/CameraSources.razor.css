@@ -1,0 +1,4 @@
+/* A switched-off source is dimmed; its button says so in words. */
+.camera-sources-table tr.is-off td {
+    opacity: 0.6;
+}

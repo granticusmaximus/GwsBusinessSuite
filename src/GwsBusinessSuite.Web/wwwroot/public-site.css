@@ -20,9 +20,11 @@
   --neu-highlight: rgba(255, 255, 255, .055);
   --neu-shadow: rgba(0, 0, 0, .52);
   --neu-inset: rgba(0, 0, 0, .38);
-  --neu-raised-shadow: 8px 8px 18px var(--neu-shadow), -6px -6px 14px var(--neu-highlight);
-  --neu-raised-shadow-sm: 4px 4px 10px var(--neu-shadow), -3px -3px 8px var(--neu-highlight);
-  --neu-inset-shadow: inset 3px 3px 7px var(--neu-inset), inset -2px -2px 5px var(--neu-highlight);
+  /* Neumorphism married to Apple's flat style (19-11-26), as in app.css: one soft drop shadow and a
+     lit top edge on raised surfaces, a gentle sink for inputs. */
+  --neu-raised-shadow: inset 0 1px 0 var(--neu-highlight), 0 10px 26px -10px var(--neu-shadow), 0 2px 6px -2px var(--neu-inset);
+  --neu-raised-shadow-sm: inset 0 1px 0 var(--neu-highlight), 0 3px 10px -4px var(--neu-shadow);
+  --neu-inset-shadow: inset 0 1px 3px var(--neu-inset), inset 0 -1px 0 var(--neu-highlight);
 
   --font-serif: 'Playfair Display', Georgia, 'Times New Roman', serif;
   --font-sans:  'Inter', system-ui, -apple-system, sans-serif;

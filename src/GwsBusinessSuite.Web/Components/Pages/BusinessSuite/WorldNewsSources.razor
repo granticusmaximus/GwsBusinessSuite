@@ -115,6 +115,31 @@ else
         </div>
     </section>
 
+    @* How late each source is seen after it publishes (19-11-26). *@
+    @if (_delays is { Count: > 0 })
+    {
+        <section class="card border-0 shadow-sm mb-3" aria-labelledby="sources-delays">
+            <div class="card-header"><strong id="sources-delays">How late each source is</strong>
+                <span class="text-muted small ms-2">Last 7 days, from its own feed's publication time to when World News read it. Reads run every few minutes, so a few minutes is on time.</span></div>
+            <div class="table-responsive">
+                <table class="table align-middle mb-0 sources-table">
+                    <thead><tr><th scope="col">Source</th><th scope="col">Dated reports</th><th scope="col">Typical</th><th scope="col">Slowest 1 in 10</th></tr></thead>
+                    <tbody>
+                        @foreach (var delay in _delays.Take(40))
+                        {
+                            <tr @key="delay.Outlet">
+                                <td>@delay.Outlet</td>
+                                <td>@delay.Reports.ToString("N0")</td>
+                                <td>@Late(delay.Median)</td>
+                                <td>@Late(delay.Slowest90)</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    }
+
     <section class="card border-0 shadow-sm mb-3" aria-labelledby="sources-feeds">
         <div class="card-header d-flex flex-wrap gap-2 justify-content-between align-items-center">
             <strong id="sources-feeds">Feeds</strong>
@@ -195,6 +220,14 @@ else
     private int Failing => _dashboard?.Feeds.Count(f => f.State is "failing" or "refused") ?? 0;
     private bool CanAdd => !string.IsNullOrWhiteSpace(_name) && !string.IsNullOrWhiteSpace(_country) && !string.IsNullOrWhiteSpace(_language);
 
+    private IReadOnlyList<GwsBusinessSuite.WorldNewsKit.WorldNewsStore.PublicationDelay>? _delays;
+
+    private static string Late(TimeSpan gap) =>
+        gap.TotalMinutes < 1 ? "under a minute"
+        : gap.TotalHours < 1 ? $"{(int)gap.TotalMinutes} min"
+        : gap.TotalDays < 1 ? $"{gap.TotalHours:0.#} h"
+        : $"{gap.TotalDays:0.#} days";
+
     protected override async Task OnInitializedAsync() => await LoadAsync();
 
     private Task Load() => LoadAsync();
@@ -209,6 +242,7 @@ else
             await Task.WhenAll(dashboard, crawlStatus);
             _dashboard = await dashboard;
             _crawlStatus = await crawlStatus;
+            _delays = await Task.Run(() => News.Store.PublicationDelays(DateTimeOffset.UtcNow.AddDays(-7)));
         }
         finally { _busy = false; }
     }

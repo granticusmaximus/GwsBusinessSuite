@@ -1214,6 +1214,9 @@ public static class DependencyInjection
         // BaseAddress/timeout), so no AddHttpClient<T> registration is needed here.
         services.AddScoped<IBusinessInfoService, OverpassBusinessInfoService>();
         services.AddScoped<ICameraFavoritesService, CameraFavoritesService>();
+        // Camera sources' terms reviews and the on/off switch the camera directory reads (19-11-26).
+        services.AddSingleton<CameraSourceReviewService>();
+        services.AddSingleton<ICameraSourceSwitch>(sp => sp.GetRequiredService<CameraSourceReviewService>());
         // Threat Intelligence page. OtxApiKey/FocsecApiKey are optional, self-registered keys
         // (same "absent disables just that section" shape as CameraIntelOptions) - RDAP and the
         // defend.network feed need no key at all and already work on a fresh deployment.

@@ -270,6 +270,7 @@ public sealed partial class WorldNewsService : IDisposable
                 };
             }
             await ClassifySituationsAsync(ct);
+            await RefineSubtypesAsync(ct);
             var alerts = Store.CreateWatchAlerts(DateTimeOffset.UtcNow, MayAlert).Concat(CreateSurgeAlerts(DateTimeOffset.UtcNow))
                 .Concat(Store.CreateKeywordAlerts(DateTimeOffset.UtcNow, MayAlert))
                 // N5: new stories on people's beats (the last day's), gated like every other alert.
@@ -460,6 +461,41 @@ public sealed partial class WorldNewsService : IDisposable
         var text = Store.TopSituations(since, int.MaxValue).ToDictionary(s => s.Id, s => $"{s.Title} {s.Latest}");
         Store.SaveKinds(active.Select(s => (s.Id, SituationKinds.FromWords(text.GetValueOrDefault(s.Id) ?? string.Empty))).ToList(),
             onlyMissing: true);
+    }
+
+    // SentinelGPT tags a few of the biggest stories the keywords couldn't (SubtypeRefinement), each
+    // once, at background priority on the Mac first. No model answering just leaves them for later.
+    private async Task RefineSubtypesAsync(CancellationToken ct)
+    {
+        if (_serverHasNoModel) return;
+        var since = DateTimeOffset.UtcNow - SituationLinker.DefaultWindow;
+        var asked = 0;
+        foreach (var situation in Store.TopSituations(since, 60))
+        {
+            if (asked >= SubtypeRefinement.MaxPerRead || ct.IsCancellationRequested) break;
+            var kind = WorldNewsMapService.KindOf(situation);
+            if (SituationSubtypes.Choices(kind).Count == 0 || Store.ModelSubtype(situation.Id) is not null) continue;
+            if (SituationSubtypes.Tag(kind, situation.Title, situation.Latest).Confidence != SituationTag.Low) continue;
+            var headlines = Store.EventsForSituation(situation.Id).OrderByDescending(e => e.LastSeen).Take(3)
+                .SelectMany(e => Store.ArticlesForEvent(e.Id)).Select(a => a.English?.Headline ?? a.Title)
+                .Distinct(StringComparer.OrdinalIgnoreCase).Take(6).ToList();
+            if (headlines.Count == 0) continue;
+            asked++;
+            try
+            {
+                await using var scope = _scopes.CreateAsyncScope();
+                using var limit = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                limit.CancelAfter(TimeSpan.FromMinutes(2));
+                var answer = await scope.ServiceProvider.GetRequiredService<IOllamaService>()
+                    .GenerateAsync(_model, SubtypeRefinement.SystemPrompt, SubtypeRefinement.Prompt(kind, headlines), limit.Token);
+                if (SubtypeRefinement.Parse(kind, answer) is { } subtype) Store.SaveModelSubtype(situation.Id, subtype, DateTimeOffset.UtcNow);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                _logger.LogDebug(ex, "World News: SentinelGPT couldn't tag {Situation}; it's asked again on a later read", situation.Id);
+                break;
+            }
+        }
     }
 
     // The kinds' example headlines as unit vectors, embedded once per run of the app.

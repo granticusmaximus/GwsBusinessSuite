@@ -339,6 +339,42 @@ public sealed class WorldNewsKitTests : IDisposable
             .Should().BeEmpty("half the reports isn't an outlier");
     }
 
+    // 19-11-26: SentinelGPT tags stories the keywords couldn't, from the kind's own list only.
+    [Fact]
+    public void SubtypeRefinement_ShouldAcceptOnlyTheKindsIds_AndBeSavedPerStory()
+    {
+        SubtypeRefinement.Parse(SituationKinds.Disaster, " Flood.").Should().Be("flood");
+        SubtypeRefinement.Parse(SituationKinds.Disaster, "none").Should().Be(SubtypeRefinement.None);
+        SubtypeRefinement.Parse(SituationKinds.Disaster, "rail").Should().BeNull("rail is a transport subtype");
+        SubtypeRefinement.Parse(SituationKinds.Disaster, "It is probably a flood").Should().BeNull();
+        SubtypeRefinement.Prompt(SituationKinds.Disaster, ["Dam bursts upstream of town"]).Should().Contain("flood: Flood").And.Contain("none: none of these");
+
+        SituationSubtypes.FromModel(SituationKinds.Disaster, "flood")!.Confidence.Should().Be(SituationTag.Model);
+        SituationSubtypes.FromModel(SituationKinds.Disaster, SubtypeRefinement.None).Should().BeNull();
+
+        var store = new WorldNewsStore(_dbPath);
+        store.ModelSubtype("s1").Should().BeNull();
+        store.SaveModelSubtype("s1", "flood", Now);
+        store.ModelSubtype("s1").Should().Be("flood");
+    }
+
+    // 19-11-26: how late each source is seen after publishing, from dated reports only.
+    [Fact]
+    public void PublicationDelays_ShouldMeasureDatedReportsOnly()
+    {
+        var store = new WorldNewsStore(_dbPath);
+        var reports = Enumerable.Range(0, 6).Select(i => Article($"late{i}", $"Late report {i}", "English", Now.AddMinutes(-30 - i))
+            with { Outlet = "Slow Times", FetchedAt = Now })
+            .Concat(Enumerable.Range(0, 6).Select(i => Article($"undated{i}", $"Undated report {i}", "English", Now) with { Outlet = "No Dates" }))
+            .ToList();
+        store.AddArticles(reports);
+
+        var delay = store.PublicationDelays(Now.AddDays(-7)).Should().ContainSingle().Subject;
+        delay.Outlet.Should().Be("Slow Times");
+        delay.Reports.Should().Be(6);
+        delay.Median.TotalMinutes.Should().BeInRange(30, 36);
+    }
+
     // 19-11-26: the hourly re-check splits stories merged before the place guard caught them, but
     // leaves a story a person has corrected alone.
     [Fact]

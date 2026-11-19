@@ -274,6 +274,19 @@
                         </button>
                     }
                 </div>
+                @if (_worldNewsSubtypes.Count > 1 || _worldNewsSubtype is not null)
+                {
+                    <div class="tg-layer-buttons" role="group" aria-label="Type of story">
+                        <button type="button" class="tg-toggle @(_worldNewsSubtype is null ? "tg-toggle-on" : "")" aria-pressed="@(_worldNewsSubtype is null ? "true" : "false")"
+                                data-tg-news-subtype="" @onclick="() => SetWorldNewsSubtypeAsync(null)">ALL TYPES</button>
+                        @foreach (var choice in _worldNewsSubtypes.Take(10))
+                        {
+                            var picked = _worldNewsSubtype == choice.Id;
+                            <button type="button" class="tg-toggle @(picked ? "tg-toggle-on" : "")" aria-pressed="@(picked ? "true" : "false")"
+                                    data-tg-news-subtype="@choice.Id" @onclick="() => SetWorldNewsSubtypeAsync(choice.Id)">@($"{choice.Label} ({choice.Count})".ToUpperInvariant())</button>
+                        }
+                    </div>
+                }
                 <div class="tg-layer-buttons">
                     <button type="button" class="tg-toggle @(_worldNewsShading ? "tg-toggle-on" : "")" aria-pressed="@(_worldNewsShading ? "true" : "false")"
                             title="Shade each country by how many outlets cover the stories placed there; click a country for its stories"
@@ -538,6 +551,7 @@
             <div class="tg-coverage-panel-header"><span>SOURCES</span><button type="button" class="tg-panel-close" aria-label="Close sources" @onclick="ToggleInfoPanel">&times;</button></div>
             <p class="tg-info-text">Basemap: Esri, Maxar, Earthstar Geographics &middot; 25+ US state DOTs &middot; DriveBC &middot; Madrid Traffic &middot; Fintraffic &middot; NZTA &middot; QLD Traffic &middot; Windy &middot; Datumfeed &middot; Mapillary &middot; KartaView &middot; Overpass/OSM &middot; Wikimedia Commons &middot; NOAA/NWS &middot; World News: Google News country editions and outlet feeds, places from GeoNames (CC BY 4.0) and Natural Earth &middot; Search: Photon/OSM, US Census Bureau &middot; full source list: COVERAGE panel / user guide</p>
             <p class="tg-info-text">ADMIN // AUTHORIZED ACCESS ONLY. Public sources only - never unsecured private cameras.</p>
+            <p class="tg-info-text"><a href="admin/osint/camera-sources">CAMERA SOURCES AND THEIR TERMS</a></p>
         </div>
     }
     @if (_helpOpen)
@@ -2295,6 +2309,7 @@
         else
         {
             _worldNewsCount = 0;
+            _worldNewsSubtypes = [];
             await JS.InvokeVoidAsync("tacticalGlobe.clearWorldNews");
             if (_worldNewsShading) await JS.InvokeVoidAsync("tacticalGlobe.clearNewsShading");
             _worldNewsShading = false;
@@ -2315,6 +2330,16 @@
         if (_worldNewsShading) await PushWorldNewsShadingAsync();
     }
 
+    // One subtype at a time (earthquakes, rail...), from those in view; null shows every story.
+    private string? _worldNewsSubtype;
+    private IReadOnlyList<GwsBusinessSuite.Infrastructure.Services.WorldNewsMapService.SubtypeChoice> _worldNewsSubtypes = [];
+
+    private async Task SetWorldNewsSubtypeAsync(string? subtype)
+    {
+        _worldNewsSubtype = _worldNewsSubtype == subtype ? null : subtype;
+        await PushWorldNewsAsync();
+    }
+
     private async Task SetWorldNewsWindowAsync(int hours)
     {
         _worldNewsHours = hours;
@@ -2328,9 +2353,11 @@
     private async Task PushWorldNewsAsync()
     {
         var (bounds, since, at, kinds, generation) = (_lastBbox, WorldNewsSince, _timeMachineOn ? TimeMachineAt : (DateTimeOffset?)null, _worldNewsKinds.ToList(), _viewGeneration);
-        var signals = await Task.Run(() => WorldNewsMap.SignalsAt(bounds, since, at, kinds));
+        var all = await Task.Run(() => WorldNewsMap.SignalsAt(bounds, since, at, kinds));
         // A later move's markers win over this one's, whichever read finishes first.
         if (!_worldNewsOn || generation != _viewGeneration) return;
+        var (signals, subtypes) = GwsBusinessSuite.Infrastructure.Services.WorldNewsMapService.BySubtype(all, _worldNewsSubtype);
+        _worldNewsSubtypes = subtypes;
         _worldNewsCount = signals.Count;
         await JS.InvokeVoidAsync("tacticalGlobe.setWorldNews", signals.Select(ToWorldNewsPayload).ToList());
     }

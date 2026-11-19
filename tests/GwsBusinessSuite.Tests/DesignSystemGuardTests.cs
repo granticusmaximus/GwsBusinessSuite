@@ -203,4 +203,26 @@ public sealed class DesignSystemGuardTests
             .Count(match => !Regex.IsMatch(match.Groups[1].Value, @"^\s*(none|var\([^()]*\)|inherit|initial|unset)\s*(!important)?\s*$")));
         raw.Should().BeLessThanOrEqualTo(ceiling, "new shadows use the existing tokens");
     }
+
+    // 19-11-26 (Grant): neumorphism married to Apple's flat style. Raised containers keep one soft
+    // shadow (no double light-and-dark pair), contents inside a card are flat, the main button is
+    // solid, focus is Apple blue and bars and menus are frosted glass, on the admin and public sites.
+    [Fact]
+    public void Styles_ShouldMarryNeumorphismWithTheFlatAppleStyle()
+    {
+        var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../.."));
+        var admin = File.ReadAllText(Path.Combine(root, "src/GwsBusinessSuite.Web/wwwroot/app.css"));
+        var site = File.ReadAllText(Path.Combine(root, "src/GwsBusinessSuite.Web/wwwroot/public-site.css"));
+
+        admin.Should().NotContain("-5px -5px 12px var(--gws-neu-highlight)", "the double light-and-dark shadow is gone")
+            .And.Contain("--gws-neu-raised-shadow: inset 0 1px 0 var(--gws-neu-highlight), 0 10px 26px -10px var(--gws-neu-shadow)")
+            .And.Contain("/* ---- Soft containers, flat contents (19-11-26) ----")
+            .And.Contain(".card .card,")
+            .And.Contain(".btn.btn-primary:not(.btn-link) { box-shadow: none; }")
+            .And.Contain("box-shadow: var(--gws-neu-focus-shadow);")
+            .And.Contain("backdrop-filter: var(--gws-glass-filter);");
+        site.Should().NotContain("-6px -6px 14px var(--neu-highlight)")
+            .And.Contain("--neu-raised-shadow: inset 0 1px 0 var(--neu-highlight)");
+    }
 }
+

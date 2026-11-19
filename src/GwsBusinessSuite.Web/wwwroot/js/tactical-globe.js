@@ -2970,7 +2970,7 @@ window.tacticalGlobe = (function () {
             (signal.latest !== signal.title ? '<div><strong>LATEST:</strong> ' + escapeHtml(signal.latest) + '</div>' : '') +
             (signal.summary ? '<p>' + escapeHtml(signal.summary) + '</p>' : '') +
             '<div class="tg-stream-panel-meta">' + escapeHtml((signal.kindLabel ? signal.kindLabel.toUpperCase() + ' · ' : '') +
-            (signal.subtype && signal.tagLabel ? signal.tagLabel.toUpperCase() + ' · ' : '') +
+            (signal.subtype && signal.tagLabel ? signal.tagLabel.toUpperCase() + (signal.tagConfidence === 'model' ? ' (TAGGED BY SENTINELGPT)' : '') + ' · ' : '') +
             (signal.thinCoverage ? 'LOCAL REPORTING ONLY, NOT YET CONFIRMED ELSEWHERE · ' : '') +
             (signal.active === false ? 'QUIET · ' : '')) + escapeHtml(signal.place || signal.country) + ' · ' +
             escapeHtml(String(signal.eventCount)) + ' EVENTS · ' + escapeHtml(String(signal.outletCount)) + ' OUTLETS' +

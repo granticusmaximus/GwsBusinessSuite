@@ -61,6 +61,11 @@ tags, the most fitting available icon per story, and the same on Overwatch's Wor
 - [x] 19-11-26: copied wire stories count once when sizing pins. `WorldNewsMapSignal.IndependentCount`
   (`SourceIndependence` across the situation's events, cached with its details) sizes the pin, and
   the panel adds "N INDEPENDENT" when that's fewer than the outlets.
-- Publication-delay metrics: how late each source is against `PublishedAt`.
-- Ollama refinement of keyword tags (low-confidence tags only).
-- A subtype filter on the Overwatch layer.
+- [x] 19-11-26: publication delay per source. `WorldArticle.FetchedAt` (set by outlet feeds only when
+  the feed dated the report), `articles.fetched_at`, `WorldNewsStore.PublicationDelays` (median and
+  90th percentile, 7 days, 5+ reports); a table on Sources.
+- [x] 19-11-26: SentinelGPT tags stories the keywords left untagged (`SubtypeRefinement`): up to 5
+  per read, Mac first, from the kind's own subtype list or none, saved per story
+  (`situation_subtypes`); the keyword tag still wins; the panel says "(TAGGED BY SENTINELGPT)".
+- [x] 19-11-26: subtype filter on the Overwatch World News layer (`WorldNewsMapService.BySubtype`):
+  ALL TYPES plus the types in view with counts.

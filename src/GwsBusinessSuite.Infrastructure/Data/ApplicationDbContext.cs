@@ -114,6 +114,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<SentinelNavigationEntry> SentinelNavigationEntries => Set<SentinelNavigationEntry>();
     public DbSet<SentinelSavedSearch> SentinelSavedSearches => Set<SentinelSavedSearch>();
     public DbSet<CameraFavorite> CameraFavorites => Set<CameraFavorite>();
+    public DbSet<CameraSourceReview> CameraSourceReviews => Set<CameraSourceReview>();
     public DbSet<NewsWatchSettings> NewsWatchSettings => Set<NewsWatchSettings>();
     public DbSet<NewsReadMark> NewsReadMarks => Set<NewsReadMark>();
     public DbSet<SavedNewsArticle> SavedNewsArticles => Set<SavedNewsArticle>();
@@ -456,6 +457,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         modelBuilder.Entity<SentinelSavedSearch>().HasIndex(x => new { x.Username, x.CreatedAt });
         modelBuilder.Entity<CameraFavorite>().HasIndex(x => new { x.Username, x.CameraId }).IsUnique();
         modelBuilder.Entity<CameraFavorite>().HasIndex(x => new { x.Username, x.CreatedAt });
+        modelBuilder.Entity<CameraSourceReview>().HasIndex(x => x.SourceName).IsUnique();
         modelBuilder.Entity<NewsReadMark>().HasIndex(x => new { x.Username, x.UrlHash }).IsUnique();
         modelBuilder.Entity<SavedNewsArticle>().HasIndex(x => new { x.Username, x.UrlHash }).IsUnique();
         modelBuilder.Entity<NewsTrendDay>().HasIndex(x => new { x.TopicKey, x.Day }).IsUnique();

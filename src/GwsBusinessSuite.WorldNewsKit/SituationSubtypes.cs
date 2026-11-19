@@ -11,6 +11,33 @@ public sealed record SituationTag(string Kind, string? Subtype, string Label, st
     public const string High = "high";
     public const string Medium = "medium";
     public const string Low = "low";
+    // Chosen by SentinelGPT for a story the words couldn't tag (SubtypeRefinement, 19-11-26).
+    public const string Model = "model";
+}
+
+// SentinelGPT tags a story the keyword rules left untagged (19-11-26, deferred from the grouping
+// plan): it picks one of the kind's subtypes, or none. Its answer is saved per story, so each is
+// asked once, and the keyword tag still wins whenever it finds one.
+public static class SubtypeRefinement
+{
+    public const int MaxPerRead = 5;
+    public const string None = "none";
+
+    public const string SystemPrompt =
+        "You label news stories. Reply with exactly one id from the list, or none if no id clearly fits. " +
+        "Reply with the id only: no other words, no punctuation.";
+
+    public static string Prompt(string kind, IReadOnlyList<string> headlines) =>
+        $"Story ({SituationKinds.Label(kind)}):\n{string.Join('\n', headlines.Take(6).Select(h => "- " + h))}\n\nIds:\n" +
+        string.Join('\n', SituationSubtypes.Choices(kind).Select(c => $"{c.Id}: {c.Label}")) + $"\n{None}: none of these";
+
+    // The id the model gave, if it's one of the kind's (or "none"); anything else is no answer.
+    public static string? Parse(string kind, string? answer)
+    {
+        var word = (answer ?? "").Trim().Trim('.', '"', '\'', '`').ToLowerInvariant();
+        if (word == None) return None;
+        return SituationSubtypes.Choices(kind).Any(c => c.Id == word) ? word : null;
+    }
 }
 
 public static partial class SituationSubtypes
@@ -76,6 +103,16 @@ public static partial class SituationSubtypes
     // Every icon a tag can name, for a check that each is in the loaded icon set.
     public static IReadOnlyCollection<string> Icons =>
         All.Select(subtype => subtype.Icon).Concat(SituationKinds.All.Select(KindIcon)).ToHashSet(StringComparer.Ordinal);
+
+    // The subtypes a kind has, for SentinelGPT to choose from.
+    public static IReadOnlyList<(string Id, string Label)> Choices(string? kind) =>
+        All.Where(subtype => subtype.Kind == kind).Select(subtype => (subtype.Id, subtype.Label)).ToList();
+
+    // The tag for a subtype SentinelGPT chose; null when the id isn't one of the kind's.
+    public static SituationTag? FromModel(string kind, string subtypeId) =>
+        All.FirstOrDefault(subtype => subtype.Kind == kind && subtype.Id == subtypeId) is { } chosen
+            ? new SituationTag(kind, chosen.Id, chosen.Label, chosen.Icon, SituationTag.Model)
+            : null;
 
     public static SituationTag Tag(string? kind, params string?[] texts)
     {

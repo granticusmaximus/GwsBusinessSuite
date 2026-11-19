@@ -209,4 +209,23 @@ public sealed class WorldNewsMapServiceTests
     }
 
     private static readonly DateTimeOffset Now = WorldNewsTestStore.Now;
+
+    // 19-11-26: the Overwatch subtype filter shows one type of story, chosen from those in view.
+    [Fact]
+    public void BySubtype_ShouldListTheTypesInView_AndShowOnlyTheChosenOne()
+    {
+        WorldNewsMapSignal Signal(string id, string? subtype, string label) => new(id, id, id,
+            new WorldNewsLocation("JP", "Japan", "Tokyo", 35.68, 139.69, WorldNewsPrecision.City), 1, 3, 3, Now, null, [],
+            SituationKinds.Disaster, Tag: new SituationTag(SituationKinds.Disaster, subtype, label, "activity", SituationTag.High));
+        var signals = new[] { Signal("q1", "earthquake", "Earthquake"), Signal("q2", "earthquake", "Earthquake"),
+            Signal("f1", "flood", "Flood"), Signal("x", null, "Disaster") };
+
+        var (all, types) = WorldNewsMapService.BySubtype(signals, null);
+        all.Should().HaveCount(4);
+        types.Select(t => (t.Id, t.Count)).Should().Equal(("earthquake", 2), ("flood", 1));
+
+        WorldNewsMapService.BySubtype(signals, "flood").Shown.Select(s => s.SituationId).Should().Equal("f1");
+        WorldNewsMapService.BySubtype(signals, "tornado").Shown.Should().HaveCount(4, "a type no longer in view shows everything");
+    }
 }
+

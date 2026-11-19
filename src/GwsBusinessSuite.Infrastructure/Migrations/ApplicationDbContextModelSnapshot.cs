@@ -2340,6 +2340,49 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
                     b.ToTable("CameraFavorites");
                 });
 
+            modelBuilder.Entity("GwsBusinessSuite.Domain.Entities.CameraSourceReview", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("ConfirmedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ConfirmedBy")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsOff")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Note")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SourceName")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SourceName")
+                        .IsUnique();
+
+                    b.ToTable("CameraSourceReviews");
+                });
+
             modelBuilder.Entity("GwsBusinessSuite.Domain.Entities.ChatMessage", b =>
                 {
                     b.Property<Guid>("Id")

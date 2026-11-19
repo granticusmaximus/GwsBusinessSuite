@@ -1,0 +1,103 @@
+@page "/admin/osint/camera-sources"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = "AdminOnly")]
+@using Microsoft.AspNetCore.Authorization
+@using GwsBusinessSuite.Application.Abstractions
+@using GwsBusinessSuite.Application.CameraIntel
+@using GwsBusinessSuite.Infrastructure.Services
+@inject CameraSourceReviewService Reviews
+@inject IEnumerable<ICameraFeedProvider> Providers
+@inject ICurrentUserAccessor CurrentUserAccessor
+
+@* Camera sources' terms (19-11-26, Grant: "I draft, you confirm"). Each source's draft says what
+   its terms are believed to be and where to read them; confirming records who read them and when.
+   Switching a source off stops Overwatch asking it for cameras. *@
+
+<PageTitle>Camera sources</PageTitle>
+
+<PageHeader Title="Camera sources" Icon="bi-camera-video" Description="Every camera source Overwatch uses, what its terms say, and whether you've confirmed them.">
+    <Actions>
+        <a class="btn btn-outline-secondary" href="admin/osint" data-enhance-nav="false"><i class="bi bi-arrow-left me-1" aria-hidden="true"></i>Overwatch</a>
+    </Actions>
+</PageHeader>
+
+@if (_rows is null)
+{
+    <LoadingIndicator Message="Loading camera sources…" />
+}
+else
+{
+    <p class="text-muted small">
+        @_rows.Count(r => r.ConfirmedAt is not null) of @_rows.Count confirmed. The drafts come from the notes kept when each source was added;
+        most say the terms haven't been read yet. Read the terms page, then confirm. A source stays on until you switch it off.
+    </p>
+    <section class="card border-0 shadow-sm mb-3" aria-label="Camera sources">
+        <div class="table-responsive">
+            <table class="table align-middle mb-0 camera-sources-table">
+                <thead><tr><th scope="col">Source</th><th scope="col">Terms (draft)</th><th scope="col">Confirmed</th><th scope="col">On</th></tr></thead>
+                <tbody>
+                    @foreach (var row in _rows)
+                    {
+                        <tr @key="row.SourceName" class="@(row.IsOff ? "is-off" : "")">
+                            <td><strong>@row.SourceName</strong></td>
+                            <td>
+                                @row.Draft.Basis
+                                @if (row.Draft.TermsUrl is { } terms)
+                                {
+                                    <div><a href="@terms" target="_blank" rel="noopener noreferrer">Read the terms <i class="bi bi-box-arrow-up-right" aria-hidden="true"></i></a></div>
+                                }
+                            </td>
+                            <td>
+                                @if (row.ConfirmedAt is { } at)
+                                {
+                                    <span>@row.ConfirmedBy · @at.ToLocalGwsDateTime()</span>
+                                }
+                                else
+                                {
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@_busy" @onclick="() => ConfirmAsync(row.SourceName)">Confirm</button>
+                                }
+                            </td>
+                            <td>
+                                <button type="button" class="btn btn-sm @(row.IsOff ? "btn-outline-danger" : "btn-outline-secondary")" disabled="@_busy"
+                                        aria-pressed="@(row.IsOff ? "false" : "true")" @onclick="() => SetOffAsync(row.SourceName, !row.IsOff)">
+                                    @(row.IsOff ? "Off: switch on" : "On: switch off")
+                                </button>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </section>
+}
+
+@code {
+    private IReadOnlyList<CameraSourceRow>? _rows;
+    private bool _busy;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync() => _rows = await Reviews.ListAsync(Providers.Select(p => p.SourceName));
+
+    private async Task ConfirmAsync(string source)
+    {
+        _busy = true;
+        try
+        {
+            await Reviews.ConfirmAsync(source, await CurrentUserAccessor.GetCurrentUsernameAsync());
+            await LoadAsync();
+        }
+        finally { _busy = false; }
+    }
+
+    private async Task SetOffAsync(string source, bool off)
+    {
+        _busy = true;
+        try
+        {
+            await Reviews.SetOffAsync(source, off, await CurrentUserAccessor.GetCurrentUsernameAsync());
+            await LoadAsync();
+        }
+        finally { _busy = false; }
+    }
+}

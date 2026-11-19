@@ -11,7 +11,7 @@ design system) in one go.
 3. **One main action per page** - done 19-11-26: page headers have at most one primary button and four in a row, the rest under More (World News, World News Desk; Home and CRM checked). Fixed on the way: World News's R shortcut ran Regroup, not Pull latest. Overwatch's 137 are layer toggles already grouped in its LAYERS panel, left as they are. Guard: `MainActionTests`.
 4. **Enforce the design system** - done.
 5. **Motion and feedback** - done 19-11-26: `InlineProgress` replaces all 20 Bootstrap spinners.
-6. Neumorphism pushback - Grant's call, not started.
+6. **Neumorphism married to the flat Apple style** - done 19-11-26 (Grant's go): one soft shadow on raised containers, flat card contents with hairline dividers, solid main button, Apple-blue focus ring, frosted bar/menus/pop-ups; admin and public site (`app.css`, `public-site.css`), guarded in `DesignSystemGuardTests`.
 7. **Detail and copy** - done 19-11-26: real ellipsis in visible text (58 in 41 files, guarded), the one display date not in dd-MM-yy fixed, a screen-reader label reworded.
 
 ## What changed
@@ -40,4 +40,4 @@ design system) in one go.
 - [x] Guard tests
 - [x] Sentinel user guide (Mac app section)
 - [x] `./scripts/verify-release.sh` and a Mac build. 19-11-26 (Claude, Mac): verify-release.sh PARTIAL, release build and full suite (incl. Playwright) pass; Mac Debug build 0 warnings.
-- [x] Items 2, 3, 5 and 7 (19-11-26). Item 6 (neumorphism) waits on Grant.
+- [x] Items 2, 3, 5, 6 and 7 (19-11-26).

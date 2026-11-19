@@ -22,6 +22,9 @@ public sealed record WorldArticle(
     string? Snippet = null)
 {
     public ReportTranslation? English { get; init; }
+    // When the report was fetched, set only when its own feed gave a publication date (SeenAt), so
+    // FetchedAt - SeenAt is how late the source was seen after publishing (19-11-26).
+    public DateTimeOffset? FetchedAt { get; init; }
     public string DisplayTitle => English?.Headline ??
         (HeadlineTranslator.IsEnglish(Language) ? Title : "English translation pending");
     public string? DisplayDescription => English?.Description ??

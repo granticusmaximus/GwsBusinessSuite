@@ -11,7 +11,8 @@ namespace GwsBusinessSuite.Application.CameraIntel;
 public sealed class CameraDirectoryService(
     IEnumerable<ICameraFeedProvider> providers,
     ILogger<CameraDirectoryService> logger,
-    SourceStatusTracker? statusTracker = null)
+    SourceStatusTracker? statusTracker = null,
+    ICameraSourceSwitch? sourceSwitch = null)
 {
     // Pins pushed to the globe for one view. A world-wide view would otherwise send every camera
     // from every source over the circuit and into Cesium; past this many, the view is thinned.
@@ -26,6 +27,8 @@ public sealed class CameraDirectoryService(
         // Agencies' own sources first, aggregators last (see below).
         var loads = providers
             .Where(provider => provider.Coverage is not { } coverage || coverage.Intersects(bbox))
+            // A source Grant switched off (its terms changed) isn't asked at all.
+            .Where(provider => sourceSwitch?.IsOff(provider.SourceName) != true)
             .OrderBy(provider => Aggregators.Contains(provider.SourceName) ? 1 : 0)
             .Select(provider => (provider.SourceName, FetchSafelyAsync(provider, bbox, cancellationToken)))
             .ToList();

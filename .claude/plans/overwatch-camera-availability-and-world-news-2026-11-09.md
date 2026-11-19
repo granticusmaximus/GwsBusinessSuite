@@ -126,12 +126,14 @@ occurred.
     cache, with no migration.
   - Tests: `NativeShapesTests`, `CameraAvailabilityTests`, `CameraHealthServiceTests`, plus the
     bridge guard. Overwatch guide updated.
-- [ ] Waiting on Grant (not built, by decision):
-  - Per-provider source-policy records (licence, terms URL, review date). Each of about 47
-    providers' terms needs a person to read and confirm them; writing them from memory would
-    record unverified legal claims.
-  - The opt-in submission workflow: anyone could submit a camera URL, and the health checker
-    would then fetch arbitrary addresses from the server. It needs a decision on who can submit
-    and an allow-list design first.
+- Grant's decisions, 19-11-26:
+  - [x] Source licences: **I draft, Grant confirms.** Built 19-11-26: `CameraSourceDrafts` (terms
+    link per source; licence wording only where the integration notes recorded it, NSW CC BY and
+    Toronto OGL, every other source "Not read yet"), `CameraSourceReview` entity + migration
+    `AddCameraSourceReviews`, `CameraSourceReviewService` (confirm, switch off/on; switched-off set
+    held in memory, re-read each minute) and `/admin/osint/camera-sources`. `CameraDirectoryService`
+    skips switched-off sources. Grant still has to read and confirm each source.
+  - [x] Opt-in submission workflow: **not built.** New sources are added in code after Grant
+    chooses them (no server fetch of submitted addresses).
   - A provider/region filter: the coverage index in EXPLORE already lists cameras by region.
   - On-screen checks in the Mac app and the PWA.

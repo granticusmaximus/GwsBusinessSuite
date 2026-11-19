@@ -313,6 +313,10 @@ public sealed class WorldNewsMapService(WorldNewsStore store, WorldNewsMapCache?
         var kind = KindOf(situation);
         var tag = SituationSubtypes.Tag(kind, [situation.Title, situation.Latest, summary,
             .. sources.Select(source => source.EnglishTitle ?? source.Title)]);
+        // The words found nothing: SentinelGPT's saved choice, if it made one (SubtypeRefinement).
+        if (tag.Confidence == SituationTag.Low && store.ModelSubtype(situation.Id) is { } chosen
+            && SituationSubtypes.FromModel(kind, chosen) is { } modelTag)
+            tag = modelTag;
         return new WorldNewsMapSignal(situation.Id, situation.Title, situation.Latest, location, situation.EventCount,
             situation.OutletCount, situation.ArticleCount, situation.LastSeen, summary, sources, kind,
             situation.LastSeen >= DateTimeOffset.UtcNow - SituationLinker.QuietAfter,
@@ -342,6 +346,24 @@ public sealed class WorldNewsMapService(WorldNewsStore store, WorldNewsMapCache?
             && Locate(situation.Title, situation.Latest, summary) is { City: not null } sharper && sharper.CountryCode == location.CountryCode)
             location = sharper;
         return new Details(summary, mappedSources, location, latestEvent?.Id, independent);
+    }
+
+    // The subtype filter (19-11-26): the subtypes among the stories in view, most stories first, and
+    // the stories of the chosen one (all of them when none is chosen, or the chosen one has gone).
+    public sealed record SubtypeChoice(string Id, string Label, int Count);
+
+    public static (IReadOnlyList<WorldNewsMapSignal> Shown, IReadOnlyList<SubtypeChoice> Subtypes) BySubtype(
+        IReadOnlyList<WorldNewsMapSignal> signals, string? subtype)
+    {
+        var subtypes = signals.Where(s => s.Tag?.Subtype is not null)
+            .GroupBy(s => s.Tag!.Subtype!, StringComparer.Ordinal)
+            .Select(g => new SubtypeChoice(g.Key, g.First().Tag!.Label, g.Count()))
+            .OrderByDescending(c => c.Count).ThenBy(c => c.Label, StringComparer.Ordinal)
+            .ToList();
+        var shown = subtype is null || subtypes.All(c => c.Id != subtype)
+            ? signals
+            : signals.Where(s => s.Tag?.Subtype == subtype).ToList();
+        return (shown, subtypes);
     }
 
     public static WorldNewsLocation? Locate(string title, string latest, string? detail = null) =>

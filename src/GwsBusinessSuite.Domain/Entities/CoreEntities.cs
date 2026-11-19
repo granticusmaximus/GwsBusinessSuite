@@ -905,6 +905,18 @@ public sealed class CameraFavorite : AuditableEntity
     public required string SourceAttributionUrl { get; set; }
 }
 
+// A camera source's terms review (19-11-26, camera availability plan): Claude drafts what each
+// source's terms say (CameraSourceDrafts); Grant confirms after reading them, and can switch a
+// source off when its terms change.
+public sealed class CameraSourceReview : AuditableEntity
+{
+    public required string SourceName { get; set; }
+    public string? ConfirmedBy { get; set; }
+    public DateTimeOffset? ConfirmedAt { get; set; }
+    public bool IsOff { get; set; }
+    public string? Note { get; set; }
+}
+
 public sealed class SentinelDiscussion : AuditableEntity
 {
     public Guid WikiPageId { get; set; }

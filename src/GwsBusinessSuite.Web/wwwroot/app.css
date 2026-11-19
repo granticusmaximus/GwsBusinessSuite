@@ -40,9 +40,18 @@
     --gws-neu-highlight: rgba(255, 255, 255, .055);
     --gws-neu-shadow: rgba(0, 0, 0, .52);
     --gws-neu-inset: rgba(0, 0, 0, .38);
-    --gws-neu-raised-shadow: 7px 7px 16px var(--gws-neu-shadow), -5px -5px 12px var(--gws-neu-highlight);
-    --gws-neu-raised-shadow-sm: 4px 4px 10px var(--gws-neu-shadow), -3px -3px 8px var(--gws-neu-highlight);
-    --gws-neu-inset-shadow: inset 3px 3px 7px var(--gws-neu-inset), inset -2px -2px 5px var(--gws-neu-highlight);
+    /* Neumorphism married to Apple's flat style (19-11-26, Grant): the big containers stay raised,
+       with one soft drop shadow and a lit top edge instead of the double light-and-dark pair; inputs
+       stay gently sunk; what sits inside a card is flat (see "Soft containers, flat contents"). */
+    --gws-neu-raised-shadow: inset 0 1px 0 var(--gws-neu-highlight), 0 10px 26px -10px var(--gws-neu-shadow), 0 2px 6px -2px var(--gws-neu-inset);
+    --gws-neu-raised-shadow-sm: inset 0 1px 0 var(--gws-neu-highlight), 0 3px 10px -4px var(--gws-neu-shadow);
+    --gws-neu-inset-shadow: inset 0 1px 3px var(--gws-neu-inset), inset 0 -1px 0 var(--gws-neu-highlight);
+    /* Apple's focus ring: system blue, outside the control. */
+    --gws-focus-color: rgba(10, 132, 255, .45);
+    --gws-neu-focus-shadow: inset 0 1px 3px var(--gws-neu-inset), 0 0 0 3px var(--gws-focus-color);
+    /* Frosted glass for bars, menus and pop-ups, over whatever is behind them. */
+    --gws-glass-bg: color-mix(in srgb, var(--gws-neu-raised) 80%, transparent);
+    --gws-glass-filter: saturate(170%) blur(18px);
     --gws-text-strong: #fafaf9;
     --gws-text-soft: #a8a29e;
     --gws-font-serif: 'Playfair Display', Georgia, 'Times New Roman', serif;
@@ -7284,3 +7293,61 @@ a[download][aria-busy="true"] { opacity: .6; cursor: progress; }
         animation: gws-progress-breathe 1.2s var(--gws-ease) infinite alternate;
     }
 }
+
+/* ---- Soft containers, flat contents (19-11-26) ----
+   Grant asked for neumorphism and Apple's flat style together. The page's panels and cards keep the
+   raised surface (the tokens above); everything inside them is flat with hairline dividers, like
+   Apple's grouped lists; the main action is a solid button; bars, menus and pop-ups are frosted
+   glass. Secondary buttons and inputs keep the soft raised and sunk feel. */
+.card .card,
+.card .surface-panel,
+.card .card.border-0.shadow-sm {
+    background: transparent !important;
+    box-shadow: none !important;
+    border: 1px solid color-mix(in srgb, var(--gws-panel-border) 70%, transparent) !important;
+}
+
+.card .list-group-item {
+    background: transparent;
+    box-shadow: none;
+    border-left: 0;
+    border-right: 0;
+    border-color: color-mix(in srgb, var(--gws-panel-border) 70%, transparent);
+}
+
+.card .table > :not(caption) > * > * {
+    box-shadow: none;
+    border-bottom-color: color-mix(in srgb, var(--gws-panel-border) 70%, transparent);
+}
+
+.btn-primary,
+:root[data-theme="light"] .btn-primary {
+    --bs-btn-color: #1c1917;
+    --bs-btn-bg: var(--gws-sidebar-accent);
+    --bs-btn-border-color: transparent;
+    --bs-btn-hover-color: #1c1917;
+    --bs-btn-hover-bg: var(--gws-sidebar-accent-hover);
+    --bs-btn-hover-border-color: transparent;
+    --bs-btn-active-color: #1c1917;
+    --bs-btn-active-bg: var(--gws-sidebar-accent-hover);
+    --bs-btn-active-border-color: transparent;
+}
+
+.btn.btn-primary:not(.btn-link) { box-shadow: none; }
+.btn.btn-primary:not(.btn-link):active { box-shadow: none; transform: scale(.98); }
+
+.form-control:focus,
+.form-select:focus {
+    border-color: rgb(10, 132, 255);
+    box-shadow: var(--gws-neu-focus-shadow);
+}
+
+.gws-admin-bar,
+.dropdown-menu,
+.modal-content,
+.offcanvas {
+    background-color: var(--gws-glass-bg);
+    -webkit-backdrop-filter: var(--gws-glass-filter);
+    backdrop-filter: var(--gws-glass-filter);
+}
+

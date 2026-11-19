@@ -135,6 +135,11 @@ public sealed partial class WorldNewsStore
         using var columns = connection.CreateCommand();
         columns.CommandText = "SELECT COUNT(*) FROM pragma_table_info('articles') WHERE name = 'snippet'";
         if ((long)columns.ExecuteScalar()! == 0) Execute(connection, "ALTER TABLE articles ADD COLUMN snippet TEXT");
+        // SentinelGPT's subtype for stories the keywords couldn't tag (SubtypeRefinement, 19-11-26).
+        Execute(connection, "CREATE TABLE IF NOT EXISTS situation_subtypes (situation_id TEXT PRIMARY KEY, subtype TEXT NOT NULL, checked_at INTEGER NOT NULL)");
+        // Nor fetched_at (19-11-26): when a dated report was fetched, for each source's delay.
+        columns.CommandText = "SELECT COUNT(*) FROM pragma_table_info('articles') WHERE name = 'fetched_at'";
+        if ((long)columns.ExecuteScalar()! == 0) Execute(connection, "ALTER TABLE articles ADD COLUMN fetched_at INTEGER");
         // Nor do databases from before situations (28-10-26) have events.situation_id.
         columns.CommandText = "SELECT COUNT(*) FROM pragma_table_info('events') WHERE name = 'situation_id'";
         if ((long)columns.ExecuteScalar()! == 0) Execute(connection, "ALTER TABLE events ADD COLUMN situation_id TEXT");
@@ -262,15 +267,16 @@ public sealed partial class WorldNewsStore
         var dayStart = days.Parameters.Add(new SqliteParameter { ParameterName = "$day" });
         using var command = connection.CreateCommand();
         command.CommandText = """
-            INSERT OR IGNORE INTO articles (id, url, title, outlet, language, country, seen_at, feed, group_hint, snippet)
-            VALUES ($id, $url, $title, $outlet, $language, $country, $seen, $feed, $hint, $snippet)
+            INSERT OR IGNORE INTO articles (id, url, title, outlet, language, country, seen_at, feed, group_hint, snippet, fetched_at)
+            VALUES ($id, $url, $title, $outlet, $language, $country, $seen, $feed, $hint, $snippet, $fetched)
             """;
-        var parameters = new[] { "$id", "$url", "$title", "$outlet", "$language", "$country", "$seen", "$feed", "$hint", "$snippet" }
+        var parameters = new[] { "$id", "$url", "$title", "$outlet", "$language", "$country", "$seen", "$feed", "$hint", "$snippet", "$fetched" }
             .Select(name => command.Parameters.Add(new SqliteParameter { ParameterName = name })).ToArray();
         var added = 0;
         foreach (var a in articles.Where(article => !NewsNoise.IsNoise(article)))
         {
-            object?[] values = [a.Id, a.Url, a.Title, a.Outlet, a.Language, a.Country, a.SeenAt.ToUnixTimeSeconds(), a.Feed, a.GroupHint, a.Snippet];
+            object?[] values = [a.Id, a.Url, a.Title, a.Outlet, a.Language, a.Country, a.SeenAt.ToUnixTimeSeconds(), a.Feed, a.GroupHint, a.Snippet,
+                a.FetchedAt?.ToUnixTimeSeconds()];
             for (var i = 0; i < values.Length; i++) parameters[i].Value = values[i] ?? DBNull.Value;
             var inserted = command.ExecuteNonQuery();
             added += inserted;
@@ -2249,6 +2255,56 @@ public sealed partial class WorldNewsStore
         command.CommandTimeout = 0;
         command.CommandText = "VACUUM; PRAGMA wal_checkpoint(TRUNCATE);";
         command.ExecuteNonQuery();
+    }
+
+    public string? ModelSubtype(string situationId)
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT subtype FROM situation_subtypes WHERE situation_id = $id";
+        command.Parameters.AddWithValue("$id", situationId);
+        return command.ExecuteScalar() as string;
+    }
+
+    public void SaveModelSubtype(string situationId, string subtype, DateTimeOffset at)
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "INSERT INTO situation_subtypes (situation_id, subtype, checked_at) VALUES ($id, $subtype, $at) " +
+            "ON CONFLICT(situation_id) DO UPDATE SET subtype = $subtype, checked_at = $at";
+        command.Parameters.AddWithValue("$id", situationId);
+        command.Parameters.AddWithValue("$subtype", subtype);
+        command.Parameters.AddWithValue("$at", at.ToUnixTimeSeconds());
+        command.ExecuteNonQuery();
+    }
+
+    // How late each source is seen after it publishes (19-11-26): for reports fetched since `since`
+    // whose own feed was dated, the median and 90th-percentile gap between publishing and fetching.
+    // Includes the time between reads (every few minutes), so a few minutes is on time.
+    public sealed record PublicationDelay(string Outlet, int Reports, TimeSpan Median, TimeSpan Slowest90);
+
+    public IReadOnlyList<PublicationDelay> PublicationDelays(DateTimeOffset since, int minimumReports = 5)
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT outlet, fetched_at - seen_at FROM articles WHERE fetched_at IS NOT NULL AND fetched_at >= $since AND fetched_at >= seen_at";
+        command.Parameters.AddWithValue("$since", since.ToUnixTimeSeconds());
+        var gaps = new Dictionary<string, List<long>>(StringComparer.OrdinalIgnoreCase);
+        using (var reader = command.ExecuteReader())
+            while (reader.Read())
+            {
+                if (!gaps.TryGetValue(reader.GetString(0), out var list)) gaps[reader.GetString(0)] = list = [];
+                list.Add(reader.GetInt64(1));
+            }
+        return gaps.Where(pair => pair.Value.Count >= minimumReports)
+            .Select(pair =>
+            {
+                var sorted = pair.Value.Order().ToList();
+                return new PublicationDelay(pair.Key, sorted.Count, TimeSpan.FromSeconds(sorted[sorted.Count / 2]),
+                    TimeSpan.FromSeconds(sorted[Math.Min(sorted.Count - 1, (int)Math.Ceiling(sorted.Count * 0.9) - 1)]));
+            })
+            .OrderByDescending(delay => delay.Median)
+            .ToList();
     }
 
     // How far ahead of now a report's date may be before it is treated as wrong, not early.
