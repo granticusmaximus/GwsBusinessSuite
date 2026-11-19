@@ -46,7 +46,7 @@ else
     <div class="story-analysis" role="status">
         @if (_analysisStatus is not null)
         {
-            <span class="spinner-border spinner-border-sm" aria-hidden="true"></span>
+            <InlineProgress />
             <span>@_analysisStatus The sections below fill in when it's done.</span>
         }
         else if (_analysisError is not null)

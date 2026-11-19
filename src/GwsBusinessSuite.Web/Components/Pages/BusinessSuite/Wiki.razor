@@ -89,11 +89,11 @@
                 <i class="bi bi-search"></i>
                 <input @ref="_paletteInputRef" @bind="_paletteQuery" @bind:event="oninput" @bind:after="SearchCommandPaletteAsync"
                        @onkeydown="HandlePaletteKeyDownAsync"
-                       placeholder="Search pages, content, databases, and rows..."
+                       placeholder="Search pages, content, databases, and rows…"
                        aria-label="Search every Sentinel page, block, database, and row" />
                 @if (_paletteBusy)
                 {
-                    <span class="spinner-border spinner-border-sm"></span>
+                    <InlineProgress />
                 }
                 <kbd>Esc</kbd>
             </div>
@@ -372,11 +372,11 @@
                     <span class="input-group-text bg-white"><i class="bi bi-search"></i></span>
                     <input id="sentinelWorkspaceSearch" @ref="_workspaceSearchInput" class="form-control"
                            @bind="SearchQuery" @bind:event="oninput" @bind:after="SearchWorkspaceAsync"
-                           placeholder="Search pages, content, databases, and rows..."
+                           placeholder="Search pages, content, databases, and rows…"
                            aria-label="Search every Sentinel page, block, database, and row" />
                     @if (IsSearchBusy)
                     {
-                        <span class="input-group-text bg-white"><span class="spinner-border spinner-border-sm"></span></span>
+                        <span class="input-group-text"><InlineProgress Label="Searching…" /></span>
                     }
                     else if (!string.IsNullOrWhiteSpace(SearchQuery))
                     {
@@ -1088,7 +1088,7 @@
                                 <InputFile OnChange="OnCoverFileSelectedAsync" disabled="@_isUploadingCover" class="form-control form-control-sm" accept="image/*" />
                                 @if (_isUploadingCover)
                                 {
-                                    <span class="spinner-border spinner-border-sm text-secondary flex-shrink-0"></span>
+                                    <InlineProgress CssClass="text-secondary" />
                                 }
                             </div>
                             @if (!string.IsNullOrEmpty(_mediaPickerError))

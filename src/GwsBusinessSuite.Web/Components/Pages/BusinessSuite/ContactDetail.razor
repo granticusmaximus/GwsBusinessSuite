@@ -114,7 +114,7 @@ else
 
             <RecordSection Title="Notes &amp; activity" Description="A lightweight internal log for this relationship." Icon="bi-journal-text">
                     <div class="d-flex gap-2 mb-3">
-                        <input class="form-control" placeholder="Log a call, email, or note..."
+                        <input class="form-control" placeholder="Log a call, email, or note…"
                                value="@NewActivityNote" @oninput="e => NewActivityNote = e.Value?.ToString() ?? string.Empty"
                                @onkeydown="OnActivityNoteKeyDown" />
                         <button class="btn btn-outline-primary flex-shrink-0" @onclick="AddActivityAsync" disabled="@(IsBusy || string.IsNullOrWhiteSpace(NewActivityNote))">

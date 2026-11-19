@@ -29,7 +29,7 @@
 
 <form class="find-bar" role="search" @onsubmit="SearchAsync" @onsubmit:preventDefault>
     <i class="bi bi-search" aria-hidden="true"></i>
-    <input type="search" class="form-control find-input" placeholder="A term, a name or a question: ransomware hospital, CVE-2026-1234, port strike..."
+    <input type="search" class="form-control find-input" placeholder="A term, a name or a question: ransomware hospital, CVE-2026-1234, port strike…"
            aria-label="Search World News" @bind="_query" @bind:event="oninput" />
     <button type="submit" class="btn btn-primary" disabled="@(string.IsNullOrWhiteSpace(_query) || _busy)">Search</button>
 </form>

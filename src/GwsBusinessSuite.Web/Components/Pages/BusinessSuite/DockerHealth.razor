@@ -22,7 +22,7 @@
         <button type="button" class="btn btn-outline-primary d-inline-flex align-items-center gap-2" @onclick="LoadContainersAsync" disabled="@IsBusy">
             @if (IsBusy)
             {
-                <span class="spinner-border spinner-border-sm" aria-hidden="true"></span>
+                <InlineProgress />
             }
             else
             {
@@ -64,7 +64,7 @@
                 </div>
             </div>
             <button class="btn btn-sm btn-primary" @onclick="SaveDoSettingsAsync" disabled="@IsDoSaving">
-                @(IsDoSaving ? "Saving..." : "Save Connection")
+                @(IsDoSaving ? "Saving…" : "Save Connection")
             </button>
             @if (!string.IsNullOrWhiteSpace(DoSaveMessage))
             {
@@ -132,8 +132,8 @@
         <button class="btn btn-sm btn-outline-primary" @onclick="BuildImageAsync" disabled="@IsBuildingImage">
             @if (IsBuildingImage)
             {
-                <span class="spinner-border spinner-border-sm me-1"></span>
-                <span>Building...</span>
+                <InlineProgress CssClass="me-1" />
+                <span>Building…</span>
             }
             else
             {

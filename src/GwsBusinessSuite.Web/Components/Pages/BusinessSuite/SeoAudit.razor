@@ -31,7 +31,7 @@ else
             <div class="col-md-4">
                 <label class="form-label small fw-semibold">Content</label>
                 <select class="form-select form-select-sm" @bind="_selectedContentKey">
-                    <option value="">Select content to audit...</option>
+                    <option value="">Select content to audit…</option>
                     @foreach (var item in Content)
                     {
                         <option value="@ContentKey(item)">@item.Title (@item.ContentType)</option>

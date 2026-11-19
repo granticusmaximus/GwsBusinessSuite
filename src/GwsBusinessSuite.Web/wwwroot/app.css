@@ -7253,3 +7253,34 @@ a[download][aria-busy="true"] { opacity: .6; cursor: progress; }
     }
     .sentinel-workspace-actions .btn { flex: 0 0 auto; }
 }
+
+/* InlineProgress (19-11-26): the one small activity indicator. It sizes to the text and takes its
+   colour, so it fits a button, a status line or a search box alike. */
+.gws-progress {
+    display: inline-block;
+    flex-shrink: 0;
+    inline-size: 0.9em;
+    block-size: 0.9em;
+    vertical-align: -0.12em;
+    border: 0.14em solid currentColor;
+    border-inline-end-color: transparent;
+    border-radius: var(--gws-radius-pill);
+    opacity: 0.8;
+    animation: gws-progress-turn 0.8s linear infinite;
+}
+
+@keyframes gws-progress-turn {
+    to { transform: rotate(1turn); }
+}
+
+@keyframes gws-progress-breathe {
+    from { opacity: 0.3; }
+    to { opacity: 0.85; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .gws-progress {
+        border-inline-end-color: currentColor;
+        animation: gws-progress-breathe 1.2s var(--gws-ease) infinite alternate;
+    }
+}

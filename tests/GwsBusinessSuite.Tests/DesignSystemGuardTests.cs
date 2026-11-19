@@ -38,25 +38,36 @@ public sealed class DesignSystemGuardTests
         viewport.Should().BeEmpty("admin pages use @container gws-main, so they fit beside the sidebar and in the Mac app");
     }
 
+    // 19-11-26 (Apple-style item 7): visible text ends in a real ellipsis ("Saving…"), not three dots.
+    // Overwatch's HUD and the boot screen keep their terminal "..." on purpose.
+    [Fact]
+    public void VisibleText_ShouldUseTheEllipsisCharacter()
+    {
+        string[] terminalStyle = ["OverwatchGrid.razor", "LoadingIndicator.razor", "BusyOverlay.razor"];
+        var visibleDots = new Regex(@">[^<@]*[A-Za-z]\.\.\.[^<]*<|""[A-Z][^""]*[a-z]\.\.\.""");
+        Files("*.razor")
+            .Where(path => !terminalStyle.Contains(Path.GetFileName(path)))
+            .SelectMany(path => File.ReadAllLines(path).Select((line, i) => (path, line, i)))
+            .Where(x => !x.line.TrimStart().StartsWith("@*", StringComparison.Ordinal) && !x.line.Contains("*@", StringComparison.Ordinal)
+                        && visibleDots.IsMatch(x.line))
+            .Select(x => $"{Name(x.path)}:{x.i + 1}")
+            .Should().BeEmpty();
+    }
+
     [Fact]
     public void PanelsAndPages_ShouldLoadWithTheBootScreen_NotABareSpinner()
     {
-        // Spinners that sit inside a button or beside live text are allowed (AGENTS.md); these
-        // are the ones reviewed on 12-11-26. A new one belongs in a button, or is a LoadingIndicator.
-        string[] reviewed =
-        [
-            "CreatePageModal.razor", "AssistantPanel.razor", "LegislationBriefPanel.razor", "ArticleEditorDetail.razor",
-            "Automation.razor", "ContentStudio.razor", "DockerHealth.razor", "SentinelAiPanel.razor",
-            "SentinelDatabaseRowPage.razor", "Settings.razor", "Wiki.razor", "WikiDatabaseEditor.razor",
-            "WorldNewsStoryView.razor", "SentinelPublicShare.razor",
-            // 18-11-26: Pull latest's status line (beside live text) and Regroup's button.
-            "WorldNews.razor", "WorldNewsGrouping.razor"
-        ];
-        var unreviewed = Files("*.razor")
-            .Where(path => File.ReadAllText(path).Contains("spinner-border", StringComparison.Ordinal))
-            .Where(path => !reviewed.Contains(Path.GetFileName(path)))
-            .Select(Name);
-        unreviewed.Should().BeEmpty();
+        // 19-11-26 (Apple-style item 5): one activity indicator everywhere. Pages and panels that are
+        // loading use LoadingIndicator; a button, status line or search box uses InlineProgress, which
+        // takes the text's colour and pulses instead of spinning with Reduce Motion.
+        Files("*.razor")
+            .Where(path => File.ReadAllText(path).Contains("spinner-border", StringComparison.Ordinal)
+                           || File.ReadAllText(path).Contains("spinner-grow", StringComparison.Ordinal))
+            .Select(Name)
+            .Should().BeEmpty("Bootstrap's spinners look and move differently from the app's own");
+        var css = File.ReadAllText(Path.Combine(Web, "wwwroot/app.css"));
+        Regex.IsMatch(css, @"prefers-reduced-motion: reduce\) \{\s*\.gws-progress \{[^}]*gws-progress-breathe")
+            .Should().BeTrue("with Reduce Motion the indicator pulses instead of turning");
     }
 
     [Fact]

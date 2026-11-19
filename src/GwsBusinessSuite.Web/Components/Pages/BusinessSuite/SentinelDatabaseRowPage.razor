@@ -69,7 +69,7 @@
                             <InputFile OnChange="OnCoverFileSelectedAsync" disabled="@_isUploadingCover" class="form-control form-control-sm" accept="image/*" />
                             @if (_isUploadingCover)
                             {
-                                <span class="spinner-border spinner-border-sm text-secondary flex-shrink-0"></span>
+                                <InlineProgress CssClass="text-secondary" />
                             }
                         </div>
                         @if (!string.IsNullOrEmpty(_mediaPickerError))

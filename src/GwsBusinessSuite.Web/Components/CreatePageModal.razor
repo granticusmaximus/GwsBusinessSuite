@@ -81,7 +81,7 @@
                         </button>
                         <button type="button" class="btn btn-outline-secondary" disabled="@_busy" @onclick="CloseAsync">Cancel</button>
                         <button type="button" class="btn btn-primary" disabled="@(_busy || _selectedKey is null)" @onclick="() => ContinueWithAsync(_selectedKey)">
-                            @if (_busy) { <span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span> }
+                            @if (_busy) { <InlineProgress CssClass="me-1" /> }
                             Continue
                         </button>
                     </div>

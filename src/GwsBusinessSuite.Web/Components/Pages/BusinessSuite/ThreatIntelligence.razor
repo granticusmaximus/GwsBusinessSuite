@@ -277,7 +277,7 @@ else
                                 @foreach (var scan in exposure.RecentScans.Take(5))
                                 {
                                     <li class="mb-1 text-break">
-                                        <a href="@scan.ResultUrl" target="_blank" rel="noopener">@(scan.ScannedAt?.ToString("yyyy-MM-dd") ?? "scan")</a>
+                                        <a href="@scan.ResultUrl" target="_blank" rel="noopener">@(scan.ScannedAt?.ToLocalGwsDate() ?? "scan")</a>
                                         - @(scan.Title ?? scan.PageUrl)
                                         <span class="text-secondary">@string.Join(" · ", new[] { scan.Ip, scan.Country, scan.Server }.Where(v => !string.IsNullOrWhiteSpace(v)))</span>
                                     </li>

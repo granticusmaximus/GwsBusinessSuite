@@ -149,7 +149,7 @@ else
                 else
                 {
                     <div class="p-2 border-bottom d-flex gap-2 gws-list-filters">
-                        <input type="search" class="form-control form-control-sm" placeholder="Search name, email, company..."
+                        <input type="search" class="form-control form-control-sm" placeholder="Search name, email, company…"
                                value="@SearchText" @oninput="e => SearchText = e.Value?.ToString() ?? string.Empty" />
                         <select class="form-select form-select-sm" style="max-width:9rem;" value="@StatusFilter"
                                 @onchange="OnStatusFilterChange">
@@ -247,7 +247,7 @@ else
                     <div class="col-md-4">
                         <label class="form-label fw-semibold small" for="deal-contact">Contact</label>
                         <InputSelect id="deal-contact" class="form-select" @bind-Value="DealEditor.ContactId">
-                            <option value="@Guid.Empty">Select a contact...</option>
+                            <option value="@Guid.Empty">Select a contact…</option>
                             @foreach (var contact in Contacts)
                             {
                                 <option value="@contact.Id">@contact.FullName</option>

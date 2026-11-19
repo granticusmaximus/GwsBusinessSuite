@@ -7,12 +7,12 @@ design system) in one go.
 ## Items
 
 1. **Mac app feels native** - done (needs a Mac build to confirm).
-2. Simplify navigation (39 sidebar links across 7 workspaces) - to do.
+2. **Simplify navigation** - done 19-11-26: section headings in every workspace over five links (Content, Relationships, Intelligence, Platform); Relationships regrouped (Clients, Billing & time, Team). Nothing removed; hiding apps stays in Settings (HiddenNavKeys). Guard: `NavMenuSectionTests`.
 3. One main action per page (World News 30 buttons, Overwatch 137) - to do.
 4. **Enforce the design system** - done.
-5. Motion and feedback (20 bare spinners, mostly in buttons) - to do.
+5. **Motion and feedback** - done 19-11-26: `InlineProgress` replaces all 20 Bootstrap spinners.
 6. Neumorphism pushback - Grant's call, not started.
-7. Detail and copy - to do.
+7. **Detail and copy** - done 19-11-26: real ellipsis in visible text (58 in 41 files, guarded), the one display date not in dd-MM-yy fixed, a screen-reader label reworded.
 
 ## What changed
 

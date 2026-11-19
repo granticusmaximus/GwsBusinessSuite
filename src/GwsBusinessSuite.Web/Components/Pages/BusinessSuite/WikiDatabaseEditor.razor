@@ -1444,7 +1444,7 @@ else
                                                             @onclick="() => RunButtonWorkflowAsync(row, property)">
                                                         @if (isButtonRunning)
                                                         {
-                                                            <span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>
+                                                            <InlineProgress CssClass="me-1" />
                                                         }
                                                         @buttonLabel
                                                     </button>
@@ -1478,7 +1478,7 @@ else
                                                                 @onclick="() => GenerateAiFieldAsync(row, property)">
                                                             @if (isAiFieldRunning)
                                                             {
-                                                                <span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>
+                                                                <InlineProgress CssClass="me-1" />
                                                             }
                                                             else
                                                             {

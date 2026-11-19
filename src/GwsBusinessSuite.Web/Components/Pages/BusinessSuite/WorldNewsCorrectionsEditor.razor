@@ -46,7 +46,7 @@
             }
         </fieldset>
     </form>
-    @if (_busy) { <LoadingIndicator Message="Updating correction notices..." /> }
+    @if (_busy) { <LoadingIndicator Message="Updating correction notices…" /> }
     @if (_loaded)
     {
         @if (_corrections.Count == 0) { <p class="small text-secondary mt-2">No published corrections for this story.</p> }

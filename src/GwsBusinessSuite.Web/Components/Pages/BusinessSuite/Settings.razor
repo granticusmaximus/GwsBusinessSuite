@@ -245,7 +245,7 @@ else
                         <input class="form-control" @bind="PullModelNameInput" @bind:event="oninput" placeholder="e.g. llama3.2" />
                         <button type="button" class="btn btn-outline-primary text-nowrap" @onclick="PullModelAsync"
                                 disabled="@(_pullingModel || string.IsNullOrWhiteSpace(PullModelNameInput))">
-                            @if (_pullingModel) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                            @if (_pullingModel) { <InlineProgress CssClass="me-1" /> }
                             else { <i class="bi bi-download me-1"></i> }
                             Install
                         </button>

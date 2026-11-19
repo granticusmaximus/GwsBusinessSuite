@@ -27,7 +27,7 @@
 <main class="sentinel-public-share">
     @if (_loading)
     {
-        <div class="spinner-border" role="status"></div>
+        <p class="text-secondary"><InlineProgress CssClass="me-2" />Loading…</p>
     }
     else if (_share is null)
     {

@@ -83,19 +83,24 @@ public sealed class OllamaFailoverTests
     }
 
     [Fact]
-    public async Task ShortRequests_ShouldPreferTheDroplet_AndFallBackToTheMac()
+    // 19-11-26 (Grant): the Mac does the work and the droplet is only the fallback, short requests included.
+    public async Task ShortRequests_ShouldGoToTheMacFirst_AndOnlyFallBackToTheDroplet()
     {
         using var monitor = Monitor();
         var mac = new Fake("mac");
         var droplet = new Fake("droplet");
         var service = Service(mac, droplet, monitor);
 
-        (await service.GenerateAsync("sentinelgpt", "short", "question")).Should().Be("droplet");
-        droplet.Calls.Should().Be(1);
-        mac.Calls.Should().Be(0);
+        (await service.GenerateAsync("sentinelgpt", "short", "question")).Should().Be("mac");
+        mac.Calls.Should().Be(1);
+        droplet.Calls.Should().Be(0);
 
-        var fallback = Service(mac, new Fake("droplet", new HttpRequestException("down")), monitor);
-        (await fallback.GenerateAsync("sentinelgpt", "short", "question")).Should().Be("mac");
+        using (OllamaComputeRouting.Use(OllamaComputeRoute.PreferDroplet))
+            (await service.GenerateAsync("sentinelgpt", "short", "question")).Should().Be("droplet", "a caller can still ask for the droplet");
+
+        using var monitor2 = Monitor();
+        var fallback = Service(new Fake("mac", new HttpRequestException("refused")), new Fake("droplet"), monitor2);
+        (await fallback.GenerateAsync("sentinelgpt", "short", "question")).Should().Be("droplet");
     }
 
     [Fact]
@@ -168,6 +173,64 @@ public sealed class OllamaFailoverTests
         var pieces = new List<string>();
         await foreach (var piece in stream) pieces.Add(piece);
         return pieces;
+    }
+
+    // 19-11-26: the Mac's Tailscale had stopped and the droplet carried everything for hours with one
+    // log line at the start. While the Mac stays unreachable the monitor says so again every hour.
+    [Fact]
+    public async Task AMacThatStaysDown_ShouldBeReportedAgainEveryHour()
+    {
+        var time = new MovableTime(At);
+        var log = new WarningLog();
+        using var monitor = new OllamaFailoverMonitor(new SplitClients(), new OllamaWorkloadScheduler(), log, time: time);
+
+        for (var i = 0; i < OllamaFailoverMonitor.DownAfterMisses; i++) await monitor.ProbeOnceAsync(CancellationToken.None);
+        monitor.PrimaryUp.Should().BeFalse();
+        log.Reminders.Should().Be(0, "the drop itself has its own warning");
+
+        time.Advance(TimeSpan.FromMinutes(61));
+        await monitor.ProbeOnceAsync(CancellationToken.None);
+        time.Advance(TimeSpan.FromMinutes(30));
+        await monitor.ProbeOnceAsync(CancellationToken.None);
+        log.Reminders.Should().Be(1, "once an hour, not every probe");
+
+        time.Advance(TimeSpan.FromMinutes(31));
+        await monitor.ProbeOnceAsync(CancellationToken.None);
+        log.Reminders.Should().Be(2);
+    }
+
+    private sealed class MovableTime(DateTimeOffset start) : TimeProvider
+    {
+        private DateTimeOffset _now = start;
+        public override DateTimeOffset GetUtcNow() => _now;
+        public void Advance(TimeSpan by) => _now += by;
+    }
+
+    // The Mac's client fails to connect; the droplet's answers.
+    private sealed class SplitClients : IHttpClientFactory
+    {
+        public HttpClient CreateClient(string name) => new(new Answer(name == OllamaFailoverMonitor.PrimaryClient))
+            { BaseAddress = new Uri("http://ollama.test/") };
+
+        private sealed class Answer(bool fail) : HttpMessageHandler
+        {
+            protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+                fail ? throw new HttpRequestException("unreachable")
+                    : Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK) { Content = new StringContent("{\"models\":[]}") });
+        }
+    }
+
+    private sealed class WarningLog : Microsoft.Extensions.Logging.ILogger<OllamaFailoverMonitor>
+    {
+        public int Reminders { get; private set; }
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel logLevel) => true;
+        public void Log<TState>(Microsoft.Extensions.Logging.LogLevel logLevel, Microsoft.Extensions.Logging.EventId eventId, TState state,
+            Exception? exception, Func<TState, Exception?, string> formatter)
+        {
+            if (logLevel == Microsoft.Extensions.Logging.LogLevel.Warning && formatter(state, exception).Contains("has been unreachable", StringComparison.Ordinal))
+                Reminders++;
+        }
     }
 
     private sealed class Clients(Func<HttpRequestMessage, HttpResponseMessage> respond) : IHttpClientFactory

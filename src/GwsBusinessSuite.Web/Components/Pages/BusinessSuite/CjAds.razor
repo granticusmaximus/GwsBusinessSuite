@@ -657,7 +657,7 @@ advertiserId, StringComparison.OrdinalIgnoreCase)));
     IsBusy = true;
     ErrorMessage = string.Empty;
     BulkLinkSyncFailures = new List<string>();
-    StatusMessage = "Syncing links for every advertiser - this can take a while for a large roster...";
+    StatusMessage = "Syncing links for every advertiser - this can take a while for a large roster…";
 
     // Same shared lock as the hourly CjAdsSyncBackgroundService, so a manual sync here
     // can't run concurrently with the scheduled one.

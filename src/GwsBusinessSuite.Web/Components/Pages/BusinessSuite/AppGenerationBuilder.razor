@@ -45,7 +45,7 @@ else
             <div class="card-body">
                 <label class="form-label fw-semibold small" for="app-gen-site">Target Site</label>
                 <select id="app-gen-site" class="form-select form-select-sm mb-3" @bind="NewSiteId">
-                    <option value="">Choose a site...</option>
+                    <option value="">Choose a site…</option>
                     @foreach (var site in Sites)
                     {
                         <option value="@site.Id">@site.Name</option>
@@ -135,7 +135,7 @@ else
                     @if (Selected.Status == AppGenerationRequestStatuses.Drafting)
                     {
                         <div class="input-group mb-2">
-                            <textarea class="form-control" rows="2" @bind="ChatMessage" @bind:event="oninput" placeholder="Reply to keep refining the plan..."></textarea>
+                            <textarea class="form-control" rows="2" @bind="ChatMessage" @bind:event="oninput" placeholder="Reply to keep refining the plan…"></textarea>
                             <button class="btn btn-outline-primary" @onclick="SendAsync" disabled="@(IsBusy || string.IsNullOrWhiteSpace(ChatMessage))">
                                 <i class="bi bi-send"></i>
                             </button>

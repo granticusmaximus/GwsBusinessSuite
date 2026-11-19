@@ -79,7 +79,7 @@ else
                 }
                 <div class="mb-2">
                     <select id="ticket-contact" class="form-select form-select-sm" aria-label="Contact" @bind="_newContactId">
-                        <option value="@Guid.Empty">Select a contact...</option>
+                        <option value="@Guid.Empty">Select a contact…</option>
                         @foreach (var contact in Contacts)
                         {
                             <option value="@contact.Id">@contact.FullName</option>
@@ -256,7 +256,7 @@ else
                                     <option value="@priority">@priority</option>
                                 }
                             </select>
-                            <input class="form-control form-control-sm w-auto" placeholder="Assign to..."
+                            <input class="form-control form-control-sm w-auto" placeholder="Assign to…"
                                    value="@SelectedTicket.AssignedToUsername" @onchange="OnAssignChangedAsync" />
                             @* Boards K8c: the ticket as a card on a board, linked both ways. *@
                             <select class="form-select form-select-sm w-auto" aria-label="Add this ticket to a board as a card" @key="@($"board-{_boardPickKey}")"
@@ -298,7 +298,7 @@ else
                     {
                         <div class="mb-2">
                             <select class="form-select form-select-sm w-auto" @bind="_selectedCannedResponseId" @bind:after="InsertCannedResponse">
-                                <option value="@Guid.Empty">Insert canned response...</option>
+                                <option value="@Guid.Empty">Insert canned response…</option>
                                 @foreach (var response in CannedResponses)
                                 {
                                     <option value="@response.Id">@response.Title</option>

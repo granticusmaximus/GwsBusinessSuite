@@ -1496,7 +1496,7 @@
         <button type="button" class="tg-icon-btn @(_briefFacts is not null ? "is-active" : "")" aria-label="Brief me on this view" title="Brief me on this view"
                 @onclick="BriefViewAsync"><i class="bi bi-card-text" aria-hidden="true"></i></button>
         <button type="button" class="tg-icon-btn tg-streetview-btn @(_streetPicking ? "is-active" : "")" data-tg-streetview draggable="true"
-                aria-label="Street view: click here, then click the map (or drag me onto the map)"
+                aria-label="Street view: choose a spot on the map, or drag this onto it"
                 title="Street view: drag me onto the map, or click me and then click the map" aria-pressed="@(_streetPicking ? "true" : "false")"
                 @onclick="ToggleStreetViewPickAsync"><i class="bi bi-person-standing" aria-hidden="true"></i></button>
         <button type="button" class="tg-icon-btn" id="tg-share-button" aria-label="Copy a link to this exact view" title="Copy a link to this exact view"><i class="bi bi-share" aria-hidden="true"></i></button>

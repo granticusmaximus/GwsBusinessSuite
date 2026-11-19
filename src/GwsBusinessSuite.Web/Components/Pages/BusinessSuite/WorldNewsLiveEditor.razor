@@ -85,7 +85,7 @@
             </div>
         </fieldset>
     </form>
-    @if (_busy) { <LoadingIndicator Message="Updating live coverage..." /> }
+    @if (_busy) { <LoadingIndicator Message="Updating live coverage…" /> }
     @if (_loaded)
     {
         @if (_updates.Count == 0) { <p class="small text-secondary mt-2">No live updates on this story yet.</p> }

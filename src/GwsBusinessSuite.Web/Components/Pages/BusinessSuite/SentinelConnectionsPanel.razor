@@ -14,7 +14,7 @@
         <div class="px-3 pt-3 small fw-semibold text-secondary">Related pages</div>
         @if (_related.Count == 0)
         {
-            <div class="px-3 pb-2 pt-1 text-secondary small">@(_loading ? "Looking..." : "Nothing closely related yet.")</div>
+            <div class="px-3 pb-2 pt-1 text-secondary small">@(_loading ? "Looking…" : "Nothing closely related yet.")</div>
         }
         else
         {
@@ -31,7 +31,7 @@
         <div class="px-3 pt-3 small fw-semibold text-secondary">Unlinked mentions</div>
         @if (_mentions.Count == 0)
         {
-            <div class="px-3 pb-3 pt-1 text-secondary small">@(_loading ? "Looking..." : "No other page names this one without linking it.")</div>
+            <div class="px-3 pb-3 pt-1 text-secondary small">@(_loading ? "Looking…" : "No other page names this one without linking it.")</div>
         }
         else
         {

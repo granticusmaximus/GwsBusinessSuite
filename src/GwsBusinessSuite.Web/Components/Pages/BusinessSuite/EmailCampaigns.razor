@@ -181,7 +181,7 @@ else
                 <div class="card-body">
                     <div class="d-flex gap-2 mb-3">
                         <select class="form-select form-select-sm" @bind="_enrollContactId">
-                            <option value="@Guid.Empty">Enroll a contact...</option>
+                            <option value="@Guid.Empty">Enroll a contact…</option>
                             @foreach (var contact in Contacts)
                             {
                                 <option value="@contact.Id">@contact.FullName@(contact.UnsubscribedFromCampaignsAt is not null ? " — unsubscribed" : "")</option>

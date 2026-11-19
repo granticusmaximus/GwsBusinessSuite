@@ -11,10 +11,10 @@ after each code item.
 | 10 | Tick release-gate boxes covered by today's green runs | several | done |
 | 3 | WMO severe-weather alerts on Overwatch | overwatch-world-signals-2026-11-05 | done |
 | 1 | World News expansion Unit 1: regional outlets, adaptive outlet threshold | world-news-overwatch-expansion-2026-11 | done |
-| 4 | Apple UI item 2: simpler navigation | apple-ui-streamlining-2026-11-18 | to do |
+| 4 | Apple UI item 2: simpler navigation | apple-ui-streamlining-2026-11-18 | done |
 | 5 | Apple UI item 3: one main action per page | apple-ui-streamlining-2026-11-18 | to do |
-| 6 | Apple UI item 5: motion and feedback (bare spinners) | apple-ui-streamlining-2026-11-18 | to do |
-| 7 | Apple UI item 7: detail and copy | apple-ui-streamlining-2026-11-18 | to do |
+| 6 | Apple UI item 5: motion and feedback (bare spinners) | apple-ui-streamlining-2026-11-18 | done |
+| 7 | Apple UI item 7: detail and copy | apple-ui-streamlining-2026-11-18 | done |
 | 2 | Camera availability phases 1-5 | overwatch-camera-availability-and-world-news-2026-11-09 | to do |
 
 Not in this phase: the AI droplet capacity follow-up (generations still time out while embedding
@@ -33,3 +33,20 @@ runs; see ai-droplet-availability-2026-11-19), and the six items that need Grant
       shapes and layer catalogue updated; `WmoWarningServiceTests`; Overwatch guide.
 - [x] 1: 17 regional outlets (tested live), thin-coverage allowance with a LOCAL REPORTING ONLY label,
       tests, Overwatch and Intelligence guides.
+- [x] 6: `InlineProgress` (Components/InlineProgress.razor, `.gws-progress` in app.css): one indicator
+      that sizes to and takes the colour of its text, breathes instead of turning with Reduce Motion,
+      and has an optional screen-reader label. All 20 Bootstrap spinners in 16 files replaced; the Wiki
+      search box lost its hard-coded `bg-white`; the public share page shows a labelled indicator (the
+      admin boot screen would read oddly to visitors). Guard: no `spinner-border`/`spinner-grow` in any
+      .razor file. UI_DESIGN_SYSTEM.md interaction rule added.
+- [x] 7: Audit for measurable detail issues. Real ellipsis in visible text (58 "..." in 41 files; the
+      Overwatch HUD and boot screen keep their terminal dots), guarded by
+      `VisibleText_ShouldUseTheEllipsisCharacter`. The one visible date not in dd-MM-yy (Threat
+      Intelligence scan link) now uses `ToLocalGwsDate`; the other 23 hits are machine formats (inputs,
+      data attributes, `<time datetime>`, CSV). Street View's screen-reader label no longer says "click
+      here". Left alone on purpose: 153 `bg-white`/`bg-light`/`text-dark` classes (app.css remaps them to
+      the theme in dark and light, so they render correctly) and "Please" in error messages.
+- [x] 4: sidebar section headings (Write/Reach/Audience; Clients/Billing & time/Team; News/Monitoring;
+      Operations/Tools/Trust), Support and Email Campaigns moved beside CRM. No link removed or renamed.
+      `NavMenuSectionTests`; nav and rail browser tests pass.
+- [x] Paused 19-11-26 for Grant's report that SentinelGPT is too slow in World News: fixed (Mac-first routing, Tailscale restarted, hourly Mac-down warning); see ai-droplet-availability-2026-11-19.

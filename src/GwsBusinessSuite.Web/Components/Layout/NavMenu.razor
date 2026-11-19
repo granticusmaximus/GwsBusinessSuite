@@ -72,6 +72,7 @@
         <section class="gws-workspace" id="gws-ws-content" data-workspace="content" data-workspace-label="Content &amp; Publishing"
                  aria-label="Content &amp; Publishing" hidden="@(!IsWorkspace("content"))">
             <h2 class="gws-workspace-title">Content &amp; Publishing</h2>
+            <h3 class="gws-subnav-section">Write</h3>
             <NavLink class="gws-nav-link" href="admin/article-editor" title="All Posts">
                 <i class="bi bi-pencil-square" aria-hidden="true"></i>
                 <span class="gws-nav-link-copy"><span>Posts</span><small>Write and publish</small></span>
@@ -91,6 +92,7 @@
                     <span class="gws-nav-link-copy"><span>Content Calendar</span><small>Everything scheduled to go out</small></span>
                 </NavLink>
             }
+            <h3 class="gws-subnav-section">Reach</h3>
             <NavLink class="gws-nav-link" href="admin/seo-audit" title="SEO Audit">
                 <i class="bi bi-search-heart" aria-hidden="true"></i>
                 <span class="gws-nav-link-copy"><span>SEO Audit</span><small>Classic + AI-era readiness</small></span>
@@ -101,6 +103,10 @@
                     <i class="bi bi-translate" aria-hidden="true"></i>
                     <span class="gws-nav-link-copy"><span>Localization</span><small>AI-assisted translations</small></span>
                 </NavLink>
+            }
+            @if (Shown("comments") || IsContributorOrAbove)
+            {
+                <h3 class="gws-subnav-section">Audience</h3>
             }
             @if (Shown("comments"))
             {
@@ -170,6 +176,10 @@
             <section class="gws-workspace" id="gws-ws-relationships" data-workspace="relationships" data-workspace-label="Relationships"
                      aria-label="Relationships" hidden="@(!IsWorkspace("relationships"))">
                 <h2 class="gws-workspace-title">Relationships</h2>
+                @if (Shown("crm") || Shown("support") || Shown("email-campaigns"))
+                {
+                    <h3 class="gws-subnav-section">Clients</h3>
+                }
                 @if (Shown("crm"))
                 {
                     <a class="@AppLinkClass(AdminApps.Crm)" href="@AdminApps.Crm.Href" aria-current="@AppCurrent(AdminApps.Crm)" title="CRM">
@@ -177,6 +187,24 @@
                         <span class="gws-nav-link-copy"><span>CRM</span><small>Contacts, deals and deal scores</small></span>
                         @if (_dueFollowUpCount > 0) { <span class="gws-nav-count">@_dueFollowUpCount</span> }
                     </a>
+                }
+                @if (Shown("support"))
+                {
+                    <NavLink class="gws-nav-link" href="admin/support" title="Support">
+                        <i class="bi bi-life-preserver" aria-hidden="true"></i>
+                        <span class="gws-nav-link-copy"><span>Support</span><small>Client portal tickets</small></span>
+                    </NavLink>
+                }
+                @if (Shown("email-campaigns"))
+                {
+                    <NavLink class="gws-nav-link" href="admin/email-campaigns" title="Email Campaigns">
+                        <i class="bi bi-envelope-paper-fill" aria-hidden="true"></i>
+                        <span class="gws-nav-link-copy"><span>Email Campaigns</span><small>Alert lists and drip sequences</small></span>
+                    </NavLink>
+                }
+                @if (Shown("billing") || Shown("scheduling"))
+                {
+                    <h3 class="gws-subnav-section">Billing &amp; time</h3>
                 }
                 @if (Shown("billing"))
                 {
@@ -192,13 +220,6 @@
                         <span class="gws-nav-link-copy"><span>Time Tracking</span><small>Timers and billable hours</small></span>
                     </NavLink>
                 }
-                @if (Shown("support"))
-                {
-                    <NavLink class="gws-nav-link" href="admin/support" title="Support">
-                        <i class="bi bi-life-preserver" aria-hidden="true"></i>
-                        <span class="gws-nav-link-copy"><span>Support</span><small>Client portal tickets</small></span>
-                    </NavLink>
-                }
                 @if (Shown("scheduling"))
                 {
                     <NavLink class="gws-nav-link" href="admin/scheduling" title="Scheduling">
@@ -206,13 +227,7 @@
                         <span class="gws-nav-link-copy"><span>Scheduling</span><small>Booking types and bookings</small></span>
                     </NavLink>
                 }
-                @if (Shown("email-campaigns"))
-                {
-                    <NavLink class="gws-nav-link" href="admin/email-campaigns" title="Email Campaigns">
-                        <i class="bi bi-envelope-paper-fill" aria-hidden="true"></i>
-                        <span class="gws-nav-link-copy"><span>Email Campaigns</span><small>Alert lists and drip sequences</small></span>
-                    </NavLink>
-                }
+                <h3 class="gws-subnav-section">Team</h3>
                 <NavLink class="gws-nav-link" href="admin/users" title="User Management">
                     <i class="bi bi-person-gear" aria-hidden="true"></i>
                     <span class="gws-nav-link-copy"><span>Users</span><small>Accounts and roles</small></span>
@@ -250,6 +265,7 @@
             <section class="gws-workspace" id="gws-ws-intelligence" data-workspace="intelligence" data-workspace-label="Intelligence"
                      aria-label="Intelligence" hidden="@(!IsWorkspace("intelligence"))">
                 <h2 class="gws-workspace-title">Intelligence</h2>
+                <h3 class="gws-subnav-section">News</h3>
                 <NavLink class="gws-nav-link" href="admin/news-intelligence" title="Media Watch">
                     <i class="bi bi-newspaper" aria-hidden="true"></i>
                     <span class="gws-nav-link-copy"><span>Media Watch</span><small>SentinelGPT-curated feeds</small></span>
@@ -262,6 +278,7 @@
                     <i class="bi bi-building" aria-hidden="true"></i>
                     <span class="gws-nav-link-copy"><span>Civic Watch</span><small>Community and government</small></span>
                 </NavLink>
+                <h3 class="gws-subnav-section">Monitoring</h3>
                 <NavLink class="gws-nav-link" href="admin/business-intelligence" title="Business Intelligence">
                     <i class="bi bi-bar-chart-line-fill" aria-hidden="true"></i>
                     <span class="gws-nav-link-copy"><span>BI Dashboards</span><small>Build and pin custom reports</small></span>
@@ -292,6 +309,7 @@
             <section class="gws-workspace" id="gws-ws-platform" data-workspace="platform" data-workspace-label="Platform"
                      aria-label="Platform" hidden="@(!IsWorkspace("platform"))">
                 <h2 class="gws-workspace-title">Platform</h2>
+                <h3 class="gws-subnav-section">Operations</h3>
                 <NavLink class="gws-nav-link" href="admin/automation" title="Workflow Automation">
                     <i class="bi bi-diagram-3-fill" aria-hidden="true"></i>
                     <span class="gws-nav-link-copy"><span>Automation</span><small>Build and run workflows</small></span>
@@ -305,10 +323,12 @@
                     <i class="bi bi-journal-code" aria-hidden="true"></i>
                     <span class="gws-nav-link-copy"><span>Logs</span><small>Errors grouped by cause, with traces</small></span>
                 </NavLink>
+                <h3 class="gws-subnav-section">Tools</h3>
                 <NavLink class="gws-nav-link" href="admin/dev-tools" title="Developer Tools">
                     <i class="bi bi-tools" aria-hidden="true"></i>
                     <span class="gws-nav-link-copy"><span>Dev Tools</span><small>Encoders, generators, and testers</small></span>
                 </NavLink>
+                <h3 class="gws-subnav-section">Trust</h3>
                 <NavLink class="gws-nav-link" href="admin/security-audit" title="Security Audit">
                     <i class="bi bi-shield-check" aria-hidden="true"></i>
                     <span class="gws-nav-link-copy"><span>Security Audit</span><small>Authentication and access evidence</small></span>

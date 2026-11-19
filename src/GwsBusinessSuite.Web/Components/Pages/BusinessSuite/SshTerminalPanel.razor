@@ -99,12 +99,12 @@ else
 
                 <div class="d-flex align-items-center gap-2 flex-wrap">
                     <button class="btn btn-sm btn-primary" @onclick="SaveSettingsAsync" disabled="@_isSavingSettings">
-                        @(_isSavingSettings ? "Saving..." : "Save Connection")
+                        @(_isSavingSettings ? "Saving…" : "Save Connection")
                     </button>
                     @if (_hasPrivateKey)
                     {
                         <button class="btn btn-sm btn-success" @onclick="ConnectAsync" disabled="@_isConnecting">
-                            @(_isConnecting ? "Connecting..." : "Connect")
+                            @(_isConnecting ? "Connecting…" : "Connect")
                         </button>
                     }
                     @if (!string.IsNullOrWhiteSpace(_saveMessage))

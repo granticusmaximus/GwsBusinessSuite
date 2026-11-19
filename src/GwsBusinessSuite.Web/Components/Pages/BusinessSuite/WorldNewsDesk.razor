@@ -37,7 +37,7 @@
         <p class="small text-secondary">All-time operational counts from retained desk records. A verdict held when the current trust label is at least as strong as the label signed by two people.</p>
         @if (_metricsBusy)
         {
-            <LoadingIndicator Message="Calculating desk metrics..." />
+            <LoadingIndicator Message="Calculating desk metrics…" />
         }
         else if (_metricsError is { } metricsError)
         {
@@ -112,7 +112,7 @@
         </fieldset>
         @if (_beatsBusy)
         {
-            <LoadingIndicator Message="Loading your beats..." />
+            <LoadingIndicator Message="Loading your beats…" />
         }
         else if (_beatError is null)
         {
@@ -159,7 +159,7 @@
                 <a class="btn btn-sm btn-outline-secondary" href="@StorySearchHref">Search stories</a>
             }
         </form>
-        @if (_morgueBusy) { <LoadingIndicator Message="Searching the newsroom archive..." /> }
+        @if (_morgueBusy) { <LoadingIndicator Message="Searching the newsroom archive…" /> }
         @if (_morgueError is { } morgueError) { <p class="alert alert-warning mt-3" role="alert">@morgueError</p> }
         @if (_morgueSearched && !_morgueBusy && _morgueError is null)
         {
@@ -212,7 +212,7 @@
             <button type="submit" class="btn btn-sm btn-primary" disabled="@_handoverBusy">Generate handover</button>
             <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@(_handoverBusy || _handover is null)" @onclick="CopyHandoverAsync">Copy handover</button>
         </form>
-        @if (_handoverBusy) { <LoadingIndicator Message="Preparing the shift handover..." /> }
+        @if (_handoverBusy) { <LoadingIndicator Message="Preparing the shift handover…" /> }
         @if (_handoverError is { } handoverError) { <p class="alert alert-warning mt-3" role="alert">@handoverError</p> }
         @if (_handoverStatus is { } handoverStatus) { <p class="small text-secondary mt-2" role="status">@handoverStatus</p> }
         @if (_handover is not null)

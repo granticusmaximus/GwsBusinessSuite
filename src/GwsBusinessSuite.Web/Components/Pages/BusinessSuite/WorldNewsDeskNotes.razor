@@ -24,7 +24,7 @@
     </form>
     @if (_loading || _saving)
     {
-        <LoadingIndicator Message="@(_saving ? "Saving the desk note..." : "Loading desk notes...")" />
+        <LoadingIndicator Message="@(_saving ? "Saving the desk note…" : "Loading desk notes…")" />
     }
     else if (_error is null && _notes.Count == 0)
     {

@@ -82,7 +82,7 @@
                 <button class="btn btn-primary" @onclick="ReviseWithAiAsync" disabled="@(IsBusy || string.IsNullOrWhiteSpace(ReviseWithAiNotes))">
                     @if (IsBusy)
                     {
-                        <span class="spinner-border spinner-border-sm me-1"></span>
+                        <InlineProgress CssClass="me-1" />
                         <span>Regenerating…</span>
                     }
                     else
@@ -335,7 +335,7 @@ else
                         <div class="col-12">
                             <label class="form-label fw-semibold small">Advertiser</label>
                             <select class="form-select" value="@SelectedAdvertiserId" @onchange="OnAdvertiserChanged">
-                                <option value="">Select an advertiser...</option>
+                                <option value="">Select an advertiser…</option>
                                 @foreach (var advertiser in AvailableAdvertisers)
                                 {
                                     <option value="@advertiser.AdvertiserId">@advertiser.AdvertiserName</option>
@@ -353,7 +353,7 @@ else
                             <label class="form-label fw-semibold small">Offer</label>
                             <select class="form-select" value="@SelectedOfferId" @onchange="OnOfferChanged"
                                     disabled="@(string.IsNullOrWhiteSpace(SelectedAdvertiserId))">
-                                <option value="">Select an offer...</option>
+                                <option value="">Select an offer…</option>
                                 @foreach (var offer in AvailableOffersForSelectedAdvertiser)
                                 {
                                     <option value="@offer.Id">@offer.LinkName</option>

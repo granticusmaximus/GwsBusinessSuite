@@ -121,6 +121,24 @@ public sealed class OllamaFailoverMonitor : BackgroundService
         while (await timer.WaitForNextTickAsync(stoppingToken));
     }
 
+    // A Mac that's off at start-up, or stays off, was one log line and then silence: on 19-11-26 its
+    // Tailscale had stopped and the droplet carried everything for hours. While it stays down this
+    // says so again every hour (Logs groups the sightings into one issue).
+    public static readonly TimeSpan DownReminderEvery = TimeSpan.FromHours(1);
+    private DateTimeOffset? _lastDownReminder;
+
+    private void RemindWhileMacDown()
+    {
+        DateTimeOffset? since;
+        lock (_gate) since = _primary.Up ? null : _primary.ChangedAt;
+        if (since is null) { _lastDownReminder = null; return; }
+        var now = _time.GetUtcNow();
+        if (now - since < DownReminderEvery || (_lastDownReminder is { } last && now - last < DownReminderEvery)) return;
+        _lastDownReminder = now;
+        _logger.LogWarning("SentinelGPT's Mac has been unreachable for {Hours:0.#} h, so the AI droplet is doing all the AI work and answers slowly. Check the Mac is awake, Ollama is running and Tailscale is connected",
+            (now - since.Value).TotalHours);
+    }
+
     // One round: is each machine answering? Public for tests.
     public async Task ProbeOnceAsync(CancellationToken ct)
     {
@@ -158,6 +176,7 @@ public sealed class OllamaFailoverMonitor : BackgroundService
             Raise(true);
         }
         if (!secondaryAnswered && changed) _logger.LogWarning("The AI droplet isn't answering");
+        RemindWhileMacDown();
 
         if (changed || _probes++ % TagsEveryProbes == 0)
         {
@@ -308,12 +327,12 @@ public sealed class FailoverOllamaService(
         RoutedAsync(PreferMac(messages.Sum(message => message.Content?.Length ?? 0), toolCount: tools?.Count ?? 0),
             (ollama, token) => ollama.ChatAsync(model, messages, tools, token), ct);
 
-    private static bool PreferMac(int inputSize, int outputTokens = 0, int contextSize = 0, int toolCount = 0) => OllamaComputeRouting.Current switch
-    {
-        OllamaComputeRoute.PreferMac => true,
-        OllamaComputeRoute.PreferDroplet => false,
-        _ => inputSize >= 12_000 || outputTokens >= 2_048 || contextSize >= 16_000 || toolCount >= 8,
-    };
+    // The Mac does the work and the droplet is the fallback (Grant, 19-11-26). From 15-11 a request
+    // under 12,000 characters started on the droplet and moved to the Mac only if the droplet failed;
+    // a busy droplet doesn't fail, it crawls (3 tokens/s, every background job timing out) while the
+    // Mac sat idle. Only a caller that asks for the droplet (PreferDroplet) starts there now.
+    private static bool PreferMac(int inputSize, int outputTokens = 0, int contextSize = 0, int toolCount = 0) =>
+        OllamaComputeRouting.Current != OllamaComputeRoute.PreferDroplet;
 
     private Task<T> RoutedAsync<T>(bool preferMac, Func<IOllamaService, CancellationToken, Task<T>> call, CancellationToken ct) =>
         preferMac ? MacFirstAsync(call, ct) : DropletFirstAsync(call, ct);

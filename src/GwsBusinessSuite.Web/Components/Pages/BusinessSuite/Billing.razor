@@ -181,7 +181,7 @@ else
                 <div class="mb-3">
                     <label class="form-label fw-semibold small" for="invoice-contact">Contact</label>
                     <select id="invoice-contact" class="form-select" @bind="Editor.ContactId" @bind:after="OnContactChangedAsync">
-                        <option value="@Guid.Empty">Select a contact...</option>
+                        <option value="@Guid.Empty">Select a contact…</option>
                         @foreach (var contact in Contacts)
                         {
                             <option value="@contact.Id">@contact.FullName</option>
@@ -326,7 +326,7 @@ else
         <div class="card border-0 shadow-sm">
             <div class="card-header bg-white border-bottom py-3 fw-semibold">Invoices</div>
             <div class="p-2 border-bottom d-flex gap-2 gws-list-filters">
-                <input type="search" class="form-control form-control-sm" placeholder="Search invoice or client..." @bind="InvoiceSearch" @bind:event="oninput" />
+                <input type="search" class="form-control form-control-sm" placeholder="Search invoice or client…" @bind="InvoiceSearch" @bind:event="oninput" />
                 <select class="form-select form-select-sm w-auto" @bind="InvoiceStatusFilter">
                     <option value="">All statuses</option>
                     @foreach (var status in InvoiceStatuses.All) { <option value="@status">@status</option> }

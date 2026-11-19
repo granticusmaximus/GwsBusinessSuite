@@ -51,7 +51,7 @@
                 <div class="mb-2">
                     <label class="form-label small" for="time-contact">Contact</label>
                     <select id="time-contact" class="form-select" value="@SelectedContactId" @onchange="OnContactChangedAsync">
-                        <option value="">Choose a contact...</option>
+                        <option value="">Choose a contact…</option>
                         @foreach (var contact in Contacts)
                         {
                             <option value="@contact.Id">@contact.FullName@(string.IsNullOrWhiteSpace(contact.Company) ? "" : $" ({contact.Company})")</option>

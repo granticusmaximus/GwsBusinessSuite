@@ -47,7 +47,7 @@
     </div>
     <button type="button" class="btn btn-primary d-inline-flex align-items-center gap-2" @onclick="GenerateForAll" disabled="@IsBusy">
       <i class="bi bi-stars"></i>
-      <span>@(IsBusy ? "Generating..." : "Generate for All Articles")</span>
+      <span>@(IsBusy ? "Generating…" : "Generate for All Articles")</span>
     </button>
   </div>
 </div>
@@ -156,7 +156,7 @@ else
   {
     IsBusy = true;
     ErrorMessage = string.Empty;
-    StatusMessage = "Generating suggestions - this can take a while...";
+    StatusMessage = "Generating suggestions - this can take a while…";
     BulkFailures = new List<string>();
     try
     {

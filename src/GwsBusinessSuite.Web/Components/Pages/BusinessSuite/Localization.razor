@@ -37,7 +37,7 @@ else
             <div class="col-lg-5">
                 <label class="form-label small fw-semibold" for="localization-content">Content</label>
                 <select id="localization-content" class="form-select form-select-sm" @bind="_selectedContentKey" @bind:after="OnContentChangedAsync" disabled="@_isBusy">
-                    <option value="">Select content to localize...</option>
+                    <option value="">Select content to localize…</option>
                     @foreach (var item in _content)
                     {
                         <option value="@ContentKey(item)">@item.Title (@item.ContentType)</option>

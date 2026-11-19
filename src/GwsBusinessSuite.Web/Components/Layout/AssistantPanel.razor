@@ -149,7 +149,7 @@
                     }
                     @if (turn.Activity is not null)
                     {
-                        <div class="gws-assistant-activity"><span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>@turn.Activity</div>
+                        <div class="gws-assistant-activity"><InlineProgress CssClass="me-1" />@turn.Activity</div>
                     }
                     @if (turn.Error is not null)
                     {

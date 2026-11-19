@@ -139,7 +139,7 @@
                         }
                         <div class="d-flex gap-2">
                             <div class="flex-grow-1">
-                                <textarea class="form-control" rows="2" placeholder="Reply..." @bind="_replyBody"></textarea>
+                                <textarea class="form-control" rows="2" placeholder="Reply…" @bind="_replyBody"></textarea>
                                 <InputFile OnChange="args => OnFilesSelectedAsync(args, _replyAttachments)" multiple class="form-control form-control-sm mt-1" />
                                 @if (_replyAttachments.Count > 0)
                                 {

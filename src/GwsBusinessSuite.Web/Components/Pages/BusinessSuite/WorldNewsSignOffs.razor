@@ -13,7 +13,7 @@
     @if (_error is { } error) { <p class="alert alert-warning" role="alert">@error</p> }
     @if (_status is { } status) { <p class="small" role="status">@status</p> }
     <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@_busy" @onclick="LoadAsync">Refresh approvals</button>
-    @if (_busy) { <LoadingIndicator Message="Updating desk approval records..." /> }
+    @if (_busy) { <LoadingIndicator Message="Updating desk approval records…" /> }
     @if (_state is { } state)
     {
         <p class="small text-secondary mt-2">Current stored-story label: @state.LabelLevel.

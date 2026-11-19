@@ -26,7 +26,7 @@
                 <button type="button" class="btn btn-sm btn-outline-primary" @onclick="GenerateOverviewAsync" disabled="@_generating">
                     @if (_generating)
                     {
-                        <span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>
+                        <InlineProgress CssClass="me-1" />
                         <span>Writing overview…</span>
                     }
                     else

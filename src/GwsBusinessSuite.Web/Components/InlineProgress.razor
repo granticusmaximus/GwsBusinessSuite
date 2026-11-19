@@ -1,0 +1,13 @@
+@* The app's one small activity indicator (19-11-26, Apple-style streamlining item 5): in a button
+   while it works, beside a live status line, or in a search box. It takes the colour of the text
+   around it, and with Reduce Motion it pulses gently instead of spinning. Pages and panels that are
+   loading use LoadingIndicator (the boot screen); a long job uses BusyOverlay.
+   Label: what a screen reader hears. Leave it empty when the text beside it already says it. *@
+
+<span class="gws-progress @CssClass" role="@(string.IsNullOrEmpty(Label) ? null : "status")"
+      aria-hidden="@(string.IsNullOrEmpty(Label) ? "true" : null)"><span class="visually-hidden">@Label</span></span>
+
+@code {
+    [Parameter] public string? Label { get; set; }
+    [Parameter] public string? CssClass { get; set; }
+}

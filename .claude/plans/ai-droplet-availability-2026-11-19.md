@@ -46,3 +46,20 @@ Grant: "build a way to work the Ollama droplet to do better and be available", a
       ~2,400 tokens. Test: `EveryRequest_ShouldAskForThePinnedContext_SoOllamaNeverReloadsTheModel`.
 - [ ] After deploy: runner starts stop (`journalctl -u ollama | grep -c "starting llama-server"`),
       World News reads finish, Today shows today's stories, future-dated reports gone.
+
+## 19-11-26 afternoon: SentinelGPT slow in World News (Grant)
+
+- Droplet CPU pressure 96%, embedding runner and chat runner running at once; 3.2 tokens/s writing,
+  14-20 reading; 14 of 19 generations timed out in 30 min. No reloads (context pin held).
+- Cause 1: production couldn't reach the Mac (8 s timeout). Tailscale was stopped on Dagda. Started it
+  (Grant: "investigate and fix"); production reaches the Mac in 0.18 s; the Mac answered 6 jobs in
+  7-13 s each.
+- Cause 2: `FailoverOllamaService.PreferMac` (15-11) sent every request under 12,000 chars, 2,048
+  output tokens, 16K context or 8 tools to the droplet first, falling back only on failure. Grant:
+  the Mac does most of the work, the droplet is the fallback. Now Mac first unless a caller asks for
+  PreferDroplet (`ShortRequests_ShouldGoToTheMacFirst_AndOnlyFallBackToTheDroplet`).
+- Cause 3: a Mac that is down at start-up or stays down logged once. `OllamaFailoverMonitor` now
+  repeats the warning hourly with what to check (`AMacThatStaysDown_ShouldBeReportedAgainEveryHour`).
+- Note: `--prune` on 19-11 also removed the droplet's `sentinelgpt-gemma4` copy (6.3 GB, couldn't fit
+  in RAM alongside the rest); the Mac has gemma4.
+- [ ] After deploy: Mac handles summaries/hot takes/overviews; droplet generate failures stop.

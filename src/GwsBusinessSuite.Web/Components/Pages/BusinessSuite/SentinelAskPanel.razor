@@ -32,7 +32,7 @@
                 </select>
             }
             <button type="button" class="btn btn-sm btn-primary" disabled="@(_busy || SentinelAsk.Normalize(_question).Length < 3)" @onclick="AskAsync">
-                @(_busy ? "Answering..." : "Ask")
+                @(_busy ? "Answering…" : "Ask")
             </button>
         </div>
     </div>
@@ -75,7 +75,7 @@
             }
             else if (_busy)
             {
-                <p class="text-secondary">@(_draft.Length > 0 ? _draft : context.HasSources ? $"Reading {context.Sources.Count} source{(context.Sources.Count == 1 ? "" : "s")}..." : "Searching...")</p>
+                <p class="text-secondary">@(_draft.Length > 0 ? _draft : context.HasSources ? $"Reading {context.Sources.Count} source{(context.Sources.Count == 1 ? "" : "s")}..." : "Searching…")</p>
             }
         </div>
         @if (context.HasSources)
@@ -117,7 +117,7 @@
     private SentinelAskAnswer? _answer;
     private CancellationTokenSource? _cts;
 
-    private string EngineText => !_probed ? "Checking for a model on this computer..."
+    private string EngineText => !_probed ? "Checking for a model on this computer…"
         : _localModels.Count == 1 ? $"Answers with {_localModel} on this computer"
         : _localModels.Count > 1 ? "Answers on this computer with"
         : "Answers with the server's model";
