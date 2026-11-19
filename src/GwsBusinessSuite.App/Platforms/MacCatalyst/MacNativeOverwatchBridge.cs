@@ -29,6 +29,13 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
     private CancellationTokenSource? _regionChangeDebounce;
     private bool _pickPointMode;
     private bool _hasInitialRegion;
+    internal const string DimOverlayTitle = "gws-dim";
+
+    // The web globe's colours (NativeShapes.ToneHex).
+    internal static UIColor Tone(NativeShapes.MarkerTone tone) => Hex(NativeShapes.ToneHex(tone));
+
+    internal static UIColor Hex(string hex) => UIColor.FromRGB(
+        Convert.ToInt32(hex.Substring(1, 2), 16), Convert.ToInt32(hex.Substring(3, 2), 16), Convert.ToInt32(hex.Substring(5, 2), 16));
 
     private MacNativeOverwatchBridge(WKWebView webView)
     {
@@ -43,6 +50,15 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
             RotateEnabled = true,
             Hidden = true
         };
+        // Styled like the web globe (19-11-26): dark labels, no Apple points of interest, and the
+        // imagery dimmed under the labels (the web dims and desaturates its satellite tiles).
+        _map.OverrideUserInterfaceStyle = UIUserInterfaceStyle.Dark;
+        _map.PointOfInterestFilter = MKPointOfInterestFilter.FilterExcludingAllCategories;
+        // The whole world in map points (MapKit's world is 2^28 points square).
+        const double World = 268_435_456;
+        var dim = MKPolygon.FromPoints([new MKMapPoint(0, 0), new MKMapPoint(World, 0), new MKMapPoint(World, World), new MKMapPoint(0, World)]);
+        dim.Title = DimOverlayTitle;
+        _map.AddOverlay(dim, MKOverlayLevel.AboveRoads);
         _delegate = new MapDelegate(this);
         _map.Delegate = _delegate;
         webView.Superview?.InsertSubviewBelow(_map, webView);
@@ -964,9 +980,9 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
                     ?? new MKMarkerAnnotationView(annotation, "gws-cluster");
                 clusterView.Annotation = annotation;
                 clusterView.CanShowCallout = false;
-                clusterView.MarkerTintColor = UIColor.SystemGreen;
+                clusterView.MarkerTintColor = Tone(NativeShapes.MarkerTone.Green);
                 clusterView.GlyphImage = null;
-                clusterView.GlyphTintColor = UIColor.White;
+                clusterView.GlyphTintColor = Hex(NativeShapes.GlyphHex);
                 clusterView.GlyphText = ClusterCount(annotation).ToString(CultureInfo.InvariantCulture);
                 return clusterView;
             }
@@ -976,7 +992,7 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
             var style = NativeShapes.Marker(native.Operation, native.Payload);
             view.DisplayPriority = style.Prominent ? MKFeatureDisplayPriority.DefaultHigh : MKFeatureDisplayPriority.DefaultLow;
             view.MarkerTintColor = MarkerColor(style.Tone);
-            view.GlyphTintColor = style.Tone == NativeShapes.MarkerTone.Yellow ? UIColor.Black : UIColor.White;
+            view.GlyphTintColor = NativeShapes.DarkGlyph(style.Tone) ? Hex(NativeShapes.GlyphHex) : UIColor.White;
             view.GlyphText = null;
             view.GlyphImage = Symbol(style.Symbol);
             return view;
@@ -991,19 +1007,7 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
             return image;
         }
 
-        private static UIColor MarkerColor(NativeShapes.MarkerTone tone) => tone switch
-        {
-            NativeShapes.MarkerTone.Red => UIColor.SystemRed,
-            NativeShapes.MarkerTone.Orange => UIColor.SystemOrange,
-            NativeShapes.MarkerTone.Yellow => UIColor.SystemYellow,
-            NativeShapes.MarkerTone.Green => UIColor.SystemGreen,
-            NativeShapes.MarkerTone.Teal => UIColor.SystemTeal,
-            NativeShapes.MarkerTone.Cyan => UIColor.SystemCyan,
-            NativeShapes.MarkerTone.Blue => UIColor.SystemBlue,
-            NativeShapes.MarkerTone.Purple => UIColor.SystemPurple,
-            NativeShapes.MarkerTone.Pink => UIColor.SystemPink,
-            _ => UIColor.SystemGray,
-        };
+        private static UIColor MarkerColor(NativeShapes.MarkerTone tone) => Tone(tone);
 
         public override MKOverlayRenderer OverlayRenderer(MKMapView mapView, IMKOverlay overlay) => overlay switch
         {
@@ -1012,17 +1016,18 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
             MKMultiPolyline paths => LineStyle(new MKMultiPolylineRenderer(paths), paths.Title),
             MKPolygon polygon => polygon.Title switch
             {
-                "setWeatherAlerts" => new MKPolygonRenderer(polygon) { FillColor = UIColor.SystemRed.ColorWithAlpha(0.16f), StrokeColor = UIColor.SystemRed, LineWidth = 1.5f },
-                "setPowerOutages" => new MKPolygonRenderer(polygon) { FillColor = UIColor.SystemPink.ColorWithAlpha(0.22f), StrokeColor = UIColor.SystemPink, LineWidth = 1 },
-                "setAurora" => new MKPolygonRenderer(polygon) { FillColor = UIColor.SystemGreen.ColorWithAlpha(0.22f), StrokeColor = UIColor.Clear, LineWidth = 0 },
-                "setAurora:strong" => new MKPolygonRenderer(polygon) { FillColor = UIColor.SystemYellow.ColorWithAlpha(0.3f), StrokeColor = UIColor.Clear, LineWidth = 0 },
-                _ => new MKPolygonRenderer(polygon) { FillColor = UIColor.SystemOrange.ColorWithAlpha(0.22f), StrokeColor = UIColor.SystemOrange, LineWidth = 2 },
+                DimOverlayTitle => new MKPolygonRenderer(polygon) { FillColor = UIColor.Black.ColorWithAlpha(0.3f), StrokeColor = UIColor.Clear, LineWidth = 0 },
+                "setWeatherAlerts" => new MKPolygonRenderer(polygon) { FillColor = Tone(NativeShapes.MarkerTone.Red).ColorWithAlpha(0.16f), StrokeColor = Tone(NativeShapes.MarkerTone.Red), LineWidth = 1.5f },
+                "setPowerOutages" => new MKPolygonRenderer(polygon) { FillColor = Tone(NativeShapes.MarkerTone.Pink).ColorWithAlpha(0.22f), StrokeColor = Tone(NativeShapes.MarkerTone.Pink), LineWidth = 1 },
+                "setAurora" => new MKPolygonRenderer(polygon) { FillColor = Tone(NativeShapes.MarkerTone.Green).ColorWithAlpha(0.22f), StrokeColor = UIColor.Clear, LineWidth = 0 },
+                "setAurora:strong" => new MKPolygonRenderer(polygon) { FillColor = Tone(NativeShapes.MarkerTone.Yellow).ColorWithAlpha(0.3f), StrokeColor = UIColor.Clear, LineWidth = 0 },
+                _ => new MKPolygonRenderer(polygon) { FillColor = Tone(NativeShapes.MarkerTone.Orange).ColorWithAlpha(0.22f), StrokeColor = Tone(NativeShapes.MarkerTone.Orange), LineWidth = 2 },
             },
             MKPolyline line => line.Title switch
             {
-                "setRoadTraffic" => new MKPolylineRenderer(line) { StrokeColor = UIColor.SystemYellow.ColorWithAlpha(0.85f), LineWidth = 3 },
+                "setRoadTraffic" => new MKPolylineRenderer(line) { StrokeColor = Tone(NativeShapes.MarkerTone.Yellow).ColorWithAlpha(0.85f), LineWidth = 3 },
                 "setSatellites" => new MKPolylineRenderer(line) { StrokeColor = UIColor.White.ColorWithAlpha(0.45f), LineWidth = 1 },
-                _ => new MKPolylineRenderer(line) { StrokeColor = UIColor.SystemCyan, LineWidth = 3 },
+                _ => new MKPolylineRenderer(line) { StrokeColor = Tone(NativeShapes.MarkerTone.Cyan), LineWidth = 3 },
             },
             _ => new MKOverlayRenderer(overlay)
         };
@@ -1032,12 +1037,12 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
         {
             var (fill, stroke, width) = layer switch
             {
-                "setWeatherAlerts" => (UIColor.SystemRed.ColorWithAlpha(0.16f), UIColor.SystemRed, 1.5f),
-                "setPowerOutages" => (UIColor.SystemPink.ColorWithAlpha(0.22f), UIColor.SystemPink, 1f),
-                "setAurora" => (UIColor.SystemGreen.ColorWithAlpha(0.22f), UIColor.Clear, 0f),
-                "setAurora:strong" => (UIColor.SystemYellow.ColorWithAlpha(0.3f), UIColor.Clear, 0f),
-                "setConvergence" => (UIColor.SystemOrange.ColorWithAlpha(0.18f), UIColor.SystemOrange, 1.5f),
-                _ => (UIColor.SystemOrange.ColorWithAlpha(0.22f), UIColor.SystemOrange, 2f),
+                "setWeatherAlerts" => (Tone(NativeShapes.MarkerTone.Red).ColorWithAlpha(0.16f), Tone(NativeShapes.MarkerTone.Red), 1.5f),
+                "setPowerOutages" => (Tone(NativeShapes.MarkerTone.Pink).ColorWithAlpha(0.22f), Tone(NativeShapes.MarkerTone.Pink), 1f),
+                "setAurora" => (Tone(NativeShapes.MarkerTone.Green).ColorWithAlpha(0.22f), UIColor.Clear, 0f),
+                "setAurora:strong" => (Tone(NativeShapes.MarkerTone.Yellow).ColorWithAlpha(0.3f), UIColor.Clear, 0f),
+                "setConvergence" => (Tone(NativeShapes.MarkerTone.Orange).ColorWithAlpha(0.18f), Tone(NativeShapes.MarkerTone.Orange), 1.5f),
+                _ => (Tone(NativeShapes.MarkerTone.Orange).ColorWithAlpha(0.22f), Tone(NativeShapes.MarkerTone.Orange), 2f),
             };
             renderer.FillColor = fill;
             renderer.StrokeColor = stroke;
@@ -1049,9 +1054,9 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
         {
             (renderer.StrokeColor, renderer.LineWidth) = layer switch
             {
-                "setRoadTraffic" => (UIColor.SystemYellow.ColorWithAlpha(0.85f), 3f),
+                "setRoadTraffic" => (Tone(NativeShapes.MarkerTone.Yellow).ColorWithAlpha(0.85f), 3f),
                 "setSatellites" => (UIColor.White.ColorWithAlpha(0.45f), 1f),
-                _ => (UIColor.SystemCyan, 3f),
+                _ => (Tone(NativeShapes.MarkerTone.Cyan), 3f),
             };
             return renderer;
         }

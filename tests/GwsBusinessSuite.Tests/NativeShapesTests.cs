@@ -180,4 +180,26 @@ public sealed class NativeShapesTests
         Assert.Equal("exclamationmark.triangle.fill", NativeShapes.Marker("setCameraPins", O(("mode", "StillImage"), ("state", "Unavailable"))).Symbol);
         Assert.Equal("camera.fill", NativeShapes.Marker("setCameraPins", O(("name", "Old payload"))).Symbol);
     }
+
+    // 19-11-26: the Mac map uses the web globe's colours, with a dark glyph on the bright ones.
+    [Fact]
+    public void MacMapPalette_ShouldMatchTheWebGlobe()
+    {
+        Assert.Equal("#7dffb0", NativeShapes.ToneHex(NativeShapes.MarkerTone.Green));
+        Assert.Equal("#c77dff", NativeShapes.ToneHex(NativeShapes.MarkerTone.Purple));
+        Assert.Equal("#ff3b3b", NativeShapes.ToneHex(NativeShapes.MarkerTone.Red));
+        Assert.True(NativeShapes.DarkGlyph(NativeShapes.MarkerTone.Green));
+        Assert.False(NativeShapes.DarkGlyph(NativeShapes.MarkerTone.Red));
+
+        var js = File.ReadAllText(Path.Combine(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../..")),
+            "src/GwsBusinessSuite.Web/wwwroot/js/tactical-globe.js"));
+        foreach (var tone in new[] { NativeShapes.MarkerTone.Green, NativeShapes.MarkerTone.Purple, NativeShapes.MarkerTone.Red, NativeShapes.MarkerTone.Pink })
+            Assert.Contains(NativeShapes.ToneHex(tone), js, StringComparison.OrdinalIgnoreCase);
+
+        var bridge = File.ReadAllText(Path.Combine(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../..")),
+            "src/GwsBusinessSuite.App/Platforms/MacCatalyst/MacNativeOverwatchBridge.cs"));
+        Assert.DoesNotContain("UIColor.System", bridge);
+        Assert.Contains("_map.OverrideUserInterfaceStyle = UIUserInterfaceStyle.Dark;", bridge);
+        Assert.Contains("_map.AddOverlay(dim, MKOverlayLevel.AboveRoads);", bridge);
+    }
 }

@@ -15,6 +15,28 @@ public static class NativeShapes
     public sealed record MarkerStyle(string Symbol, MarkerTone Tone, bool Prominent = false);
     public enum MarkerTone { Red, Orange, Yellow, Green, Teal, Cyan, Blue, Purple, Pink, Gray }
 
+    // The web globe's palette (tactical-globe.js), so the Mac map's pins and areas match it
+    // (19-11-26): green cameras, purple news, red/orange/yellow severity, pink outages.
+    public static string ToneHex(MarkerTone tone) => tone switch
+    {
+        MarkerTone.Red => "#ff3b3b",
+        MarkerTone.Orange => "#ff9d3b",
+        MarkerTone.Yellow => "#ffe83b",
+        MarkerTone.Green => "#7dffb0",
+        MarkerTone.Teal => "#3fe0c5",
+        MarkerTone.Cyan => "#00e5ff",
+        MarkerTone.Blue => "#5ec8ff",
+        MarkerTone.Purple => "#c77dff",
+        MarkerTone.Pink => "#ff8bd1",
+        _ => "#b0b8c4",
+    };
+
+    // The web palette is bright, so most pins take the web's near-black glyph; white reads better
+    // only on the strong red, orange and purple.
+    public static bool DarkGlyph(MarkerTone tone) => tone is not (MarkerTone.Red or MarkerTone.Orange or MarkerTone.Purple);
+
+    public const string GlyphHex = "#05080a";
+
     // Ops with their own handler in the bridge (tiles, settings, grids), not points and paths.
     public static readonly IReadOnlySet<string> Handled = new HashSet<string>(StringComparer.Ordinal)
     {

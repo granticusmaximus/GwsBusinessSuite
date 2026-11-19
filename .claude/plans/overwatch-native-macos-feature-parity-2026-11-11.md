@@ -91,3 +91,16 @@ and zoom lag. Causes found and fixed:
 - Pins do not bleed through the back of the map, clustered counts are visible, and selecting an
   actionable pin opens the same detail workflow as the web renderer.
 - Browser and PWA behavior remains unchanged.
+
+## 19-11-26: Mac map styled like the web globe
+
+- [x] `MKMapView`: dark interface style (dark labels), `PointOfInterestFilter = ExcludingAllFilter`,
+  and a world `MKPolygon` ("gws-dim", black at 30%) at `AboveRoads`, so the imagery is dimmed under
+  the labels like the web's darkened tiles.
+- [x] Colours: `NativeShapes.ToneHex` is the web palette; the bridge's pins, clusters, areas and
+  lines use it (no `UIColor.System*` left). `DarkGlyph` puts the web's near-black glyph on the
+  bright tones. Guarded in `NativeShapesTests.MacMapPalette_ShouldMatchTheWebGlobe`.
+- [ ] Not done: the web's flat pin discs in place of MapKit's balloon markers. Replacing the
+  annotation views would change the hit-testing and reselect behaviour the native map harness
+  covers, so it wants its own pass with an on-screen check.
+- [ ] Grant: look at it on screen after `open gws`.
