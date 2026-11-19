@@ -62,4 +62,9 @@ runs; see ai-droplet-availability-2026-11-19), and the six items that need Grant
       (`WorldNewsService.BriefSummaryAsync`, prompt in `OverwatchBrief`), the report and its source, and
       the matching stories with their latest summaries (`BriefCoverageAsync` over `FindAsync`). Search
       words from `HazardFeature.NewsQuery` (conflict sides + place) or the title. A first version that
-      jumped to a story or the search was replaced the same day. Tests: OverwatchBriefTests.
+      jumped to a story or the search was replaced the same day. Tests: OverwatchBriefTests.- [x] 19-11-26 12:43 Mac app crash zooming on Georgia (crash report GwsBusinessSuite.App-2026-11-19-124328.ips):
+      EXC_BAD_ACCESS at 0x20 in MapKit `_insert` (MKQuadTrie) from `requestAddingClusterForAnnotationViews`
+      after `MacNativeOverwatchBridge.ZoomBy`. Cause: the day's `CreateClusterAnnotation` override built
+      MKClusterAnnotation from macOS 27's protocol-wrapper members. Removed; `LabelCluster` now only sets
+      the title/subtitle on MapKit's own group (setter checked, nothing throws). Guard:
+      `MacMap_ShouldLabelMapKitsOwnGroups_NotBuildThem`. Needs `open gws` to reach the installed app.

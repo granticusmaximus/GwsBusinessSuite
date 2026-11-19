@@ -921,22 +921,41 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
         private static readonly Dictionary<string, UIImage> Symbols = new(StringComparer.Ordinal);
 
         // The group's label says what it holds ("7 conflict reports") and names the first few items,
-        // instead of MapKit's first title and "+6 more" (19-11-26). Members share a layer (ClusteringIdentifier).
-        public override MKClusterAnnotation CreateClusterAnnotation(MKMapView mapView, IMKAnnotation[] memberAnnotations)
+        // instead of MapKit's first title and "+6 more" (19-11-26). MapKit makes the group; only its
+        // label is set here. Making the group ourselves (mapView:clusterAnnotationForMemberAnnotations:)
+        // crashed the app on 19-11-26: since macOS 27 the members arrive as protocol wrappers, and the
+        // cluster built from them gave MapKit's quad trie a nil annotation (EXC_BAD_ACCESS at 0x20 while
+        // zooming). Nothing here may throw: a group without a label is fine, a crash isn't.
+        private void LabelCluster(IMKAnnotation annotation)
         {
-            var members = memberAnnotations.Select(owner.Resolve).OfType<NativeAnnotation>().ToList();
-            var cluster = new MKClusterAnnotation(memberAnnotations);
-            if (members.Count == 0) return cluster;
-            var (title, subtitle) = NativeShapes.ClusterLabel(members[0].Operation, members.Select(m => m.Title).ToList());
-            cluster.Title = title;
-            cluster.Subtitle = subtitle;
-            return cluster;
+            try
+            {
+                var members = (owner.ClusterMembers(annotation) ?? []).Select(owner.Resolve).OfType<NativeAnnotation>().ToList();
+                if (members.Count == 0) return;
+                var (title, subtitle) = NativeShapes.ClusterLabel(members[0].Operation, members.Select(m => m.Title).ToList());
+                if (annotation is MKClusterAnnotation cluster)
+                {
+                    cluster.Title = title;
+                    cluster.Subtitle = subtitle;
+                    return;
+                }
+                if (AsNative(annotation) is not { } native) return;
+                if (native.RespondsToSelector(new ObjCRuntime.Selector("setTitle:")))
+                    native.SetValueForKey(new NSString(title), new NSString("title"));
+                if (native.RespondsToSelector(new ObjCRuntime.Selector("setSubtitle:")))
+                    native.SetValueForKey(new NSString(subtitle), new NSString("subtitle"));
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Overwatch: couldn't label a pin group: {ex.Message}");
+            }
         }
 
         public override MKAnnotationView GetViewForAnnotation(MKMapView mapView, IMKAnnotation annotation)
         {
             if (IsCluster(annotation))
             {
+                LabelCluster(annotation);
                 var clusterView = mapView.DequeueReusableAnnotation("gws-cluster") as MKMarkerAnnotationView
                     ?? new MKMarkerAnnotationView(annotation, "gws-cluster");
                 clusterView.Annotation = annotation;

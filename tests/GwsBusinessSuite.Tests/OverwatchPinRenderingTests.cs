@@ -23,6 +23,18 @@ public sealed class OverwatchPinRenderingTests
             "the World News panel shows the story's subtype");
     }
 
+    // 19-11-26: the Mac app crashed zooming in on Georgia. Building MapKit's pin groups ourselves
+    // (mapView:clusterAnnotationForMemberAnnotations:) gave its quad trie a nil annotation on macOS 27;
+    // the app only labels the groups MapKit makes.
+    [Fact]
+    public void MacMap_ShouldLabelMapKitsOwnGroups_NotBuildThem()
+    {
+        var bridge = File.ReadAllText(Path.Combine(RepoRoot, "src/GwsBusinessSuite.App/Platforms/MacCatalyst/MacNativeOverwatchBridge.cs"));
+        bridge.Should().NotContain("override MKClusterAnnotation CreateClusterAnnotation")
+            .And.NotContain("new MKClusterAnnotation(")
+            .And.Contain("LabelCluster(annotation);");
+    }
+
     // 19-11-26: every hazard and conflict window opens its World News briefing.
     [Fact]
     public void HazardWindows_ShouldOfferTheWorldNewsStory()
