@@ -3,6 +3,9 @@ using Microsoft.Extensions.Diagnostics.HealthChecks;
 
 namespace GwsBusinessSuite.Web.HealthChecks;
 
+// Degraded, never Unhealthy (19-11-26): the site works without AI, but a hung Ollama on the AI
+// droplet made /health/ready 503, so a deploy and then its rollback both failed and the live site
+// was marked not ready. AI features already say when the server model is unavailable.
 public sealed class OllamaHealthCheck(IOllamaService ollamaService) : IHealthCheck
 {
     // The configured Ollama HttpClient timeout is set for long generation calls (minutes),
@@ -27,11 +30,11 @@ public sealed class OllamaHealthCheck(IOllamaService ollamaService) : IHealthChe
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
-            return HealthCheckResult.Unhealthy("Ollama did not respond within the health check timeout.");
+            return HealthCheckResult.Degraded("Ollama did not respond within the health check timeout.");
         }
         catch (Exception ex)
         {
-            return HealthCheckResult.Unhealthy("Ollama is unreachable.", ex);
+            return HealthCheckResult.Degraded("Ollama is unreachable.", ex);
         }
     }
 }

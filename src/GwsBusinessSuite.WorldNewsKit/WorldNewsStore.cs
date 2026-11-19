@@ -2251,11 +2251,24 @@ public sealed partial class WorldNewsStore
         command.ExecuteNonQuery();
     }
 
-    public void Prune(DateTimeOffset before)
+    // How far ahead of now a report's date may be before it is treated as wrong, not early.
+    public static readonly TimeSpan FutureTolerance = TimeSpan.FromHours(1);
+
+    // `now` also drops reports dated in the future (19-11-26): crawled sports and event pages carried
+    // their fixture's date as "published", so they counted as recent until that date (one into
+    // 22-02-27) and sat on Today. A story left with no reports goes; the rest get a true last_seen.
+    public void Prune(DateTimeOffset before, DateTimeOffset? now = null)
     {
         using var connection = Open();
         using var command = connection.CreateCommand();
-        command.CommandText = """
+        command.CommandText = (now is null ? "" : """
+            DELETE FROM articles WHERE seen_at > $future;
+            DELETE FROM events WHERE last_seen > $future AND NOT EXISTS (SELECT 1 FROM articles a WHERE a.event_id = events.id);
+            UPDATE events SET last_seen = (SELECT MAX(a.seen_at) FROM articles a WHERE a.event_id = events.id),
+                              first_seen = MIN(first_seen, (SELECT MAX(a.seen_at) FROM articles a WHERE a.event_id = events.id))
+                WHERE last_seen > $future;
+
+            """) + """
             DELETE FROM articles WHERE seen_at < $before;
             DELETE FROM country_hours WHERE hour < $before;
             DELETE FROM outlet_days WHERE day < $before;
@@ -2274,6 +2287,7 @@ public sealed partial class WorldNewsStore
             DELETE FROM grouping_pairs WHERE event_a NOT IN (SELECT id FROM events) OR event_b NOT IN (SELECT id FROM events);
             """;
         command.Parameters.AddWithValue("$before", before.ToUnixTimeSeconds());
+        if (now is { } at) command.Parameters.AddWithValue("$future", (at + FutureTolerance).ToUnixTimeSeconds());
         command.ExecuteNonQuery();
     }
 

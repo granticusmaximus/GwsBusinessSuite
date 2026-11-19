@@ -477,6 +477,10 @@ public sealed class WebCrawler(
 
         var title = ArticleNormalizer.CleanTitle(page.Title);
         if (title.Length == 0) return null;
+        // "Published" after the page was fetched is a fixture or event date, not a report (19-11-26:
+        // sports listings dated weeks ahead stayed on Today until then).
+        if (page.PublishedUnix is { } stated
+            && stated > page.FetchedUnix + (long)WorldNewsStore.FutureTolerance.TotalSeconds) return null;
         var names = outlets.Select(outlet => outlet.Name).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
         var languages = outlets.Select(outlet => outlet.Language).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
         var countries = outlets.Select(outlet => outlet.Country).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();

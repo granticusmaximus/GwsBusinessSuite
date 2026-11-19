@@ -252,7 +252,7 @@ public sealed class WorldNewsPipeline(WorldNewsStore store, HttpClient http, Gde
         }
 
         var grouped = Group();
-        store.Prune(time.GetUtcNow() - options.KeepFor);
+        store.Prune(time.GetUtcNow() - options.KeepFor, time.GetUtcNow());
         store.ReleaseStaleVectors(time.GetUtcNow());
 
         var retainedSince = time.GetUtcNow() - options.KeepFor;

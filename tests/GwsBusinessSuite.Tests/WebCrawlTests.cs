@@ -261,6 +261,31 @@ public sealed class WebCrawlTests : IDisposable
         await bad.Should().ThrowAsync<WebCrawlException>();
     }
 
+    // 19-11-26: a "published" date after the fetch is a fixture or event date, not a report.
+    [Fact]
+    public async Task Crawler_ShouldNotImportAPageDatedAfterItWasFetched()
+    {
+        var clock = new MovableClock(new DateTimeOffset(2026, 11, 11, 12, 0, 0, TimeSpan.Zero));
+        var host = "www.nytimes.com";
+        var crawlStore = new WebCrawlStore(_dbPath);
+        var fetched = clock.GetUtcNow().ToUnixTimeSeconds();
+        await crawlStore.AddPageAsync($"https://{host}/sports/fixture", host, "Play-off: Netherlands - Slovenia",
+            clock.GetUtcNow().AddDays(20), fetched, "Kick-off on 01-12.");
+        await crawlStore.AddPageAsync($"https://{host}/world/today", host, "Floods in Valencia",
+            clock.GetUtcNow().AddMinutes(-10), fetched, "Report.");
+
+        await using var app = await TestApp.CreateAsync();
+        var crawler = new WebCrawler(new FakeWeb(clock), app.ScopeFactory, Options.Create(new WebCrawlOptions { DatabasePath = _dbPath }),
+            clock, NullLogger<WebCrawler>.Instance);
+        var worldNews = new WorldNewsStore(_worldNewsPath);
+
+        var imported = await crawler.ImportWorldNewsPagesAsync(worldNews, 10);
+
+        imported.Scanned.Should().Be(2);
+        imported.Added.Should().Be(1);
+        worldNews.RecentReports(clock.GetUtcNow().AddDays(-1)).Should().ContainSingle().Which.Title.Should().Be("Floods in Valencia");
+    }
+
     [Fact]
     public async Task Crawler_ShouldImportOnlyCuratedOutletMetadata_AndResumeWithoutDuplicateReports()
     {

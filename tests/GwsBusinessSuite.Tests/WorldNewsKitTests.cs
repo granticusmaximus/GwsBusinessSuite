@@ -1681,6 +1681,36 @@ public sealed class WorldNewsKitTests : IDisposable
             if (File.Exists(_dbPath + suffix)) File.Delete(_dbPath + suffix);
     }
 
+    // 19-11-26: crawled fixture pages dated weeks ahead stayed on Today (newest report: 22-02-27).
+    [Fact]
+    public void Prune_ShouldDropFutureDatedReports_AndGiveTheirStoriesATrueLastSeen()
+    {
+        var store = new WorldNewsStore(_dbPath);
+        var fixture = Article("fixture", "Play-off: Netherlands - Slovenia", "English", Now.AddDays(20));
+        var real = Article("real", "Floods in Valencia", "English", Now.AddHours(-1));
+        var misdated = Article("misdated", "Floods in Valencia: rescue", "English", Now.AddDays(30));
+        var early = Article("early", "Summit opens", "English", Now.AddMinutes(30));
+        store.AddArticles([fixture, real, misdated, early]);
+        var future = Event("future", fixture.Title, [1f, 0f], 1);
+        future.FirstSeen = Now.AddDays(20);
+        future.LastSeen = Now.AddDays(20);
+        var mixed = Event("mixed", real.Title, [0f, 1f], 2);
+        mixed.LastSeen = Now.AddDays(30);
+        var soon = Event("soon", early.Title, [1f, 1f], 1);
+        soon.LastSeen = Now.AddMinutes(30);
+        store.SaveClustering(new ClusterResult(
+            [(fixture.Id, "future"), (real.Id, "mixed"), (misdated.Id, "mixed"), (early.Id, "soon")], [future, mixed, soon], 3));
+
+        store.Prune(Now.AddDays(-7), Now);
+
+        store.RecentReports(Now.AddDays(-1)).Select(r => r.Id).Should().BeEquivalentTo(["real", "early"],
+            "a report up to an hour ahead is a clock difference; weeks ahead is a fixture date");
+        var events = store.ActiveEvents(Now.AddDays(-1)).ToDictionary(e => e.Id);
+        events.Should().NotContainKey("future", "a story with only future-dated reports goes");
+        events["mixed"].LastSeen.Should().Be(Now.AddHours(-1));
+        events["soon"].LastSeen.Should().Be(Now.AddMinutes(30));
+    }
+
     private static WorldArticle Article(string id, string title, string language, DateTimeOffset seen, string? hint = null) =>
         new(id, $"https://example.com/{id}", title, "Outlet " + id, language, "Somewhere", seen, "test", hint);
 

@@ -36,6 +36,15 @@ service ("build a service that does what that was intending and then have Ollama
       the others, `IsBehind`; `OllamaWebSearchServiceTests`: never paid unless allowed, refusal
       hand-over, no key sent to SearXNG).
 - [x] `docs/INTELLIGENCE_USER_GUIDE.md` (Sources section), `.env.example`, `docker-compose.yml`.
+- [x] 19-11-26 follow-up (Grant: Today still shows days-old news after a Pull). Production
+      `feed_state`: last successful read **15-11-26 05:22**; 199,392 reports since 12-11 never
+      grouped, so Today showed 15-11's stories, and Pull's read hit the same overflow. Also 124
+      crawled pages were dated in the future (sports fixtures, the newest 22-02-27), and with the
+      3-hour window they counted as "recent" and sat on Today. Fixes: `WebCrawler.ToWorldArticle`
+      skips a page whose published date is after its fetch (+1 h), and `WorldNewsStore.Prune(before,
+      now)` (every read) deletes reports dated over an hour ahead, drops stories left empty and
+      resets the rest's `last_seen`. Grouping takes the newest reports first (`RecentArticlesToEmbed`,
+      1,500 a read), so Today catches up on the first good read.
 - [ ] After deploy: confirm `World news read failed` stops and reads finish every ~5 minutes;
       discovery runs on SearXNG with no 402s.
 - [ ] Optional, Grant: delete `OLLAMA_WEB_API_KEY` from the droplet `.env`. It is harmless now.
