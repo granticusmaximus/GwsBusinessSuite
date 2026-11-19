@@ -2,11 +2,19 @@
 
 ## Granular Milestones
 
-- [ ] Unit 1: Outlet Ingestion & Regional Media Expansion (`OutletFeeds.cs`, `GoogleNewsFeed.cs`, `WorldNewsMapService.cs`)
-  - [ ] 1.1 Expand `OutletFeeds.Outlets` with key regional, Middle Eastern, Asian, European, and Latin American publishers
-  - [ ] 1.2 Implement adaptive outlet threshold for low-density/conflict zones (allow 1-2 outlets if flagged with local wire/conflict)
-  - [ ] 1.3 Add unit tests in `tests/GwsBusinessSuite.Tests/` to verify feed parsing and adaptive thresholds
-  - [ ] 1.4 Run tests to verify Unit 1 passes
+- [x] Unit 1: Outlet Ingestion & Regional Media Expansion (19-11-26)
+  - [x] 1.1 44 candidate regional feeds tested from the Mac with the server's user agent; 17 new ones
+        that answered with current stories added (Africa, Middle East, South/Southeast/Central Asia,
+        Latin America, Poland). Refusals (403: Addis Standard, Efecto Cocuyo, TOLOnews) respected;
+        AllAfrica left out (republishes other outlets). Myanmar added to WorldRegions; VnExpress marked
+        state media. Seven candidates were already in the roster.
+  - [x] 1.2 `WorldNewsMapService.QualifiesByThinCoverage`: one outlet is enough for a conflict or
+        disaster placed in a country with fewer than 2 roster newsrooms, if a reporting outlet is
+        based there. The pin says LOCAL REPORTING ONLY, NOT YET CONFIRMED ELSEWHERE (`ThinCoverage`).
+  - [x] 1.3 Tests: `OutletFeeds_ContainsExpandedRegionalNewsrooms` (extended),
+        `WorldNewsMapService_ThinCoverage_AllowsOneLocalOutletForConflictOrDisaster`; feed parsing is
+        covered by the existing OutletFeeds parser tests (RSS/RDF/Atom).
+  - [x] 1.4 World News tests pass (375).
 
 - [x] Unit 2: Viewport-Adaptive Geo-Querying (`WorldNewsMapService.cs`, `OverwatchGrid.razor`, `tactical-globe.js`)
   - [x] 2.1 Existing `WorldNewsMapService.SignalsAt` filters mapped situations to the requested bounds.

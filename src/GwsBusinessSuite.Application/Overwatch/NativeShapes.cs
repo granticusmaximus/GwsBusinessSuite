@@ -180,6 +180,7 @@ public static class NativeShapes
             "setInternetOutages" => new("wifi.slash", MarkerTone.Red, major),
             "setAirportStatus" => new("airplane.departure", severityTone, major),
             "setChokepoints" => new("arrow.left.arrow.right", severityTone, major),
+            "setWeatherWarnings" => new("cloud.bolt.rain.fill", severityTone, major),
             "setTravelAdvice" => new("globe.americas.fill", severityTone, major),
             "setFireHotspots" => new("flame.fill", MarkerTone.Red, major),
             "setConflict" => new(kind == "conflict-confirmed" ? "target" : "scope", MarkerTone.Red, major),

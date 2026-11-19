@@ -19,7 +19,7 @@ Restore Overwatch in the Mac Catalyst app's WKWebView without changing the worki
 - [x] Run focused Overwatch native/browser tests.
 - [ ] Rebuild and launch the Mac Catalyst app.
 - [ ] Complete authenticated native acceptance and confirm no new shader compile failure in the native diagnostics log.
-- [ ] Run `./scripts/verify-release.sh` after the native acceptance result is known.
+- [x] Run `./scripts/verify-release.sh`. 19-11-26 (Claude, Mac): `verify-release.sh` PARTIAL, release build and full suite incl. Playwright pass; native acceptance (above) is still Grant's on-screen check.
 
 ## Acceptance boundary
 

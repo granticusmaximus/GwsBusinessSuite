@@ -31,7 +31,9 @@ public sealed record WorldNewsMapSignal(
     // The situation's latest event, whose document READ DOCUMENT opens (06-11-26).
     string? EventId = null,
     // Subtype, icon and how sure the tag is (SituationSubtypes, 18-11-26).
-    SituationTag? Tag = null)
+    SituationTag? Tag = null,
+    // On the map by the thin-coverage allowance: local reporting only, not yet confirmed elsewhere.
+    bool ThinCoverage = false)
 {
     public string Country => Location.Country;
     public double Latitude => Location.Latitude;
@@ -66,6 +68,31 @@ public sealed class WorldNewsMapService(WorldNewsStore store, WorldNewsMapCache?
         situation.OutletCount >= MinimumOutlets ||
         (situation.OutletCount >= MinimumOutletsOperational &&
          SituationKinds.Operational.Contains(KindOf(situation)));
+
+    // Thin coverage (19-11-26, World News expansion Unit 1.2): where few of the outlets World News reads
+    // are based, a conflict or disaster can be reported by one local newsroom long before a second
+    // outlet picks it up. Such a story goes on the map with one outlet if a reporting outlet is based in
+    // the country it's placed in; the pin says it's local reporting not yet confirmed elsewhere.
+    public static readonly IReadOnlyList<string> ThinCoverageKinds = [SituationKinds.Conflict, SituationKinds.Disaster];
+    public const int ThinCoverageBelowOutlets = 2;
+
+    private static readonly Lazy<IReadOnlyDictionary<string, int>> RosterOutletsByCountry = new(() =>
+        GwsBusinessSuite.WorldNewsKit.OutletFeeds.Outlets
+            .GroupBy(outlet => outlet.Country, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.Select(outlet => outlet.Name).Distinct(StringComparer.OrdinalIgnoreCase).Count(),
+                StringComparer.OrdinalIgnoreCase));
+
+    public static bool IsThinlyCovered(string country) =>
+        RosterOutletsByCountry.Value.GetValueOrDefault(country) < ThinCoverageBelowOutlets;
+
+    public static bool QualifiesByThinCoverage(SituationOverview situation, WorldNewsLocation location) =>
+        situation.OutletCount >= 1
+        && ThinCoverageKinds.Contains(KindOf(situation))
+        && IsThinlyCovered(location.Country)
+        && situation.Countries.Contains(location.Country, StringComparer.OrdinalIgnoreCase);
+
+    public static bool QualifiesForMap(SituationOverview situation, WorldNewsLocation location) =>
+        QualifiesForMap(situation) || QualifiesByThinCoverage(situation, location);
     public const int MaximumSignals = 50;
 
     // How far back Brief me and World News's "Show on Overwatch" link look; the layer itself can
@@ -194,8 +221,8 @@ public sealed class WorldNewsMapService(WorldNewsStore store, WorldNewsMapCache?
         var key = at is null ? $"top:{since:yyyyMMddHHmm}" : $"top:{since:yyyyMMddHHmm}:{at:yyyyMMddHHmm}";
         foreach (var situation in Cached(key, () => at is null ? store.TopSituations(since, 300) : store.TopSituationsAt(since, at.Value, 300)))
         {
-            if (!QualifiesForMap(situation) || (kinds is not null && !kinds.Contains(KindOf(situation)))) continue;
-            if (Locate(situation, corrections) is { } location) yield return (situation, location);
+            if (kinds is not null && !kinds.Contains(KindOf(situation))) continue;
+            if (Locate(situation, corrections) is { } location && QualifiesForMap(situation, location)) yield return (situation, location);
         }
     }
 
@@ -211,7 +238,7 @@ public sealed class WorldNewsMapService(WorldNewsStore store, WorldNewsMapCache?
 
     // Where the layer would put a situation, or null when it stays off the globe.
     public WorldNewsLocation? Place(SituationOverview situation, DateTimeOffset since) =>
-        QualifiesForMap(situation) && situation.LastSeen >= since ? Locate(situation, Corrections()) : null;
+        situation.LastSeen >= since && Locate(situation, Corrections()) is { } location && QualifiesForMap(situation, location) ? location : null;
 
     // Where the headlines alone put it, ignoring any correction (for "Wrong place?").
     public static WorldNewsLocation? Named(SituationOverview situation) => Locate(situation.Title, situation.Latest);
@@ -287,7 +314,7 @@ public sealed class WorldNewsMapService(WorldNewsStore store, WorldNewsMapCache?
             situation.LastSeen >= DateTimeOffset.UtcNow - SituationLinker.QuietAfter,
             SituationSurge.IsSurging(outlets, before) ? SituationSurge.Message(outlets, before) : null,
             kind == SituationKinds.Cyber ? CyberStatus.Of([situation.Title, situation.Latest, summary, .. sources.Select(source => source.Title)]) : null,
-            details.EventId, tag);
+            details.EventId, tag, ThinCoverage: !QualifiesForMap(situation));
     }
 
     private Details LoadDetails(SituationOverview situation, WorldNewsLocation location)

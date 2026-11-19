@@ -46,6 +46,7 @@
 @inject GwsBusinessSuite.Infrastructure.Services.SignalConvergenceService SignalConvergenceService
 @inject GwsBusinessSuite.Application.LiveLayers.AirportStatusService AirportStatusService
 @inject GwsBusinessSuite.Application.LiveLayers.ChokepointService ChokepointService
+@inject GwsBusinessSuite.Infrastructure.Services.WmoWarningService WmoWarningService
 @inject GwsBusinessSuite.Application.Overwatch.SatelliteSceneService SatelliteSceneService
 @inject GwsBusinessSuite.Infrastructure.Services.OverwatchViewBriefingPdf ViewBriefingPdf
 @inject GwsBusinessSuite.Application.LiveLayers.SpaceWeatherService SpaceWeatherService
@@ -302,6 +303,10 @@
                         title="Earthquakes (USGS), wildfires (NIFC in the US, GDACS elsewhere), flooding river gauges (NOAA), tropical storms (NOAA's hurricane center, GDACS elsewhere), floods, volcanoes and droughts worldwide (GDACS), and landslides, dust and sea ice (NASA EONET)" @onclick="ToggleHazardsAsync">
                     HAZARDS [@(_hazardsOn ? "ON" : "OFF")]
                 </button>
+                <button type="button" data-tg-toggle="wmo" class="tg-toggle @(_wmoOn ? "tg-toggle-on" : "")"
+                        title="Severe-weather warnings from about 40 national weather services outside the US (WMO Severe Weather Information Centre), one pin per country" @onclick="ToggleWmoAsync">
+                    WORLD WARNINGS [@(_wmoOn ? "ON" : "OFF")]
+                </button>
                 <button type="button" data-tg-toggle="outages" class="tg-toggle @(_outagesOn ? "tg-toggle-on" : "")"
                         title="Power outages by county from utilities that report to the U.S. DOE's ODIN (60+ utilities in 26 states)" @onclick="ToggleOutagesAsync">
                     POWER OUTAGES [@(_outagesOn ? "ON" : "OFF")]
@@ -332,6 +337,10 @@
             @if (_firesOn && !string.IsNullOrWhiteSpace(_fireSummary))
             {
                 <div class="tg-hazard-summary">@_fireSummary</div>
+            }
+            @if (_wmoOn && !string.IsNullOrWhiteSpace(_wmoSummary))
+            {
+                <div class="tg-hazard-summary">@_wmoSummary</div>
             }
             @if (_hazardsOn && !string.IsNullOrWhiteSpace(_hazardSummary))
             {
@@ -2040,6 +2049,7 @@
             _internetOn ? TimedAsync("internet outages", PushInternetAsync) : Task.CompletedTask,
             _convergenceOn ? TimedAsync("convergence", PushConvergenceAsync) : Task.CompletedTask,
             _airportsOn ? TimedAsync("airports", PushAirportsAsync) : Task.CompletedTask,
+            _wmoOn ? TimedAsync("world warnings", PushWmoAsync) : Task.CompletedTask,
             _travelOn ? TimedAsync("travel advice", PushTravelAsync) : Task.CompletedTask,
             _firesOn ? TimedAsync("fire hotspots", PushFiresAsync) : Task.CompletedTask,
             _conflictOn ? TimedAsync("conflict", PushConflictAsync) : Task.CompletedTask,
@@ -2435,6 +2445,7 @@
         subtype = signal.Tag?.Subtype,
         tagLabel = signal.Tag?.Label,
         tagConfidence = signal.Tag?.Confidence,
+        thinCoverage = signal.ThinCoverage,
         icon = signal.Tag?.Icon ?? GwsBusinessSuite.WorldNewsKit.SituationSubtypes.KindIcon(signal.Kind),
         status = signal.Status is { } status ? GwsBusinessSuite.WorldNewsKit.CyberStatus.Label(status) : null,
         statusMeaning = signal.Status is { } meaning ? GwsBusinessSuite.WorldNewsKit.CyberStatus.Meaning(meaning) : null,
@@ -2729,7 +2740,7 @@
     private bool _helpOpen;
 
     private int ActiveLayerCount =>
-        new[] { _radarOn, _alertsOn, _incidentsOn, _worldNewsOn, _hazardsOn, _signsOn, _roadWeatherOn, _aircraftOn, _airQualityOn, _shipsOn, _outagesOn, _internetOn, _convergenceOn, _airportsOn, _auroraOn, _satellitesOn, _cityTrafficOn, _liveFlowOn, _hideUnhealthy, _selectModeOn, _travelOn, _firesOn, _conflictOn, _humanitarianOn }.Count(on => on);
+        new[] { _radarOn, _alertsOn, _incidentsOn, _worldNewsOn, _hazardsOn, _signsOn, _roadWeatherOn, _aircraftOn, _airQualityOn, _shipsOn, _outagesOn, _internetOn, _convergenceOn, _airportsOn, _wmoOn, _auroraOn, _satellitesOn, _cityTrafficOn, _liveFlowOn, _hideUnhealthy, _selectModeOn, _travelOn, _firesOn, _conflictOn, _humanitarianOn }.Count(on => on);
 
     private async Task SelectPanelTabAsync(string tab, bool keepOpen = false)
     {
@@ -4240,6 +4251,45 @@
             : $"{points.Count} CHOKEPOINTS" + (down.Count > 0 ? $" · traffic well down: {string.Join(", ", down)}" : " · none well below normal");
     }
 
+    // ---- Severe-weather warnings worldwide (WMO SWIC), 19-11-26. ----
+    private bool _wmoOn;
+    private string? _wmoSummary;
+
+    private async Task ToggleWmoAsync()
+    {
+        _wmoOn = !_wmoOn;
+        if (_wmoOn)
+        {
+            await PushWmoAsync();
+        }
+        else
+        {
+            _wmoSummary = null;
+            _drawnSources.Remove("wmo"); await JS.InvokeVoidAsync("tacticalGlobe.clearWeatherWarnings");
+        }
+    }
+
+    private async Task PushWmoAsync()
+    {
+        try
+        {
+            var countries = await WmoWarningService.GetAsync();
+            if (AlreadyDrawn("wmo", ContentKey(countries))) return;
+            await JS.InvokeVoidAsync("tacticalGlobe.setWeatherWarnings", HazardPayload(countries));
+            var severe = countries.Where(c => c.Severity == "major").Select(c => c.Title.Split(':')[0]).ToList();
+            _wmoSummary = countries.Count == 0
+                ? "WMO: no current warnings outside the US, or the warning index couldn't be read."
+                : $"WMO: WARNINGS IN {countries.Count} {(countries.Count == 1 ? "COUNTRY" : "COUNTRIES")}" +
+                  (severe.Count > 0 ? $" · severe or extreme: {string.Join(", ", severe.Take(6))}{(severe.Count > 6 ? $" +{severe.Count - 6}" : "")}" : string.Empty);
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Logger.LogWarning(ex, "Overwatch world warnings layer failed"); NoteLayerProblem("world warnings", ex);
+            _wmoSummary = "World weather warnings couldn't be shown just now.";
+        }
+    }
+
     private async Task ToggleAirportsAsync()
     {
         _airportsOn = !_airportsOn;
@@ -4289,6 +4339,7 @@
             (_internetOn, "Internet outages", _internetSummary), (_firesOn, "Fire hotspots", _fireSummary),
             (_nightLightsOn, "Night lights", _nightLightsLabel), (_aircraftOn, "Aircraft", _aircraftSummary),
             (_airQualityOn, "Air quality", _airQualitySummary), (_airportsOn, "Airports", _airportSummary),
+            (_wmoOn, "World warnings", _wmoSummary),
             (_auroraOn, "Aurora", _auroraSummary), (_satellitesOn, "Satellites", _satelliteSummary),
             (_shipsOn, "Ships", _shipSummary), (_chokepointsOn, "Chokepoints", _chokepointSummary),
         }

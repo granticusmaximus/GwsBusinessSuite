@@ -94,7 +94,11 @@ that becomes a toolset beside `search_web` and `read_web_page`:
     traffic: LAX, LAS and SAN were closed only to visiting private planes. Those, and closures at
     set hours each day, are minor.
 - [x] **NOAA SWPC aurora oval** (OVATION) and Kp index (SPACE > AURORA), drawn as two imagery layers from byte grids.
-- [ ] **WMO severe-weather alerts:** not built.
+- [x] **WMO severe-weather alerts** (19-11-26, WORLD WARNINGS): built from the index alone. The CAP
+  files aren't fetched (the site answers 403 to automated requests, and that refusal is respected);
+  each alert's path starts with its country's ISO code, so warnings are placed one pin per country
+  at its worst current warning (`WmoWarningService`, `WmoWarningServiceTests`). The US is left to
+  the NWS ALERTS layer.
   - `wmo_all.json` has 2,051 alerts with no coordinates, only an area name and a link to each alert's CAP file.
   - Placing them would mean fetching about 2,000 files per refresh, and a guessed CAP path answered 403.
   - GDACS already covers the world's cyclones and floods.

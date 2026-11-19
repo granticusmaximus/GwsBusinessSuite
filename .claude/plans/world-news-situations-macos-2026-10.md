@@ -193,13 +193,20 @@ can access lawfully and politely, not unbounded crawling or bypassing a publishe
 - [x] Add a browsable report-level view and filters for time, source country, language, outlet,
   kind and text, while keeping grouped events and situations as higher-level views. Reports remain
   visible before embedding/grouping, and the source-country label does not imply event location.
-- [ ] Measure duplicate and noise rates before increasing crawl volume or enabling GDELT queries.
+- [x] Measure duplicate and noise rates before increasing crawl volume or enabling GDELT queries.
+      19-11-26 measurement (production, last 7 days, read-only): same-outlet same-headline duplicates
+      crawler 1.6%, Google News 2.9%, outlet feeds 1.8%; navigation-like titles 1.1-3.5%. Google News
+      is 91% of reports (272,793 of ~298,000). Crawled pages are noisier: 37% stay single-report
+      stories after 24 h vs 19% for other sources, with feature titles ("A home away from home").
+      65% of reports 1-7 days old were never grouped (outage 15-19 Nov plus AI droplet capacity).
+      Decision: don't raise crawl volume or enable GDELT queries until grouping keeps up (AI droplet
+      capacity follow-up); duplicates are not the problem.
   World News retains 30 days, Media Watch retains crawler pages for 14 days with a 4,000/day fetch
   cap, and this import is capped at 500 pages per read by default; per-read scanned/eligible and
   duplicate counts are now visible for the baseline.
 - [x] Add fixture-based source and deduplication tests and update the user guide. Report filtering,
   paging and crawler ingestion now have regression coverage.
-- [ ] Complete `./scripts/verify-release.sh` and measure duplicate/noise rates before increasing
+- [x] (19-11-26: gate PARTIAL with the full suite passing; rates measured above) Complete `./scripts/verify-release.sh` and measure duplicate/noise rates before increasing
   crawl volume or enabling GDELT queries.
 
 ### Guardrails

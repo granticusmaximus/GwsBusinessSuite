@@ -31,7 +31,7 @@
 - [ ] Mac smoke test: menu item, dashboard button and rail right-click each open the window
   (confirm WKWebView raises `Navigating` for the scripted `gws-native://` navigation), window loads Sentinel, main window unaffected. Send the
   `Sentinel window:` lines from `gws-mainpage-debug.log` if it is still blank.
-- [ ] Run the available tests and release gate; record Mac-only checks separately.
+- [x] Tests and release gate. 19-11-26 (Claude, Mac): `verify-release.sh` PARTIAL, release build and full suite incl. Playwright pass; Mac Debug build 0 warnings. Mac-only check: the smoke test above.
 
 The Mac window must reuse the existing authorized Sentinel editor, preserve the
 shared session and page-lock handling, and not take over the main window's

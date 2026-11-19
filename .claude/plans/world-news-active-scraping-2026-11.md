@@ -27,7 +27,10 @@ not merely rotate one broad search and otherwise depend on feeds.
 - [x] Expose whether active discovery is configured, its last attempt, searches today and accepted
   publisher pages today on World News → Sources.
 - [x] Run focused crawler/UI contract tests and the complete release gate.
-- [ ] Confirm live discovery counts and Sources layout after Grant deploys the staged work.
+- [x] Confirm live discovery counts (19-11-26, production logs): until fed9fac1/9bd76edf every search
+      hit Ollama's paid API and failed with 402 (694 failures that day); since then searches run on
+      SearXNG with no failures, about 1 new configured-publisher page per run (23 accepted over 8
+      runs that day). The Sources page layout needs an MFA sign-in, so it wasn't viewed here.
 
 Focused crawler/background/CSS coverage passed 12/12. `scripts/verify-release.sh` completed
 `PARTIAL`: responsive lint, whitespace, Compose rendering, restore, dependency audit, zero-warning

@@ -163,7 +163,7 @@ public sealed class NativeShapesTests
             "setCameraPins", "setWeatherSnapshot", "setHourlyForecast", "setWeatherAlerts", "setCameraAlertHighlights", "setTrafficIncidents",
             "setWorldNews", "setNewsShading", "setMapNotes", "setDriveFollow", "setSelectModeEnabled", "setRoadWeather", "setMessageSigns",
             "setRoadTraffic", "setAircraft", "setAirQuality", "setPowerOutages", "setInternetOutages", "setConvergence", "setAirportStatus",
-            "setChokepoints", "setSatellites", "setTravelAdvice", "setFireHotspots", "setConflict", "setHumanitarian", "setHazards",
+            "setChokepoints", "setWeatherWarnings", "setSatellites", "setTravelAdvice", "setFireHotspots", "setConflict", "setHumanitarian", "setHazards",
             "setShips", "setCoverageMarkers", "setRoute", "setRouteHighlights", "setRouteConditions", "setStreetViewMarker",
         };
         var sets = NativeOverwatchOperations.All.Where(op => op.StartsWith("set", StringComparison.Ordinal)).ToList();

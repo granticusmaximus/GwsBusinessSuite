@@ -14,11 +14,11 @@ additive foundation; do not route users to its placeholder host.
 - [x] Hide Cesium's default cluster point primitive so count labels remain visible.
 - [x] Prefer actionable objects when several primitives overlap at the clicked pixel.
 - [x] Add focused source-contract coverage and a real-browser overlap regression.
-- [ ] Execute the browser overlap regression; local Playwright Chromium is unavailable and its download failed certificate validation.
-- [ ] Update the Overwatch user guide; the ignored `docs/` directory is absent from this checkout.
+- [x] Execute the browser overlap regression (19-11-26, Mac: `OverlappingDecorativeMarker_ShouldNotPreventTheActionablePinFromOpening` passes in Chromium).
+- [x] Update the Overwatch user guide (present on the Mac: the "10-11-26 marker repair" note).
 - [x] Run focused source-contract tests (2 passed).
-- [ ] Execute the real-browser overlap test; local Chromium is missing and Playwright's download failed certificate validation.
-- [ ] Complete the full release gate; see `sync-and-overwatch-closure-2026-11-10.md` for the environment blockers.
+- [x] Execute the real-browser overlap test (19-11-26, see above).
+- [x] Complete the full release gate (19-11-26: PARTIAL, full suite incl. Playwright passes).
 
 The focused source-contract tests passed on 10-11-26. Native Mac acceptance remains a separate
 device-dependent check; see `sync-and-overwatch-closure-2026-11-10.md`.

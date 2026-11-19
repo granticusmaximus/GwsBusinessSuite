@@ -1841,6 +1841,39 @@ public sealed class WorldNewsKitTests : IDisposable
         Assert.Contains(OutletFeeds.Outlets, o => o.Name == "Focus Taiwan" && o.Country == "Taiwan");
         Assert.Contains(OutletFeeds.Outlets, o => o.Name == "Civil.ge" && o.Country == "Georgia");
         Assert.Contains(OutletFeeds.Outlets, o => o.Name == "El Tiempo" && o.Country == "Colombia");
+        // 19-11-26 (expansion Unit 1.1): places the roster barely covered.
+        foreach (var country in new[] { "Nigeria", "Ghana", "Kenya", "Saudi Arabia", "Israel", "Thailand", "Myanmar",
+                     "Philippines", "Kazakhstan", "Peru", "Cuba" })
+            OutletFeeds.Outlets.Should().Contain(o => o.Country == country, $"{country} has a newsroom of its own now");
+        OutletFeeds.Outlets.Count(o => o.Country == "Nigeria").Should().BeGreaterThanOrEqualTo(2);
+        OutletNames.IsStateMedia("VnExpress International").Should().BeTrue();
+        OutletFeeds.Outlets.Should().NotContain(o => o.Name == "AllAfrica", "it republishes other outlets' reports");
+    }
+
+    // 19-11-26 (expansion Unit 1.2): one local outlet is enough for a conflict or disaster where few
+    // of the outlets World News reads are based, and nowhere else.
+    [Fact]
+    public void WorldNewsMapService_ThinCoverage_AllowsOneLocalOutletForConflictOrDisaster()
+    {
+        var places = WorldNewsPlaces.Instance;
+        var myanmar = places.At(places.FindCountry("Myanmar")!, null, WorldNewsPrecision.Country);
+        var unitedStates = places.At(places.FindCountry("United States")!, null, WorldNewsPrecision.Country);
+        SituationOverview Story(string kind, int outlets, params string[] sourceCountries) => new("sit", "Fighting near Lashio", "Fighting near Lashio",
+            1, outlets, outlets, sourceCountries, ["English"], DateTimeOffset.UtcNow.AddHours(-1), DateTimeOffset.UtcNow, Kind: kind);
+
+        WorldNewsMapService.IsThinlyCovered(myanmar.Country).Should().BeTrue("one newsroom is based there");
+        WorldNewsMapService.IsThinlyCovered(unitedStates.Country).Should().BeFalse();
+
+        WorldNewsMapService.QualifiesForMap(Story(SituationKinds.Conflict, 1, myanmar.Country), myanmar).Should().BeTrue();
+        WorldNewsMapService.QualifiesForMap(Story(SituationKinds.Disaster, 1, myanmar.Country), myanmar).Should().BeTrue();
+        WorldNewsMapService.QualifiesForMap(Story(SituationKinds.Conflict, 1, "United Kingdom"), myanmar)
+            .Should().BeFalse("the one outlet isn't local");
+        WorldNewsMapService.QualifiesForMap(Story(SituationKinds.Other, 1, myanmar.Country), myanmar)
+            .Should().BeFalse("only conflicts and disasters");
+        WorldNewsMapService.QualifiesForMap(Story(SituationKinds.Conflict, 1, unitedStates.Country), unitedStates)
+            .Should().BeFalse("a well-covered country keeps the usual bar");
+        WorldNewsMapService.QualifiesForMap(Story(SituationKinds.Conflict, 3, "United Kingdom"), unitedStates)
+            .Should().BeTrue("the usual rule still applies everywhere");
     }
 
     [Fact]

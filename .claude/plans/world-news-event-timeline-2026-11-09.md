@@ -27,5 +27,5 @@ do not create a second news store or timeline model.
 - [x] Implement the map-query replay boundary and focused regression tests.
 - [x] Implement the Overwatch timeline control and its browser contract.
 - [x] Update user documentation.
-- [ ] Run `./scripts/verify-release.sh` and record the result.
+- [x] Run `./scripts/verify-release.sh`. 19-11-26 (Claude, Mac): `verify-release.sh` PARTIAL, release build and full suite incl. Playwright pass.
 

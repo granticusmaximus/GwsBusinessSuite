@@ -653,6 +653,8 @@ window.tacticalGlobe = (function () {
         await viewer.dataSources.add(airportDataSource);
         const chokepointDataSource = new Cesium.CustomDataSource('tg-chokepoints');
         await viewer.dataSources.add(chokepointDataSource);
+        const weatherWarningDataSource = new Cesium.CustomDataSource('tg-weather-warnings');
+        await viewer.dataSources.add(weatherWarningDataSource);
         const satelliteDataSource = new Cesium.CustomDataSource('tg-satellites');
         await viewer.dataSources.add(satelliteDataSource);
         // Key-less world layers (07-11-26): travel advice, fire hotspots, conflict, humanitarian.
@@ -790,7 +792,7 @@ window.tacticalGlobe = (function () {
 
         viewers.set(containerId, {
             containerId, viewer, dotNetRef, cameraDataSource, cameraEntities, alertEntities, incidentDataSource, incidentEntities, worldNewsDataSource,
-            hazardDataSource, internetDataSource, convergenceDataSource, airportDataSource, chokepointDataSource, auroraLayers: [], satelliteDataSource, signDataSource, roadWeatherDataSource, radar, clickHandler, selectMode: false, selectedCameras: new Map(), currentView: null,
+            hazardDataSource, internetDataSource, convergenceDataSource, airportDataSource, chokepointDataSource, weatherWarningDataSource, auroraLayers: [], satelliteDataSource, signDataSource, roadWeatherDataSource, radar, clickHandler, selectMode: false, selectedCameras: new Map(), currentView: null,
             travelDataSource, fireDataSource, conflictDataSource, humanitarianDataSource, satelliteImagery: null,
             ionToken: options && typeof options.ionToken === 'string' && options.ionToken.length > 0 ? options.ionToken : null, threeD: null,
             renderTimer, pulseTimer: null, onRenderError
@@ -2918,6 +2920,7 @@ window.tacticalGlobe = (function () {
             (signal.summary ? '<p>' + escapeHtml(signal.summary) + '</p>' : '') +
             '<div class="tg-stream-panel-meta">' + escapeHtml((signal.kindLabel ? signal.kindLabel.toUpperCase() + ' · ' : '') +
             (signal.subtype && signal.tagLabel ? signal.tagLabel.toUpperCase() + ' · ' : '') +
+            (signal.thinCoverage ? 'LOCAL REPORTING ONLY, NOT YET CONFIRMED ELSEWHERE · ' : '') +
             (signal.active === false ? 'QUIET · ' : '')) + escapeHtml(signal.place || signal.country) + ' · ' +
             escapeHtml(String(signal.eventCount)) + ' EVENTS · ' + escapeHtml(String(signal.outletCount)) +
             ' OUTLETS · UPDATED ' + escapeHtml(signal.lastSeen) + '</div>' +
@@ -3286,6 +3289,8 @@ window.tacticalGlobe = (function () {
         cyclone: '#00e0c6', flood: '#2f6bff', volcano: '#ff2e4d', drought: '#d4a72c', internet: '#9dff3c', airport: '#ffe14d',
         // 07-11-26: NASA EONET's natural events, and the travel, fire, conflict and humanitarian layers.
         landslide: '#b5794a', dust: '#d9b26f', ice: '#bfe8ff',
+        // 19-11-26: national weather services' warnings worldwide (WMO SWIC), one pin per country.
+        'weather-warning': '#ff9f1c',
         travel: '#ffd166', chokepoint: '#7ae0ff', hotspot: '#ff7b00', conflict: '#ff4d6d', 'conflict-confirmed': '#c1121f', humanitarian: '#4cc9f0'
     };
     const hazardSizes = { major: 20, moderate: 15, minor: 11 };
@@ -3314,6 +3319,17 @@ window.tacticalGlobe = (function () {
     function setChokepoints(points, containerId) {
         const entry = viewers.get(containerId || 'tg-viewport');
         if (entry) drawHazardPins(entry.chokepointDataSource, points);
+    }
+
+    // Severe-weather warnings worldwide (19-11-26): one pin per country (WmoWarningService).
+    function setWeatherWarnings(countries, containerId) {
+        const entry = viewers.get(containerId || 'tg-viewport');
+        if (entry) drawHazardPins(entry.weatherWarningDataSource, countries);
+    }
+
+    function clearWeatherWarnings(containerId) {
+        const entry = viewers.get(containerId || 'tg-viewport');
+        if (entry) entry.weatherWarningDataSource.entities.removeAll();
     }
 
     function clearChokepoints(containerId) {
@@ -4963,6 +4979,8 @@ window.tacticalGlobe = (function () {
         clearAirportStatus: clearAirportStatus,
         setChokepoints: setChokepoints,
         clearChokepoints: clearChokepoints,
+        setWeatherWarnings: setWeatherWarnings,
+        clearWeatherWarnings: clearWeatherWarnings,
         setAurora: setAurora,
         clearAurora: clearAurora,
         readPhotoExif: readPhotoExif,
@@ -5060,6 +5078,7 @@ window.tacticalGlobe = (function () {
             setInternetOutages: function (outage) { openHazardPanel(outage); },
             setAirportStatus: function (airport) { openHazardPanel(airport); },
             setChokepoints: function (point) { openHazardPanel(point); },
+            setWeatherWarnings: function (country) { openHazardPanel(country); },
             setTravelAdvice: function (pin) { openHazardPanel(pin); },
             setFireHotspots: function (cell) { openHazardPanel(cell); },
             setConflict: function (event) { openHazardPanel(event); },
@@ -5079,7 +5098,7 @@ window.tacticalGlobe = (function () {
             setCameraPins: 'CAMERA', setWorldNews: 'NEWS', setNewsShading: 'NEWS', setAircraft: 'AIRCRAFT',
             setRoadWeather: 'ROAD WEATHER', setMessageSigns: 'SIGN', setTrafficIncidents: 'INCIDENT',
             setConvergence: 'SIGNALS', setSatellites: 'SATELLITE', setHazards: 'HAZARD', setInternetOutages: 'INTERNET',
-            setAirportStatus: 'AIRPORT', setChokepoints: 'CHOKEPOINT', setTravelAdvice: 'TRAVEL', setFireHotspots: 'FIRE', setConflict: 'CONFLICT',
+            setAirportStatus: 'AIRPORT', setChokepoints: 'CHOKEPOINT', setWeatherWarnings: 'WARNINGS', setTravelAdvice: 'TRAVEL', setFireHotspots: 'FIRE', setConflict: 'CONFLICT',
             setHumanitarian: 'HUMANITARIAN', setMapNotes: 'NOTE'
         };
         const openNativeChoices = function (group) {
@@ -5150,7 +5169,7 @@ window.tacticalGlobe = (function () {
             'clearHazards', 'setMessageSigns', 'clearMessageSigns', 'setRoadWeather',
             'clearRoadWeather', 'setRoute', 'clearRoute', 'setRouteHighlights',
             'setRouteConditions', 'setInternetOutages', 'clearInternetOutages', 'setConvergence',
-            'clearConvergence', 'setAirportStatus', 'clearAirportStatus', 'setChokepoints', 'clearChokepoints', 'setAurora', 'clearAurora',
+            'clearConvergence', 'setAirportStatus', 'clearAirportStatus', 'setChokepoints', 'clearChokepoints', 'setWeatherWarnings', 'clearWeatherWarnings', 'setAurora', 'clearAurora',
             'setSatellites', 'clearSatellites', 'setTravelAdvice', 'clearTravelAdvice',
             'setFireHotspots', 'clearFireHotspots', 'setConflict', 'clearConflict',
             'setHumanitarian', 'clearHumanitarian', 'setWeatherSnapshot'

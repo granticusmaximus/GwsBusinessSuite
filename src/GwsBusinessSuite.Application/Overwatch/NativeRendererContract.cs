@@ -111,6 +111,8 @@ public static class NativeOverwatchOperations
     public const string ClearAirportStatus = "clearAirportStatus";
     public const string SetChokepoints = "setChokepoints";
     public const string ClearChokepoints = "clearChokepoints";
+    public const string SetWeatherWarnings = "setWeatherWarnings";
+    public const string ClearWeatherWarnings = "clearWeatherWarnings";
     public const string SetAurora = "setAurora";
     public const string ClearAurora = "clearAurora";
     public const string SetSatellites = "setSatellites";
@@ -143,7 +145,7 @@ public static class NativeOverwatchOperations
         SetMapNotes, SetThreeD, SetNightLights, SetSatelliteScene, ClearSatelliteScene, SetMeasure, ClearMeasure, SetDriveFollow, SetSelectModeEnabled, SetTimeMachine, ClearTimeMachine, SetRoadWeather, ClearRoadWeather,
         SetMessageSigns, ClearMessageSigns, SetRoadTraffic, SetTrafficFlow, SetAircraft,
         SetAirQuality, SetPowerOutages, SetInternetOutages, ClearInternetOutages, SetConvergence,
-        ClearConvergence, SetAirportStatus, ClearAirportStatus, SetChokepoints, ClearChokepoints, SetAurora, ClearAurora,
+        ClearConvergence, SetAirportStatus, ClearAirportStatus, SetChokepoints, ClearChokepoints, SetWeatherWarnings, ClearWeatherWarnings, SetAurora, ClearAurora,
         SetSatellites, ClearSatellites, SetTravelAdvice, ClearTravelAdvice, SetFireHotspots,
         ClearFireHotspots, SetConflict, ClearConflict, SetHumanitarian, ClearHumanitarian,
         SetHazards, ClearHazards, SetShips, SetCoverageMarkers, ClearCoverageMarkers, SetRoute,
@@ -160,6 +162,6 @@ public static class NativeOverwatchOperations
     {
         SetCameraPins, SetWorldNews, SetNewsShading, SetAircraft, SetRoadWeather, SetMessageSigns,
         SetTrafficIncidents, SetConvergence, SetSatellites, SetHazards, SetInternetOutages,
-        SetAirportStatus, SetChokepoints, SetTravelAdvice, SetFireHotspots, SetConflict, SetHumanitarian, SetMapNotes
+        SetAirportStatus, SetChokepoints, SetWeatherWarnings, SetTravelAdvice, SetFireHotspots, SetConflict, SetHumanitarian, SetMapNotes
     };
 }

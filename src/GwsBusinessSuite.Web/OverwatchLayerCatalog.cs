@@ -26,6 +26,7 @@ public static class OverwatchLayerCatalog
         ("aircraft", "OpenSky Network"),
         ("air", "Open-Meteo air quality"),
         ("airports", "FAA NAS status"),
+        ("world warnings", "WMO Severe Weather Information Centre"),
         ("aurora", "NOAA SWPC"),
         ("satellites", "CelesTrak"),
         ("ships", "Finland's open AIS (aisstream with a key)"),

@@ -1142,6 +1142,12 @@ public static class DependencyInjection
             client.Timeout = TimeSpan.FromSeconds(30);
             client.DefaultRequestHeaders.UserAgent.ParseAdd("GwsBusinessSuite-Overwatch/1.0 (+https://www.gwsapp.net)");
         }).AddHttpMessageHandler<RefusedHostPauseHandler>();
+        // Severe-weather warnings worldwide (WMO SWIC's public alert index), 19-11-26.
+        services.AddHttpClient<WmoWarningService>(client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(30);
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("GwsBusinessSuite-Overwatch/1.0 (+https://www.gwsapp.net)");
+        }).AddHttpMessageHandler<RefusedHostPauseHandler>();
         services.AddHttpClient<GwsBusinessSuite.Application.LiveLayers.AirportStatusService>(client =>
         {
             client.Timeout = TimeSpan.FromSeconds(20);

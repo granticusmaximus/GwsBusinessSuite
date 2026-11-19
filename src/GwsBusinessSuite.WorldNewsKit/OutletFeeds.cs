@@ -154,6 +154,28 @@ public static partial class OutletFeeds
         new("BBC News", "English", "United Kingdom", "https://www.bbc.com/sitemaps/https-index-com-news.xml", "sitemap"),
         new("Al Jazeera", "English", "Qatar", "https://www.aljazeera.com/news-sitemap.xml", "sitemap"),
         new("DW", "English", "Germany", "https://www.dw.com/en/news-sitemap.xml", "sitemap"),
+        // Regional newsrooms for places the roster barely covered (19-11-26, World News expansion
+        // Unit 1), each answering the server with that day's stories. Left out that day: Addis
+        // Standard, Efecto Cocuyo and TOLOnews (403 to the app), AllAfrica (republishes other outlets,
+        // so it would count their reports twice), and feeds that were broken, stale or gone (Daily Star
+        // Bangladesh, Kathmandu Post, Middle East Eye, Rudaw, Kurdistan24, News24, The Star Kenya).
+        new("Punch", "English", "Nigeria", "https://punchng.com/feed/"),
+        new("MyJoyOnline", "English", "Ghana", "https://www.myjoyonline.com/feed/"),
+        new("Nation Africa", "English", "Kenya", "https://nation.africa/kenya/rss.xml"),
+        new("Radio Dabanga", "English", "Netherlands", "https://www.dabangasudan.org/en/feed"),
+        new("Asharq Al-Awsat", "English", "Saudi Arabia", "https://english.aawsat.com/feed"),
+        new("Haaretz", "English", "Israel", "https://www.haaretz.com/srv/haaretz-latest-headlines"),
+        new("Daily Sabah", "English", "Turkey", "https://www.dailysabah.com/rssFeed/world"),
+        new("VnExpress International", "English", "Vietnam", "https://e.vnexpress.net/rss/news.rss"),
+        new("Bangkok Post", "English", "Thailand", "https://www.bangkokpost.com/rss/data/topstories.xml"),
+        new("The Irrawaddy", "English", "Myanmar", "https://www.irrawaddy.com/feed"),
+        new("Rappler", "English", "Philippines", "https://www.rappler.com/feed/"),
+        new("The Astana Times", "English", "Kazakhstan", "https://astanatimes.com/feed/"),
+        new("Notes from Poland", "English", "Poland", "https://notesfrompoland.com/feed/"),
+        new("La Nación", "Spanish", "Argentina", "https://www.lanacion.com.ar/arc/outboundfeeds/rss/"),
+        new("El Comercio", "Spanish", "Peru", "https://elcomercio.pe/arcio/rss/"),
+        new("14ymedio", "Spanish", "Cuba", "https://www.14ymedio.com/rss/"),
+        new("Agência Brasil", "Portuguese", "Brazil", "https://agenciabrasil.ebc.com.br/rss/ultimasnoticias/feed.xml"),
         // Fact-checkers (1.7): their reports are verdicts on claims; a story they cover shows the verdict.
         new("Snopes", "English", "United States", "https://www.snopes.com/feed/", "factcheck"),
         new("FactCheck.org", "English", "United States", "https://www.factcheck.org/feed/", "factcheck"),

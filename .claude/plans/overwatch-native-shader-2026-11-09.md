@@ -17,7 +17,7 @@ retain the affected Cesium release in a WebView cache.
 - [x] Add focused regression coverage for the endpoint default and asynchronous render failure.
 - [x] Run focused Overwatch/PWA tests and build/run the Mac Catalyst app with the matching Xcode
       environment available on this Mac.
-- [ ] Run `./scripts/verify-release.sh` and record the result.
+- [x] Run `./scripts/verify-release.sh`. 19-11-26 (Claude, Mac): `verify-release.sh` PARTIAL, release build and full suite incl. Playwright pass.
 
 ## Acceptance evidence
 

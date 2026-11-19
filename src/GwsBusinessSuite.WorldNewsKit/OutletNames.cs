@@ -35,6 +35,8 @@ public static class OutletNames
         "Anadolu Agency", "Anadolu Ajansı", "TRT World", "TRT Haber",
         // Belarus, Venezuela, Cuba
         "BelTA", "teleSUR", "Prensa Latina", "Granma",
+        // Vietnam: governed by the Ministry of Science and Technology (19-11-26)
+        "VnExpress", "VnExpress International",
     };
 
     public static string Canonical(string outlet) =>

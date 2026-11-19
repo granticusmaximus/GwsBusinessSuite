@@ -40,7 +40,7 @@ public static class WorldRegions
         ["Republic of the Congo"] = Africa, ["Democratic Republic of the Congo"] = Africa,
         ["China"] = Asia, ["Hong Kong"] = Asia, ["India"] = Asia, ["Indonesia"] = Asia, ["Japan"] = Asia, ["Pakistan"] = Asia,
         ["Philippines"] = Asia, ["Singapore"] = Asia, ["South Korea"] = Asia, ["Taiwan"] = Asia, ["Thailand"] = Asia,
-        ["Vietnam"] = Asia, ["Bangladesh"] = Asia, ["Malaysia"] = Asia,
+        ["Vietnam"] = Asia, ["Bangladesh"] = Asia, ["Malaysia"] = Asia, ["Myanmar"] = Asia,
         ["Australia"] = Oceania, ["New Zealand"] = Oceania
     };
 
