@@ -1,3 +1,4 @@
+using FluentAssertions;
 using GwsBusinessSuite.WorldNewsKit;
 
 namespace GwsBusinessSuite.Tests;

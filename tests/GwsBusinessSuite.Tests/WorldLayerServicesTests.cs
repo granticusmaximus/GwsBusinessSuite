@@ -244,6 +244,9 @@ public sealed class WorldLayerServicesTests
 
         var pins = ConflictEventService.Confirmed(events);
         pins.Should().OnlyContain(p => p.ObservedAt == null, "UCDP dates have no time; the summary carries them");
+        pins.Single(p => p.Title.StartsWith("Iran")).NewsQuery.Should().Be("Iran Jaish al Adl Kurin district of Zahedan County",
+            "World News is searched with the sides and the place");
+        ConflictEventService.NewsQuery("Unidentified armed group", "Civilians", "Hama", "Syria").Should().Be("Hama Syria");
         pins.Single(p => p.Title.StartsWith("Iran")).Detail.Should().StartWith("Latest, 05-09-26")
             .And.Contain("Here over the last 90 days: 2 deaths in 1 event on 05-09-26 (state-based violence).");
     }

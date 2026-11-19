@@ -233,7 +233,8 @@ public sealed partial class ConflictEventService(HttpClient httpClient, IMemoryC
                     HazardKinds.Conflict, $"{group.Key.Item1} reported - {place}",
                     what + "\n" + string.Create(CultureInfo.InvariantCulture,
                         $"{group.Count()} {(group.Count() == 1 ? "report" : "reports")} in {articles} news {(articles == 1 ? "article" : "articles")} in the last day, machine-read by GDELT and not confirmed. The newest article is linked below."),
-                    newest.Latitude, newest.Longitude, articles >= 20 ? "major" : articles >= 6 ? "moderate" : "minor", newest.Url, newest.Seen);
+                    newest.Latitude, newest.Longitude, articles >= 20 ? "major" : articles >= 6 ? "moderate" : "minor", newest.Url, newest.Seen,
+                    NewsQuery(group.Key.Item1, who?.Actor1, who?.Actor2, place));
             })
             .OrderByDescending(f => f.ObservedAt)
             .ToList();
@@ -315,7 +316,8 @@ public sealed partial class ConflictEventService(HttpClient httpClient, IMemoryC
                     main.ConflictId.Length > 0 ? $"https://ucdp.uu.se/conflict/{Uri.EscapeDataString(main.ConflictId)}" : "https://ucdp.uu.se/",
                     // UCDP dates have no time: shown as a time they read as the evening before in the
                     // Americas ("AS OF 31-08-26 20:00" for 01-09-26). The dates are in the summary instead.
-                    null);
+                    null,
+                    NewsQuery(latest.SideA, latest.SideB, latest.Where, latest.Country));
             })
             .OrderByDescending(f => f.Severity switch { "major" => 2, "moderate" => 1, _ => 0 })
             .ToList();
@@ -353,6 +355,18 @@ public sealed partial class ConflictEventService(HttpClient httpClient, IMemoryC
 
     [GeneratedRegex(@"\bXXX\d+\b")]
     private static partial Regex UnidentifiedGroup();
+
+    // The words World News is searched with for a pin: the sides and the place, without UCDP's
+    // placeholders ("Civilians", an unidentified group), each word once.
+    public static string NewsQuery(params string?[] parts)
+    {
+        var skip = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "Civilians", "Unidentified armed group", "Government of" };
+        var words = parts.Where(p => !string.IsNullOrWhiteSpace(p) && !skip.Contains(p!.Trim()))
+            .SelectMany(p => Regex.Split(p!.Replace("Government of ", "", StringComparison.OrdinalIgnoreCase), @"[\s,;:()\-]+"))
+            .Where(w => w.Length > 1)
+            .Distinct(StringComparer.OrdinalIgnoreCase);
+        return string.Join(' ', words);
+    }
 
     // UCDP lists several sources with ";" between them; the first is enough for the summary.
     private static string First(string list) => list.Split(';', 2)[0].Trim();

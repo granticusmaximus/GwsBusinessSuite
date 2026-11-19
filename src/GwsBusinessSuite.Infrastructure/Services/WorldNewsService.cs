@@ -575,6 +575,27 @@ public sealed partial class WorldNewsService : IDisposable
         return new FindResult(text, stories.Take(WorldNewsFinder.Limit).ToList(), note);
     }
 
+    // "Open in World News" from an Overwatch window (19-11-26): the stories about it, close matches
+    // first, each with its latest summary.
+    public async Task<IReadOnlyList<BriefCoverage>> BriefCoverageAsync(OverwatchReport report, CancellationToken ct = default)
+    {
+        var found = await FindAsync(report.Query, report.Days, ct: ct);
+        var ordered = OverwatchBrief.Order(found.Stories);
+        return await Task.Run(() => ordered.Select(s => new BriefCoverage(s, Store.LatestSummary(s.Event.Id)?.Text)).ToList(), ct);
+    }
+
+    // SentinelGPT's executive summary of the report and what the news says about it. Null when the
+    // model gave nothing; it throws when no model answered, for the page to say so.
+    public async Task<string?> BriefSummaryAsync(OverwatchReport report, IReadOnlyList<BriefCoverage> coverage, CancellationToken ct = default)
+    {
+        await using var scope = _scopes.CreateAsyncScope();
+        using var limit = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        limit.CancelAfter(TimeSpan.FromMinutes(3));
+        var text = await scope.ServiceProvider.GetRequiredService<IOllamaService>()
+            .GenerateAsync(_model, OverwatchBrief.SystemPrompt, OverwatchBrief.Prompt(report, coverage), limit.Token);
+        return string.IsNullOrWhiteSpace(text) ? null : text.Trim();
+    }
+
     // Stories like this one (its own vector against the last week's), most similar first.
     public async Task<FindResult> SimilarToAsync(string eventId, CancellationToken ct = default)
     {

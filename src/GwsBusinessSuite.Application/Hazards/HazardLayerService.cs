@@ -42,7 +42,10 @@ public sealed record HazardFeature(
     // "major" / "moderate" / "minor" - same scale as normalized traffic incidents.
     string Severity,
     string Url,
-    DateTimeOffset? ObservedAt);
+    DateTimeOffset? ObservedAt,
+    // What to look for in World News, so the window can open the story and SentinelGPT's analysis
+    // (19-11-26). Null: the title is used.
+    string? NewsQuery = null);
 
 public sealed record HazardLayerResult(IReadOnlyList<HazardFeature> Features, IReadOnlyList<string> Notes);
 

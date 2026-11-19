@@ -3975,9 +3975,20 @@ window.tacticalGlobe = (function () {
                 return '<dt>' + f[0] + '</dt><dd>' + escapeHtml(String(f[1]).toUpperCase()) + '</dd>';
             }).join('') + '</dl>' +
             '<div class="tg-hazard-detail">' + escapeHtml(hazard.detail || '') + '</div>' +
+            '<button type="button" class="tg-incident-report tg-hazard-world-news">OPEN IN WORLD NEWS</button>' +
             '<div class="tg-stream-panel-meta"><a href="' + escapeHtml(hazard.url) + '" target="_blank" rel="noopener noreferrer">OFFICIAL SOURCE</a></div>' +
             '</div>';
         panel.querySelector('.tg-stream-panel-close').addEventListener('click', closeIncidentPanel);
+        // 19-11-26: the item's World News briefing: what it is, SentinelGPT's executive summary, the
+        // report itself and what the news says about it (WorldNewsOverwatchBrief).
+        panel.querySelector('.tg-hazard-world-news').addEventListener('click', function () {
+            const params = new URLSearchParams({
+                kind: hazard.kind || '', label: hazardKindLabels[hazard.kind] || hazard.kind || '', title: hazard.title || '',
+                detail: hazard.detail || '', severity: hazard.severity || '', asof: hazard.observedAt || '',
+                source: hazard.url || '', q: hazard.newsQuery || ''
+            });
+            window.location.assign('/admin/world-news/brief?' + params.toString());
+        });
         if (!openAsModal(panel, closeIncidentPanel)) return;
         incidentPanel = panel;
     }

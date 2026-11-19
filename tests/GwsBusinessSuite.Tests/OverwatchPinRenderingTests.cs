@@ -23,6 +23,16 @@ public sealed class OverwatchPinRenderingTests
             "the World News panel shows the story's subtype");
     }
 
+    // 19-11-26: every hazard and conflict window opens its World News briefing.
+    [Fact]
+    public void HazardWindows_ShouldOfferTheWorldNewsStory()
+    {
+        var source = File.ReadAllText(Path.Combine(RepoRoot, "src/GwsBusinessSuite.Web/wwwroot/js/tactical-globe.js"));
+        source.Should().Contain("tg-hazard-world-news\">OPEN IN WORLD NEWS</button>")
+            .And.Contain("window.location.assign('/admin/world-news/brief?' + params.toString())",
+                "the item's briefing: what it is, the executive summary, the report and the coverage");
+    }
+
     [Fact]
     public void GlobePins_ShouldRemainDepthTested_AndClusterCountsShouldNotBeCovered()
     {

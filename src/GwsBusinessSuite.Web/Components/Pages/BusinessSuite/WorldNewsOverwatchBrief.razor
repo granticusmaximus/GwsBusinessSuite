@@ -1,0 +1,168 @@
+@page "/admin/world-news/brief"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = "AdminOnly")]
+@implements IDisposable
+@using Microsoft.AspNetCore.Authorization
+@using GwsBusinessSuite.Application.Abstractions
+@using GwsBusinessSuite.Infrastructure.Services
+@using GwsBusinessSuite.WorldNewsKit
+@inject WorldNewsService News
+@inject ILogger<WorldNewsOverwatchBrief> Logger
+
+@* An Overwatch item opened in World News (19-11-26, Grant): what the report is, SentinelGPT's
+   executive summary, the report itself, and what the news says about it. The item comes from the
+   Overwatch window's link; the coverage from World News search (OverwatchBrief). *@
+
+<PageTitle>@(_report?.Title ?? "Overwatch briefing")</PageTitle>
+
+<PageHeader Title="@(_report?.Title ?? "Overwatch briefing")" Icon="bi-globe2" Description="An item from Overwatch, with what World News knows about it.">
+    <Actions>
+        <a class="btn btn-outline-secondary" href="admin/osint" data-enhance-nav="false"><i class="bi bi-arrow-left me-1" aria-hidden="true"></i>Overwatch</a>
+        @if (_report is not null)
+        {
+            <a class="btn btn-outline-secondary" href="@SearchHref"><i class="bi bi-search me-1" aria-hidden="true"></i>Search World News</a>
+        }
+    </Actions>
+</PageHeader>
+
+@if (_report is null)
+{
+    <EmptyState Icon="bi-globe2" Title="Nothing to brief" Message="Open this from an Overwatch window's OPEN IN WORLD NEWS button." />
+}
+else
+{
+    <div class="brief">
+        <section class="brief-card" aria-labelledby="brief-what">
+            <h2 id="brief-what">What this is</h2>
+            <dl class="brief-facts">
+                <dt>Type</dt><dd>@_report.KindLabel</dd>
+                @if (!string.IsNullOrWhiteSpace(_report.Severity)) { <dt>Severity</dt><dd>@_report.Severity</dd> }
+                @if (!string.IsNullOrWhiteSpace(_report.AsOf)) { <dt>As of</dt><dd>@_report.AsOf</dd> }
+                <dt>From</dt><dd>Overwatch</dd>
+            </dl>
+        </section>
+
+        <section class="brief-card" aria-labelledby="brief-summary" aria-busy="@(_summaryBusy ? "true" : "false")">
+            <h2 id="brief-summary">Executive summary</h2>
+            @if (_summaryBusy)
+            {
+                <p class="brief-quiet"><InlineProgress CssClass="me-2" />SentinelGPT is reading the report and the coverage…</p>
+            }
+            else if (_summary is not null)
+            {
+                <p class="brief-text">@_summary</p>
+                <p class="brief-quiet small">Written by SentinelGPT from the report and the news below. Check the sources.</p>
+            }
+            else
+            {
+                <p class="brief-quiet">@(_summaryProblem ?? "SentinelGPT didn't write a summary.")</p>
+            }
+        </section>
+
+        <section class="brief-card" aria-labelledby="brief-report">
+            <h2 id="brief-report">The report</h2>
+            <p class="brief-text">@_report.Detail</p>
+            @if (_source is not null)
+            {
+                <a class="brief-link" href="@_source" target="_blank" rel="noopener noreferrer">Official source <i class="bi bi-box-arrow-up-right" aria-hidden="true"></i></a>
+            }
+        </section>
+
+        <section class="brief-card" aria-labelledby="brief-coverage">
+            <h2 id="brief-coverage">What others are reporting</h2>
+            @if (_coverage is null)
+            {
+                <LoadingIndicator Message="Searching World News…" />
+            }
+            else if (_coverage.Count == 0)
+            {
+                <p class="brief-quiet">No World News story about this in the last @_report.Days days. The news hasn't covered it yet, or it's covered under other words: <a href="@SearchHref">search World News</a>.</p>
+            }
+            else
+            {
+                <ul class="brief-stories">
+                    @foreach (var item in _coverage)
+                    {
+                        var e = item.Story.Event;
+                        <li @key="e.Id">
+                            <a class="brief-story-title" href="@($"admin/world-news/events/{Uri.EscapeDataString(e.Id)}")">@(e.Headline ?? e.Title)</a>
+                            <span class="brief-match @(item.Story.IsStrong ? "is-close" : "")">@(item.Story.IsStrong ? "Close match" : "May be related")</span>
+                            <div class="brief-meta">
+                                @e.OutletCount @(e.OutletCount == 1 ? "outlet" : "outlets")@(e.Countries.Count > 0 ? $" in {string.Join(", ", e.Countries.Take(4))}" : "") · last report @e.LastSeen.ToLocalGwsDateTime()
+                            </div>
+                            @if (!string.IsNullOrWhiteSpace(item.Summary))
+                            {
+                                <p class="brief-story-summary">@item.Summary</p>
+                            }
+                        </li>
+                    }
+                </ul>
+                <p class="brief-quiet small">Each story's own page has every source and SentinelGPT's comparison of what the outlets say.</p>
+            }
+        </section>
+    </div>
+}
+
+@code {
+    [SupplyParameterFromQuery(Name = "kind")] public string? Kind { get; set; }
+    [SupplyParameterFromQuery(Name = "label")] public string? Label { get; set; }
+    [SupplyParameterFromQuery(Name = "title")] public string? TitleParameter { get; set; }
+    [SupplyParameterFromQuery(Name = "detail")] public string? Detail { get; set; }
+    [SupplyParameterFromQuery(Name = "severity")] public string? Severity { get; set; }
+    [SupplyParameterFromQuery(Name = "asof")] public string? AsOf { get; set; }
+    [SupplyParameterFromQuery(Name = "source")] public string? Source { get; set; }
+    [SupplyParameterFromQuery(Name = "q")] public string? Query { get; set; }
+
+    private OverwatchReport? _report;
+    private string? _source;
+    private IReadOnlyList<BriefCoverage>? _coverage;
+    private string? _summary;
+    private string? _summaryProblem;
+    private bool _summaryBusy;
+    private readonly CancellationTokenSource _cts = new();
+
+    private string SearchHref => _report is null ? "admin/world-news/search"
+        : $"admin/world-news/search?q={Uri.EscapeDataString(_report.Query)}&days={_report.Days}";
+
+    protected override void OnParametersSet()
+    {
+        if (string.IsNullOrWhiteSpace(TitleParameter)) { _report = null; return; }
+        var title = TitleParameter.Trim();
+        _report = new OverwatchReport(Kind ?? "", string.IsNullOrWhiteSpace(Label) ? "Overwatch item" : Label!, title, Detail?.Trim() ?? "",
+            Severity, AsOf, Source, OverwatchBrief.QueryFor(title, Query), OverwatchBrief.DaysFor(Kind));
+        _source = OverwatchBrief.SafeLink(Source);
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || _report is not { } report) return;
+        try
+        {
+            _coverage = await News.BriefCoverageAsync(report, _cts.Token);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Logger.LogWarning(ex, "World News brief: coverage search failed for {Title}", report.Title);
+            _coverage = [];
+        }
+        _summaryBusy = true;
+        StateHasChanged();
+        try
+        {
+            _summary = await News.BriefSummaryAsync(report, _coverage, _cts.Token);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !_cts.IsCancellationRequested)
+        {
+            Logger.LogInformation(ex, "World News brief: no summary for {Title}", report.Title);
+            _summaryProblem = "SentinelGPT couldn't write a summary just now. The report and the coverage are below.";
+        }
+        _summaryBusy = false;
+        if (!_cts.IsCancellationRequested) StateHasChanged();
+    }
+
+    public void Dispose()
+    {
+        _cts.Cancel();
+        _cts.Dispose();
+    }
+}

@@ -57,3 +57,9 @@ runs; see ai-droplet-availability-2026-11-19), and the six items that need Grant
       evening before). GDELT pins name the actors. Mac map clusters get "N conflict reports" plus the
       first names (`NativeShapes.ClusterLabel`); the grouped list shows a summary line per item;
       hazard panels keep line breaks (`.tg-hazard-detail`). Tests in WorldLayerServicesTests.
+- [x] Grant 19-11-26: OPEN IN WORLD NEWS on every hazard/conflict window opens a World News briefing
+      (`/admin/world-news/brief`, WorldNewsOverwatchBrief): what it is, SentinelGPT's executive summary
+      (`WorldNewsService.BriefSummaryAsync`, prompt in `OverwatchBrief`), the report and its source, and
+      the matching stories with their latest summaries (`BriefCoverageAsync` over `FindAsync`). Search
+      words from `HazardFeature.NewsQuery` (conflict sides + place) or the title. A first version that
+      jumped to a story or the search was replaced the same day. Tests: OverwatchBriefTests.

@@ -1,0 +1,88 @@
+/* An Overwatch item's World News briefing (19-11-26): four neumorphic cards, one column, readable width. */
+.brief {
+    display: grid;
+    gap: 1rem;
+    max-width: 72ch;
+}
+
+.brief-card {
+    background: var(--gws-neu-surface);
+    box-shadow: var(--gws-neu-raised-shadow-sm);
+    border-radius: var(--gws-radius-lg);
+    padding: 1rem 1.25rem;
+}
+
+.brief-card h2 {
+    font-size: var(--gws-type-md);
+    color: var(--gws-text-strong);
+    margin-bottom: 0.5rem;
+}
+
+.brief-facts {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 0.25rem 1rem;
+    margin: 0;
+}
+
+.brief-facts dt {
+    color: var(--gws-text-soft);
+    font-weight: 500;
+}
+
+.brief-facts dd {
+    margin: 0;
+    color: var(--gws-text-strong);
+}
+
+.brief-text {
+    white-space: pre-line;
+    color: var(--gws-text-strong);
+}
+
+.brief-quiet {
+    color: var(--gws-text-soft);
+}
+
+.brief-stories {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: grid;
+    gap: 0.75rem;
+}
+
+.brief-stories li {
+    background: var(--gws-neu-inset);
+    box-shadow: var(--gws-neu-inset-shadow);
+    border-radius: var(--gws-radius-md);
+    padding: 0.75rem 1rem;
+}
+
+.brief-story-title {
+    font-weight: 600;
+    margin-inline-end: 0.5rem;
+}
+
+.brief-match {
+    font-size: var(--gws-type-xs);
+    color: var(--gws-text-soft);
+    border-radius: var(--gws-radius-pill);
+    padding: 0 0.5rem;
+    box-shadow: var(--gws-neu-raised-shadow-sm);
+}
+
+.brief-match.is-close {
+    color: var(--gws-sidebar-accent);
+}
+
+.brief-meta {
+    font-size: var(--gws-type-sm);
+    color: var(--gws-text-soft);
+    margin-top: 0.25rem;
+}
+
+.brief-story-summary {
+    font-size: var(--gws-type-sm);
+    margin: 0.5rem 0 0;
+}
