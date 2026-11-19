@@ -12,7 +12,7 @@ after each code item.
 | 3 | WMO severe-weather alerts on Overwatch | overwatch-world-signals-2026-11-05 | done |
 | 1 | World News expansion Unit 1: regional outlets, adaptive outlet threshold | world-news-overwatch-expansion-2026-11 | done |
 | 4 | Apple UI item 2: simpler navigation | apple-ui-streamlining-2026-11-18 | done |
-| 5 | Apple UI item 3: one main action per page | apple-ui-streamlining-2026-11-18 | to do |
+| 5 | Apple UI item 3: one main action per page | apple-ui-streamlining-2026-11-18 | done |
 | 6 | Apple UI item 5: motion and feedback (bare spinners) | apple-ui-streamlining-2026-11-18 | done |
 | 7 | Apple UI item 7: detail and copy | apple-ui-streamlining-2026-11-18 | done |
 | 2 | Camera availability phases 1-5 | overwatch-camera-availability-and-world-news-2026-11-09 | to do |
@@ -68,3 +68,7 @@ runs; see ai-droplet-availability-2026-11-19), and the six items that need Grant
       MKClusterAnnotation from macOS 27's protocol-wrapper members. Removed; `LabelCluster` now only sets
       the title/subtitle on MapKit's own group (setter checked, nothing throws). Guard:
       `MacMap_ShouldLabelMapKitsOwnGroups_NotBuildThem`. Needs `open gws` to reach the installed app.
+- [x] 5: one main action per page header (`MainActionTests`): World News (Pull latest primary,
+      Search, More: Desk/Sources/Methodology/Regroup), World News Desk (back + More), Home (one primary).
+      World News's R shortcut ran Regroup (first `.world-news-refresh`); now Pull latest. Overwatch's
+      layer toggles left grouped in LAYERS.

@@ -8,7 +8,7 @@ design system) in one go.
 
 1. **Mac app feels native** - done (needs a Mac build to confirm).
 2. **Simplify navigation** - done 19-11-26: section headings in every workspace over five links (Content, Relationships, Intelligence, Platform); Relationships regrouped (Clients, Billing & time, Team). Nothing removed; hiding apps stays in Settings (HiddenNavKeys). Guard: `NavMenuSectionTests`.
-3. One main action per page (World News 30 buttons, Overwatch 137) - to do.
+3. **One main action per page** - done 19-11-26: page headers have at most one primary button and four in a row, the rest under More (World News, World News Desk; Home and CRM checked). Fixed on the way: World News's R shortcut ran Regroup, not Pull latest. Overwatch's 137 are layer toggles already grouped in its LAYERS panel, left as they are. Guard: `MainActionTests`.
 4. **Enforce the design system** - done.
 5. **Motion and feedback** - done 19-11-26: `InlineProgress` replaces all 20 Bootstrap spinners.
 6. Neumorphism pushback - Grant's call, not started.

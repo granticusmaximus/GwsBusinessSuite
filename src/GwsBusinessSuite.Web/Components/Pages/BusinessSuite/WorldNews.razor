@@ -39,25 +39,31 @@
         }
     </Meta>
     <Actions>
+        @* One main action (19-11-26, Apple-style item 3): Pull latest is the page's button; Search sits
+           beside it, and the rest is under More. Regroup isn't a .world-news-refresh button any more, so
+           the R shortcut (world-news.js) pulls the news instead of regrouping every story. *@
         <a class="btn btn-outline-secondary" href="admin/world-news/search" title="Find every story with similar reports, and the cyber attacks in the news now">
             <i class="bi bi-search me-1" aria-hidden="true"></i>Search
         </a>
-        <a class="btn btn-outline-secondary" href="admin/world-news/desk" title="The story budget and the tips readers have sent">
-            <i class="bi bi-journal-text me-1" aria-hidden="true"></i>Desk
-        </a>
-        <a class="btn btn-outline-secondary" href="admin/world-news/methodology" title="How stories are labelled, and how well the labels hold up">
-            <i class="bi bi-clipboard-check me-1" aria-hidden="true"></i>Methodology
-        </a>
-        <a class="btn btn-outline-secondary" href="admin/world-news/sources" title="Every feed's health, the crawl's numbers and where coverage is thin">
-            <i class="bi bi-broadcast me-1" aria-hidden="true"></i>Sources
-        </a>
-        <button type="button" class="btn btn-outline-secondary world-news-refresh" @onclick="RegroupNow" disabled="@(News.IsRegrouping || News.IsPulling)"
-                aria-label="@(News.IsRegrouping ? "Regrouping stories" : "Regroup stories")"
-                title="Compare every active story with every other and join the ones about the same event. The AI checks the close calls.">
-            <i class="bi bi-diagram-3 @(News.IsRegrouping ? "world-news-spin" : "")" aria-hidden="true"></i>
-            <span class="world-news-refresh-text">@(News.IsRegrouping ? "Regrouping…" : "Regroup")</span>
-        </button>
-        <button type="button" class="btn btn-outline-secondary world-news-refresh" @onclick="PullNow" disabled="@(News.IsPulling || PullWait > TimeSpan.Zero)"
+        <div class="dropdown">
+            <button class="btn btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false"
+                    aria-label="More World News pages and tools">
+                <i class="bi bi-three-dots me-1" aria-hidden="true"></i>More
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end">
+                <li><a class="dropdown-item" href="admin/world-news/desk" title="The story budget and the tips readers have sent"><i class="bi bi-journal-text me-2" aria-hidden="true"></i>Desk</a></li>
+                <li><a class="dropdown-item" href="admin/world-news/sources" title="Every feed's health, the crawl's numbers and where coverage is thin"><i class="bi bi-broadcast me-2" aria-hidden="true"></i>Sources</a></li>
+                <li><a class="dropdown-item" href="admin/world-news/methodology" title="How stories are labelled, and how well the labels hold up"><i class="bi bi-clipboard-check me-2" aria-hidden="true"></i>Methodology</a></li>
+                <li><hr class="dropdown-divider" /></li>
+                <li>
+                    <button type="button" class="dropdown-item" @onclick="RegroupNow" disabled="@(News.IsRegrouping || News.IsPulling)"
+                            title="Compare every active story with every other and join the ones about the same event. The AI checks the close calls.">
+                        <i class="bi bi-diagram-3 me-2 @(News.IsRegrouping ? "world-news-spin" : "")" aria-hidden="true"></i>@(News.IsRegrouping ? "Regrouping…" : "Regroup stories")
+                    </button>
+                </li>
+            </ul>
+        </div>
+        <button type="button" class="btn btn-primary world-news-refresh" @onclick="PullNow" disabled="@(News.IsPulling || PullWait > TimeSpan.Zero)"
                 aria-label="@(News.IsPulling ? "Pulling the latest news" : "Pull the latest news")"
                 title="@PullTitle">
             <i class="bi bi-arrow-clockwise @(News.IsPulling || News.IsRefreshing ? "world-news-spin" : "")" aria-hidden="true"></i>

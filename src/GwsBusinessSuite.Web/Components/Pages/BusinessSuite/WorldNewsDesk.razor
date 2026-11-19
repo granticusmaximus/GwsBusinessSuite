@@ -18,11 +18,21 @@
 
 <PageHeader Title="News desk" Icon="bi-journal-text" Description="The stories the desk is following, and the tips readers have sent.">
     <Actions>
-        <a class="btn btn-outline-secondary" href="admin/world-news/source-book">My source book</a>
-        <a class="btn btn-outline-secondary" href="admin/world-news/search">Search stories</a>
-        <a class="btn btn-outline-secondary" href="world-news/live" target="_blank" rel="noopener">Public live coverage</a>
+        @* Back, and the rest under More (19-11-26, Apple-style item 3). *@
         <a class="btn btn-outline-secondary" href="admin/world-news"><i class="bi bi-arrow-left me-1" aria-hidden="true"></i>World News</a>
-        <a class="btn btn-outline-secondary" href="tip" target="_blank" rel="noopener"><i class="bi bi-box-arrow-up-right me-1" aria-hidden="true"></i>Tip form</a>
+        <div class="dropdown">
+            <button class="btn btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false"
+                    aria-label="More desk pages">
+                <i class="bi bi-three-dots me-1" aria-hidden="true"></i>More
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end">
+                <li><a class="dropdown-item" href="admin/world-news/source-book"><i class="bi bi-person-lines-fill me-2" aria-hidden="true"></i>My source book</a></li>
+                <li><a class="dropdown-item" href="admin/world-news/search"><i class="bi bi-search me-2" aria-hidden="true"></i>Search stories</a></li>
+                <li><hr class="dropdown-divider" /></li>
+                <li><a class="dropdown-item" href="world-news/live" target="_blank" rel="noopener"><i class="bi bi-broadcast me-2" aria-hidden="true"></i>Public live coverage</a></li>
+                <li><a class="dropdown-item" href="tip" target="_blank" rel="noopener"><i class="bi bi-box-arrow-up-right me-2" aria-hidden="true"></i>Tip form</a></li>
+            </ul>
+        </div>
     </Actions>
 </PageHeader>
 
