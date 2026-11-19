@@ -405,6 +405,19 @@
     text-decoration: underline;
 }
 
+/* How the camera can be viewed and whether it's working; a broken one is dimmed (the words say so too). */
+.tg-world-news-camera-facts {
+    display: block;
+    font-size: 0.85em;
+    opacity: 0.75;
+    text-decoration: none;
+}
+
+.tg-world-news-camera.is-unavailable {
+    color: inherit;
+    opacity: 0.6;
+}
+
 .tg-world-news-capture {
     display: block;
     margin-bottom: 0.25rem;

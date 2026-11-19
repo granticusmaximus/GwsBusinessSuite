@@ -97,3 +97,17 @@ occurred.
 - [ ] Implement phase 3: availability map/list UX.
 - [ ] Implement phase 4: World News visual context and capture policy.
 - [ ] Implement phase 5: tests, guides, release gate, and native/browser validation.
+- [x] 19-11-26: World News visual context (phase 4 items 1-3, phase 3 item 3 in part).
+  `CameraAvailability` (Application/CameraIntel) classifies each camera from its stream kind and
+  the existing `CameraHealthService` checks: Live video / Still image; Available now / Not
+  confirmed / Not working; last seen working. `WorldNewsContextService.NearbyCameras` ranks the
+  25-mile list working-first, then by distance (country-level stories still get none). The
+  Overwatch news panel shows **VISUAL CONTEXT · NEARBY CAMERAS** with mode, state, source and time,
+  plus the "don't verify the report" line. Capture stays still-image only (`IncidentCaptureService`
+  already filtered to `Snapshot`). `CameraAvailabilityTests`. Overwatch guide updated.
+- Already in place before this plan's later phases (found 19-11-26, not rebuilt): server-side
+  health checks with a 90 s minimum interval per camera (`CameraHealthService`), the camera panel's
+  health badge and source link, and the "hide frozen, stale and offline" camera filter.
+- [ ] Still open: persisted provider policy and capability records (phases 1-2; health is
+  in-memory and restarts empty), capability-specific pin symbols and the extra filters (phase 3
+  items 1, 2, 4), the opt-in submission workflow, and Mac/PWA manual checks.

@@ -3218,10 +3218,19 @@ window.tacticalGlobe = (function () {
                 'Use Wrong place? on World News to pin one.</div>';
         } else {
             html += '<div class="tg-world-news-context-note">Nearby live sensors are context only; they do not confirm the reported event.</div>';
-            html += list('NEARBY CAMERAS', (context.cameras || []).map(function (c, i) {
-                return '<button type="button" class="tg-world-news-camera" data-camera-index="' + i + '">' +
-                    escapeHtml(c.name + ' · ' + c.miles + ' MI') + '</button>';
+            // Visual context (19-11-26): working cameras first, each with how it can be viewed and
+            // when it was last seen working. A camera shows conditions there, not the event.
+            html += list('VISUAL CONTEXT · NEARBY CAMERAS', (context.cameras || []).map(function (c, i) {
+                const facts = [c.mode, c.stateLabel, c.source].filter(Boolean).join(' · ') +
+                    (c.confirmed ? ' · SEEN WORKING ' + c.confirmed : '');
+                return '<button type="button" class="tg-world-news-camera' + (c.state === 'Unavailable' ? ' is-unavailable' : '') +
+                    '" data-camera-index="' + i + '"' + (c.reason ? ' title="' + escapeHtml(c.reason) + '"' : '') + '>' +
+                    escapeHtml(c.name + ' · ' + c.miles + ' MI') +
+                    (facts ? '<span class="tg-world-news-camera-facts">' + escapeHtml(facts.toUpperCase()) + '</span>' : '') + '</button>';
             }));
+            if ((context.cameras || []).length) {
+                html += '<div class="tg-world-news-context-note">Public cameras may show conditions near the place. They don\'t verify the report.</div>';
+            }
             html += list('WEATHER ALERTS', (context.alerts || []).map(escapeHtml));
             html += list('HAZARDS NEARBY', (context.hazards || []).map(escapeHtml));
             html += list('POWER OUTAGES NEARBY', (context.outages || []).map(escapeHtml));

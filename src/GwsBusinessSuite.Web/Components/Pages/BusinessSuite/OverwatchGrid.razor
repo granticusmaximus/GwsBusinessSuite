@@ -2378,7 +2378,18 @@
         {
             backing = context.Backing.Select(b => new { source = b.Source, text = b.Text, url = b.Url }).ToList(),
             precise = context.Nearby is not null,
-            cameras = context.Nearby?.Cameras.Select(c => new { name = c.Camera.Name, miles = Math.Round(c.Miles, 1), pin = ToPinPayload(c.Camera) }).ToList(),
+            cameras = context.Nearby?.Cameras.Select(c => new
+            {
+                name = c.Camera.Name,
+                miles = Math.Round(c.Miles, 1),
+                source = c.Camera.SourceName,
+                mode = c.Availability?.ModeLabel,
+                state = c.Availability?.State.ToString(),
+                stateLabel = c.Availability?.StateLabel,
+                reason = c.Availability?.Reason,
+                confirmed = c.Availability?.LastConfirmed?.ToLocalGwsDateTime(),
+                pin = ToPinPayload(c.Camera)
+            }).ToList(),
             alerts = context.Nearby?.Alerts.Select(a => a.Event).Distinct().ToList(),
             hazards = context.Nearby?.Hazards.Select(h => h.Title).ToList(),
             outages = context.Nearby?.Outages.Select(o => $"{o.CustomersOut:N0} customers out in {o.Name}, {o.State}").ToList(),

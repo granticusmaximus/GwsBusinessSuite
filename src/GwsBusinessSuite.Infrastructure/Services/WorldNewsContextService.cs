@@ -10,7 +10,8 @@ namespace GwsBusinessSuite.Infrastructure.Services;
 
 // An official signal that matches a reported story in kind, place and time.
 public sealed record WorldNewsBacking(string Source, string Text, string? Url);
-public sealed record WorldNewsNearbyCamera(CameraFeed Camera, double Miles);
+// Availability ranks a story's nearby cameras: working ones first (19-11-26).
+public sealed record WorldNewsNearbyCamera(CameraFeed Camera, double Miles, CameraAvailability? Availability = null);
 public sealed record WorldNewsNearbyAircraft(Aircraft Aircraft, double Miles);
 public sealed record WorldNewsNearbyShip(Ship Ship, double Miles);
 public sealed record WorldNewsNearby(IReadOnlyList<WorldNewsNearbyCamera> Cameras, IReadOnlyList<WeatherAlert> Alerts,
@@ -31,7 +32,8 @@ public sealed partial class WorldNewsContextService(
     IncidentCaptureService captures,
     ILogger<WorldNewsContextService> logger,
     AircraftService? aircraft = null,
-    ShipService? ships = null)
+    ShipService? ships = null,
+    CameraHealthService? cameraHealth = null)
 {
     public const double NearbyMiles = 25;
     // How far from a city-level story an official signal can be and still back it.
@@ -79,8 +81,7 @@ public sealed partial class WorldNewsContextService(
             var aircraftResult = aircraftTask.Result;
             var shipResult = shipsTask.Result;
             nearby = new WorldNewsNearby(
-                cameraList.Select(c => new WorldNewsNearbyCamera(c, RoadTrafficSummary.Miles(lat, lon, c.Latitude, c.Longitude)))
-                    .Where(c => c.Miles <= NearbyMiles).OrderBy(c => c.Miles).Take(MaxNearbyCameras).ToList(),
+                NearbyCameras(lat, lon, cameraList, id => cameraHealth?.GetKnown(id)),
                 alertList,
                 hazardList.Where(h => RoadTrafficSummary.Miles(lat, lon, h.Latitude, h.Longitude) <= NearbyMiles).ToList(),
                 outageList.Where(a => RoadTrafficSummary.Miles(lat, lon, a.Latitude, a.Longitude) <= NearbyMiles).ToList(),
@@ -90,6 +91,17 @@ public sealed partial class WorldNewsContextService(
                 shipResult?.Note);
         }
         return new WorldNewsStoryContext(backing, nearby);
+    }
+
+    // The cameras within NearbyMiles: working ones first, then unchecked, then broken; nearest
+    // first within each.
+    public static IReadOnlyList<WorldNewsNearbyCamera> NearbyCameras(double lat, double lon, IEnumerable<CameraFeed> cameraList,
+        Func<string, CameraHealthReport?> health)
+    {
+        var near = cameraList
+            .Select(c => new WorldNewsNearbyCamera(c, RoadTrafficSummary.Miles(lat, lon, c.Latitude, c.Longitude), CameraAvailability.For(c, health(c.Id))))
+            .Where(c => c.Miles <= NearbyMiles);
+        return CameraAvailability.Rank(near, c => c.Availability!, c => c.Miles, MaxNearbyCameras);
     }
 
     public static IReadOnlyList<WorldNewsNearbyAircraft> NearbyAircraft(WorldNewsMapSignal signal, IEnumerable<Aircraft> aircraft) =>
