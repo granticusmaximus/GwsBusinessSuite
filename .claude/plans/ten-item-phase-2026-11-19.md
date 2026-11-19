@@ -15,7 +15,7 @@ after each code item.
 | 5 | Apple UI item 3: one main action per page | apple-ui-streamlining-2026-11-18 | done |
 | 6 | Apple UI item 5: motion and feedback (bare spinners) | apple-ui-streamlining-2026-11-18 | done |
 | 7 | Apple UI item 7: detail and copy | apple-ui-streamlining-2026-11-18 | done |
-| 2 | Camera availability phases 1-5 | overwatch-camera-availability-and-world-news-2026-11-09 | in part: World News visual context, pin shapes and LIVE VIDEO ONLY done 19-11-26; persisted provider policy, native pin shapes, provider filters and viewport list open |
+| 2 | Camera availability phases 1-5 | overwatch-camera-availability-and-world-news-2026-11-09 | in part: done 19-11-26 (visual context, pin shapes web and Mac, LIVE VIDEO ONLY, cameras in view, health kept across restarts); provider policy records and submissions wait on Grant |
 
 Not in this phase: the AI droplet capacity follow-up (generations still time out while embedding
 runs; see ai-droplet-availability-2026-11-19), and the six items that need Grant.

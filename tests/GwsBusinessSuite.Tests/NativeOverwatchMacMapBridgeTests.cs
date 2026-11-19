@@ -103,7 +103,8 @@ public sealed class NativeOverwatchMacMapBridgeTests
         bridge.Should().Contain("if (!_scheduledLayers.Add(layer)) return;");
         bridge.Should().Contain("slow apply {operation}");
         bridge.Should().Contain("if (_signatures.TryGetValue(operation, out var last) && last == signature) return;");
-        bridge.Should().Contain("if (previous.Remove(key, out var kept) && kept is NativeAnnotation native)");
+        bridge.Should().Contain("if (previous.TryGetValue(key, out var kept) && kept is NativeAnnotation native")
+            .And.Contain("NativeShapes.Marker(operation, native.Payload) == NativeShapes.Marker(operation, item)", "a pin whose symbol changes is replaced, since MapKit keeps the drawn view");
         bridge.Should().Contain("NativeShapes.Identity(operation, item)");
         bridge.Should().Contain("native.Update(item, coordinate)");
         bridge.Should().Contain("_annotationsByHandle.GetValueOrDefault(handle)");

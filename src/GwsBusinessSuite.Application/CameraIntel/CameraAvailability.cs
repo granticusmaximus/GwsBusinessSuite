@@ -51,7 +51,21 @@ public sealed record CameraAvailability(
         };
     }
 
+    // The Overwatch "cameras in view" list (19-11-26): working first (as Rank), nearest to the view's
+    // middle, or most recently seen working.
+    public const string SortWorking = "working";
+    public const string SortNearest = "nearest";
+    public const string SortRecent = "recent";
+
+    public static IReadOnlyList<T> Sort<T>(IEnumerable<T> items, string sort, Func<T, CameraAvailability> availability, Func<T, double> miles, int take) =>
+        (sort switch
+        {
+            SortNearest => items.OrderBy(miles),
+            SortRecent => items.OrderByDescending(item => availability(item).LastConfirmed ?? DateTimeOffset.MinValue).ThenBy(miles),
+            _ => items.OrderBy(item => (int)availability(item).State).ThenBy(miles),
+        }).Take(take).ToList();
+
     // Working cameras first, then unchecked ones, then broken ones; nearest first within each.
     public static IReadOnlyList<T> Rank<T>(IEnumerable<T> items, Func<T, CameraAvailability> availability, Func<T, double> miles, int take) =>
-        items.OrderBy(item => (int)availability(item).State).ThenBy(miles).Take(take).ToList();
+        Sort(items, SortWorking, availability, miles, take);
 }

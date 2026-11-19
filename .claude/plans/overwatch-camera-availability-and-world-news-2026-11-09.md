@@ -114,7 +114,24 @@ occurred.
   health check changes them. The camera window shows mode · state · source. **LIVE VIDEO ONLY**
   filters server-side (`CameraFilter`), so the Mac map gets it too, though the native MapKit pins
   don't take the shapes yet. Guard in `CameraAvailabilityTests`.
-- [ ] Still open: persisted provider policy and capability records (phases 1-2; health is
-  in-memory and restarts empty), native MapKit pin shapes, the provider/region filters and
-  viewport camera list (phase 3 items 2, 4), the opt-in submission workflow, and Mac/PWA manual
-  checks.
+- [x] 19-11-26: the rest of phase 3, and keeping the capability state.
+  - Mac map: `NativeShapes.Marker` gives camera pins `camera.fill` (still image), `video.fill`
+    (live video) or a grey `exclamationmark.triangle.fill` (not working). `MacNativeOverwatchBridge`
+    replaces a pin whose symbol changed, because MapKit keeps the view it already drew.
+  - **CAMERAS IN VIEW** in EXPLORE: up to 40 of the pins in view, sorted by working first, nearest
+    or last seen working (`CameraAvailability.Sort`), with OPEN.
+  - Health history survives restarts: `CameraHealthService.Snapshot/Restore` and
+    `CameraHealthStateFile` (`camera-health.json` beside worldnews.db, written atomically after
+    each 10-minute sweep, read at start, 6-hour window). It's a file, not a table: a small rolling
+    cache, with no migration.
+  - Tests: `NativeShapesTests`, `CameraAvailabilityTests`, `CameraHealthServiceTests`, plus the
+    bridge guard. Overwatch guide updated.
+- [ ] Waiting on Grant (not built, by decision):
+  - Per-provider source-policy records (licence, terms URL, review date). Each of about 47
+    providers' terms needs a person to read and confirm them; writing them from memory would
+    record unverified legal claims.
+  - The opt-in submission workflow: anyone could submit a camera URL, and the health checker
+    would then fetch arbitrary addresses from the server. It needs a decision on who can submit
+    and an allow-list design first.
+  - A provider/region filter: the coverage index in EXPLORE already lists cameras by region.
+  - On-screen checks in the Mac app and the PWA.

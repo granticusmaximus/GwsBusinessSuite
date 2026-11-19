@@ -56,6 +56,63 @@ public sealed class CameraHealthService(
 
     private static string Key(string cameraId) => $"camera-health:{cameraId}";
 
+    // Which cameras have a history, so it can be saved (the memory cache can't be listed). Kept in
+    // the same cache, so it lives exactly as long as the histories do.
+    private const string IndexKey = "camera-health:index";
+    private System.Collections.Concurrent.ConcurrentDictionary<string, byte> Index =>
+        cache.GetOrCreate(IndexKey, entry =>
+        {
+            entry.Priority = CacheItemPriority.NeverRemove;
+            return new System.Collections.Concurrent.ConcurrentDictionary<string, byte>(StringComparer.Ordinal);
+        })!;
+
+    private History HistoryFor(string cameraId)
+    {
+        Index.TryAdd(cameraId, 0);
+        return cache.GetOrCreate(Key(cameraId), entry =>
+        {
+            entry.SlidingExpiration = HistoryLifetime;
+            return new History();
+        })!;
+    }
+
+    // Saved across restarts (19-11-26, camera availability plan): a deploy used to start every
+    // camera over at "Not checked yet". Only samples from the last HistoryLifetime are kept.
+    public IReadOnlyDictionary<string, IReadOnlyList<Sample>> Snapshot()
+    {
+        var now = timeProvider.GetUtcNow();
+        var saved = new Dictionary<string, IReadOnlyList<Sample>>(StringComparer.Ordinal);
+        foreach (var cameraId in Index.Keys)
+        {
+            if (!cache.TryGetValue(Key(cameraId), out History? history) || history is null) { Index.TryRemove(cameraId, out _); continue; }
+            lock (history.Gate)
+            {
+                var recent = history.Samples.Where(sample => now - sample.At <= HistoryLifetime).ToList();
+                if (recent.Count > 0) saved[cameraId] = recent;
+            }
+        }
+        return saved;
+    }
+
+    public int Restore(IReadOnlyDictionary<string, IReadOnlyList<Sample>> saved)
+    {
+        var now = timeProvider.GetUtcNow();
+        var restored = 0;
+        foreach (var (cameraId, samples) in saved)
+        {
+            var recent = samples.Where(sample => now - sample.At <= HistoryLifetime).OrderBy(sample => sample.At).TakeLast(MaxSamples).ToList();
+            if (recent.Count == 0) continue;
+            var history = HistoryFor(cameraId);
+            lock (history.Gate)
+            {
+                if (history.Samples.Count > 0) continue;
+                history.Samples.AddRange(recent);
+            }
+            restored++;
+        }
+        return restored;
+    }
+
     // The latest verdict without fetching anything - for filtering pins.
     public CameraHealthReport? GetKnown(string cameraId)
     {
@@ -75,11 +132,7 @@ public sealed class CameraHealthService(
             return new(new(camera.Id, CameraHealthStatus.Unknown, "Live video stream - not health-checked.", null), null);
 
         var now = timeProvider.GetUtcNow();
-        var history = cache.GetOrCreate(Key(camera.Id), entry =>
-        {
-            entry.SlidingExpiration = HistoryLifetime;
-            return new History();
-        })!;
+        var history = HistoryFor(camera.Id);
 
         lock (history.Gate)
         {

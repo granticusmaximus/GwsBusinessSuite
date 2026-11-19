@@ -40,4 +40,4 @@ design system) in one go.
 - [x] Guard tests
 - [x] Sentinel user guide (Mac app section)
 - [x] `./scripts/verify-release.sh` and a Mac build. 19-11-26 (Claude, Mac): verify-release.sh PARTIAL, release build and full suite (incl. Playwright) pass; Mac Debug build 0 warnings.
-- [ ] Items 2, 3, 5, 6, 7
+- [x] Items 2, 3, 5 and 7 (19-11-26). Item 6 (neumorphism) waits on Grant.

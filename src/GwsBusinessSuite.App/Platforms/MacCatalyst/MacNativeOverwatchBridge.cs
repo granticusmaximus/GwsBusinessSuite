@@ -244,8 +244,12 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
             {
                 var key = itemKey;
                 while (next.ContainsKey(key)) key += "#";
-                if (previous.Remove(key, out var kept) && kept is NativeAnnotation native)
+                // A pin whose symbol changes (a camera found not working, say) is replaced: MapKit
+                // doesn't restyle a view it has already drawn.
+                if (previous.TryGetValue(key, out var kept) && kept is NativeAnnotation native
+                    && NativeShapes.Marker(operation, native.Payload) == NativeShapes.Marker(operation, item))
                 {
+                    previous.Remove(key);
                     native.Update(item, coordinate);
                     next[key] = native;
                 }

@@ -105,6 +105,41 @@ public sealed class CameraHealthServiceTests
         return new HttpResponseMessage(HttpStatusCode.OK) { Content = content };
     }
 
+    // 19-11-26: a deploy reset every camera to "Not checked yet". The history is saved and read back.
+    [Fact]
+    public async Task History_ShouldSurviveARestart_ThroughTheStateFile()
+    {
+        var clock = new Clock { UtcNow = T0 };
+        var image = new byte[] { 1, 2, 3 };
+        var before = Create(clock, _ => Image(image));
+        for (var i = 0; i < 4; i++)
+        {
+            await before.CheckAsync(Camera);
+            clock.UtcNow = clock.UtcNow.AddMinutes(15);
+        }
+        before.GetKnown(Camera.Id)!.Status.Should().Be(CameraHealthStatus.Frozen);
+
+        var path = Path.Combine(Path.GetTempPath(), $"camera-health-{Guid.NewGuid():N}.json");
+        try
+        {
+            var file = new GwsBusinessSuite.Infrastructure.Services.CameraHealthStateFile(path);
+            await file.WriteAsync(before.Snapshot());
+
+            var after = Create(clock, _ => Image(image));
+            after.GetKnown(Camera.Id).Should().BeNull("a new process starts empty");
+            after.Restore(await file.ReadAsync()).Should().Be(1);
+            after.GetKnown(Camera.Id)!.Status.Should().Be(CameraHealthStatus.Frozen);
+
+            clock.UtcNow = clock.UtcNow.AddHours(7);
+            var later = Create(clock, _ => Image(image));
+            later.Restore(await file.ReadAsync()).Should().Be(0, "samples older than the history lifetime aren't restored");
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
     private static CameraHealthService Create(Clock clock, Func<HttpRequestMessage, HttpResponseMessage> respond) =>
         new(new HttpClient(new Handler(respond)), new MemoryCache(new MemoryCacheOptions()), clock, NullLogger<CameraHealthService>.Instance);
 

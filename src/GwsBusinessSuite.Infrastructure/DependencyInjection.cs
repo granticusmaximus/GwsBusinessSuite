@@ -840,6 +840,9 @@ public static class DependencyInjection
             client.Timeout = TimeSpan.FromSeconds(15);
             client.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (compatible; GWSuite-Overwatch/1.0; +https://grantwatson.dev)");
         });
+        // Camera health history survives restarts (camera-health.json beside World News' database).
+        services.AddSingleton(new CameraHealthStateFile(configuration["Overwatch:CameraHealthPath"] is { Length: > 0 } healthPath ? healthPath
+            : Path.Combine(Path.GetDirectoryName(Path.GetFullPath(configuration["WorldNews:DatabasePath"] ?? "/app/data/worldnews.db"))!, "camera-health.json")));
         services.AddHostedService<CameraHealthBackgroundService>();
         services.AddSingleton(sp => new CameraTimelapseStore(
             configuration["Overwatch:TimelapsePath"] ?? "/app/data/overwatch-timelapse",

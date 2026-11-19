@@ -170,4 +170,14 @@ public sealed class NativeShapesTests
 
         Assert.DoesNotContain(sets, op => !NativeShapes.Handled.Contains(op) && !pointsAndPaths.Contains(op));
     }
+
+    // 19-11-26: the Mac map's camera pins say what the camera offers, as the web map's shapes do.
+    [Fact]
+    public void CameraPins_ShouldShowStillImage_LiveVideo_AndNotWorking_BySymbol()
+    {
+        Assert.Equal("camera.fill", NativeShapes.Marker("setCameraPins", O(("mode", "StillImage"), ("state", "AvailableNow"))).Symbol);
+        Assert.Equal("video.fill", NativeShapes.Marker("setCameraPins", O(("mode", "LiveVideo"), ("state", "Unconfirmed"))).Symbol);
+        Assert.Equal("exclamationmark.triangle.fill", NativeShapes.Marker("setCameraPins", O(("mode", "StillImage"), ("state", "Unavailable"))).Symbol);
+        Assert.Equal("camera.fill", NativeShapes.Marker("setCameraPins", O(("name", "Old payload"))).Symbol);
+    }
 }

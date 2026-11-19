@@ -1004,3 +1004,20 @@
     background: rgba(0, 0, 0, 0.35); color: inherit; border: 1px solid rgba(120, 255, 170, 0.35);
     font: 11px monospace; padding: 4px 6px; border-radius: var(--gws-radius-xs); color-scheme: dark;
 }
+
+/* Cameras in view (19-11-26): a collapsible list in EXPLORE; a broken camera is dimmed and says so. */
+.tg-inview > summary {
+    cursor: pointer;
+    list-style: none;
+}
+
+.tg-inview-sort {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+    margin: 0.25rem 0 0.4rem;
+}
+
+.tg-coverage-item.is-unavailable {
+    opacity: 0.6;
+}

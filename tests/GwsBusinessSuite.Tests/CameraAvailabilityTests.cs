@@ -105,4 +105,24 @@ public sealed class CameraAvailabilityTests
             .And.Contain("include: CameraFilter()")
             .And.Contain("LIVE VIDEO ONLY [");
     }
+
+    // The Overwatch "cameras in view" list: working first, nearest, or most recently seen working.
+    [Fact]
+    public void InViewList_ShouldSortByWorking_Nearest_OrLastSeenWorking()
+    {
+        var rows = new (string Id, CameraAvailability Availability, double Miles)[]
+        {
+            ("broken-near", new(CameraViewingMode.StillImage, CameraAvailabilityState.Unavailable, "x", null), 1),
+            ("working-old", new(CameraViewingMode.StillImage, CameraAvailabilityState.AvailableNow, "x", T0.AddHours(-1)), 5),
+            ("working-new", new(CameraViewingMode.StillImage, CameraAvailabilityState.AvailableNow, "x", T0), 9),
+            ("unchecked", new(CameraViewingMode.LiveVideo, CameraAvailabilityState.Unconfirmed, "x", null), 2),
+        };
+        string[] Order(string sort, int take = 10) =>
+            CameraAvailability.Sort(rows, sort, r => r.Availability, r => r.Miles, take).Select(r => r.Id).ToArray();
+
+        Order(CameraAvailability.SortWorking).Should().Equal("working-old", "working-new", "unchecked", "broken-near");
+        Order(CameraAvailability.SortNearest).Should().Equal("broken-near", "unchecked", "working-old", "working-new");
+        Order(CameraAvailability.SortRecent).Should().Equal("working-new", "working-old", "broken-near", "unchecked");
+        Order(CameraAvailability.SortWorking, take: 2).Should().HaveCount(2);
+    }
 }

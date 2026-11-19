@@ -203,6 +203,10 @@ public static class NativeShapes
 
         return operation switch
         {
+            // What the camera offers, by symbol as on the web map (19-11-26): still image, live
+            // video, or found not working (CameraAvailability's mode and state on the pin).
+            "setCameraPins" when Text(item, "state") == "unavailable" => new("exclamationmark.triangle.fill", MarkerTone.Gray),
+            "setCameraPins" when Text(item, "mode") == "livevideo" => new("video.fill", MarkerTone.Teal),
             "setCameraPins" => new("camera.fill", MarkerTone.Green),
             "setCameraAlertHighlights" => new("camera.badge.ellipsis", MarkerTone.Red, true),
             "setAircraft" when !string.IsNullOrWhiteSpace(Text(item, "emergency")) => new("airplane.circle.fill", MarkerTone.Red, true),

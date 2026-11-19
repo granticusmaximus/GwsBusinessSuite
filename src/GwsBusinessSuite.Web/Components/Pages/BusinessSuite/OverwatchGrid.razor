@@ -863,6 +863,39 @@
             @switch (_panelTab)
             {
                 case "explore":
+                    @* Cameras in view (19-11-26): the pins in view as a list, so a dense area can be
+                       searched without opening every camera. *@
+                    @if (_visibleCameras.Count > 0)
+                    {
+                        <details class="tg-inview">
+                            <summary class="tg-coverage-panel-header"><span>CAMERAS IN VIEW (@_visibleCameras.Count.ToString("N0"))</span></summary>
+                            <div class="tg-inview-sort" role="group" aria-label="Sort cameras">
+                                @foreach (var (sortKey, sortLabel) in InViewSorts)
+                                {
+                                    <button type="button" class="tg-toggle @(_inViewSort == sortKey ? "tg-toggle-on" : "")" aria-pressed="@(_inViewSort == sortKey ? "true" : "false")"
+                                            @onclick="() => _inViewSort = sortKey">@sortLabel</button>
+                                }
+                            </div>
+                            <ul class="tg-coverage-list">
+                                @foreach (var row in InViewCameraRows())
+                                {
+                                    <li class="tg-coverage-item @(row.Availability.State == CameraAvailabilityState.Unavailable ? "is-unavailable" : "")" @key="row.Camera.Id">
+                                        <span>
+                                            @row.Camera.Name
+                                            <small class="tg-coverage-status">@($"{row.Availability.ModeLabel} · {row.Availability.StateLabel} · {row.Camera.SourceName} · {row.Miles:0.#} mi".ToUpperInvariant())@(row.Availability.LastConfirmed is { } seen ? $" · SEEN WORKING {seen.ToLocalGwsDateTime()}" : "")</small>
+                                        </span>
+                                        <span class="tg-area-actions">
+                                            <button type="button" title="@row.Availability.Reason" @onclick="() => OpenInViewCameraAsync(row.Camera)">OPEN</button>
+                                        </span>
+                                    </li>
+                                }
+                            </ul>
+                            @if (_visibleCameras.Count > MaxInViewRows)
+                            {
+                                <div class="tg-favorites-empty">Showing @MaxInViewRows of @_visibleCameras.Count.ToString("N0"). Zoom in to narrow the list.</div>
+                            }
+                        </details>
+                    }
                     @if (_cityTrafficOn)
                     {
                         <div class="tg-coverage-panel-header"><span>TRAFFIC IN VIEW</span></div>
@@ -1966,6 +1999,23 @@
             .ToList();
         await JS.InvokeVoidAsync("tacticalGlobe.openTimelapse", favorite.Name, frames);
     }
+
+    private const int MaxInViewRows = 40;
+    private string _inViewSort = CameraAvailability.SortWorking;
+    private static readonly (string Key, string Label)[] InViewSorts =
+        [(CameraAvailability.SortWorking, "WORKING FIRST"), (CameraAvailability.SortNearest, "NEAREST"), (CameraAvailability.SortRecent, "LAST SEEN WORKING")];
+
+    // Distance is from the middle of the view.
+    private IReadOnlyList<(CameraFeed Camera, CameraAvailability Availability, double Miles)> InViewCameraRows()
+    {
+        var (lat, lon) = ((_lastBbox.North + _lastBbox.South) / 2, (_lastBbox.East + _lastBbox.West) / 2);
+        var rows = _visibleCameras.Select(camera => (Camera: camera, Availability: CameraAvailability.For(camera, CameraHealthService.GetKnown(camera.Id)),
+            Miles: GwsBusinessSuite.Application.RoadTraffic.RoadTrafficSummary.Miles(lat, lon, camera.Latitude, camera.Longitude)));
+        return CameraAvailability.Sort(rows, _inViewSort, row => row.Availability, row => row.Miles, MaxInViewRows);
+    }
+
+    private async Task OpenInViewCameraAsync(CameraFeed camera) =>
+        await JS.InvokeVoidAsync("tacticalGlobe.openCamera", ToPinPayload(camera));
 
     private async Task GoToFavoriteAsync(CameraFeed favorite)
     {
