@@ -381,6 +381,33 @@ public sealed class OllamaServiceTests
         contexts.Select(c => c.NumCtx).Should().Equal([16_384, 16_384], "without the setting each caller's size is sent as before");
     }
 
+    // 19-11-26: the Mac's sentinelgpt is built on gemma4, a thinking model. /api/generate without
+    // think:false made it reason at length before every answer ("Say OK." took 21 s), so World News
+    // summaries and briefings queued behind each other and timed out in the Mac app. Every
+    // generate, streamed or not, now asks for no thinking (the droplet's llama3.2 accepts it too).
+    [Fact]
+    public async Task EveryGenerate_ShouldAskForNoThinking()
+    {
+        var thinks = new List<bool?>();
+        var handler = new RecordingHandler(request =>
+        {
+            using var body = System.Text.Json.JsonDocument.Parse(request.Content!.ReadAsStringAsync().GetAwaiter().GetResult());
+            thinks.Add(body.RootElement.TryGetProperty("think", out var think) ? think.GetBoolean() : null);
+            var answer = body.RootElement.TryGetProperty("stream", out var s) && s.GetBoolean()
+                ? "{\"response\":\"ok\",\"done\":false}\n{\"done\":true}\n"
+                : """{"response":"ok","done":true}""";
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(answer) };
+        });
+        var service = CreateService(handler, new RecordingLogger<OllamaService>());
+
+        await service.GenerateAsync("sentinelgpt", "system", "prompt");
+        await service.GenerateAsync("sentinelgpt", "system", "prompt", 8192);
+        await foreach (var _ in service.GenerateStreamAsync("sentinelgpt", "system", "prompt")) { }
+        await foreach (var _ in service.GenerateStreamAsync("sentinelgpt", "system", "prompt", 200)) { }
+
+        thinks.Should().HaveCount(4).And.OnlyContain(t => t == false);
+    }
+
     private static OllamaService CreateService(
         HttpMessageHandler handler,
         ILogger<OllamaService> logger,

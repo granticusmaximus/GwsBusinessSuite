@@ -79,6 +79,7 @@ public sealed class OllamaService(
                 system = systemPrompt,
                 prompt = userPrompt,
                 keep_alive = modelKeepAlive,
+                think = false,
                 options = new { num_ctx = contextSize }
             }
             : new
@@ -87,7 +88,8 @@ public sealed class OllamaService(
                 stream = false,
                 system = systemPrompt,
                 prompt = userPrompt,
-                keep_alive = modelKeepAlive
+                keep_alive = modelKeepAlive,
+                think = false
             };
 
         try
@@ -179,6 +181,7 @@ public sealed class OllamaService(
                 system = systemPrompt,
                 prompt = userPrompt,
                 keep_alive = modelKeepAlive,
+                think = false,
                 options = streamOptions
             }
             : new
@@ -187,7 +190,8 @@ public sealed class OllamaService(
                 stream = true,
                 system = systemPrompt,
                 prompt = userPrompt,
-                keep_alive = modelKeepAlive
+                keep_alive = modelKeepAlive,
+                think = false
             };
 
         var workloadPriority = workloadScheduler.CurrentPriority;
