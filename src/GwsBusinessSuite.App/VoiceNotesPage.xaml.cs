@@ -178,7 +178,7 @@ public partial class VoiceNotesPage : ContentPage
         try
         {
             var result = await _ollama.ChatAsync(model,
-                [new OllamaChatMessage("system", SummaryPrompt), new OllamaChatMessage("user", transcript)],
+                (OllamaChatMessage[])[new OllamaChatMessage("system", SummaryPrompt), new OllamaChatMessage("user", transcript)],
                 [], CancellationToken.None, think: false);
             SummaryEditor.Text = result.Content.Trim();
             StatusLabel.Text = "Done. Edit the notes if needed, then save.";

@@ -152,7 +152,7 @@ public partial class CapturePage : ContentPage
         try
         {
             var result = await _ollama.ChatAsync(model,
-            [
+            (OllamaChatMessage[])[
                 new OllamaChatMessage("system", "Answer the question using only the captured text. If the text doesn't say, reply that it doesn't. Be brief."),
                 new OllamaChatMessage("user", $"Captured text:\n{text}\n\nQuestion: {question}")
             ], [], CancellationToken.None, think: false);
@@ -188,7 +188,7 @@ public partial class CapturePage : ContentPage
         try
         {
             var result = await _ollama.ChatAsync(model,
-                [new OllamaChatMessage("system", ContactPrompt), new OllamaChatMessage("user", text)], [], CancellationToken.None, think: false);
+                (OllamaChatMessage[])[new OllamaChatMessage("system", ContactPrompt), new OllamaChatMessage("user", text)], [], CancellationToken.None, think: false);
             var (name, foundEmail, company) = ParseContact(result.Content);
             ContactNameEntry.Text = name;
             if (email.Length == 0) ContactEmailEntry.Text = foundEmail;

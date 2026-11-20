@@ -870,7 +870,7 @@ public partial class SentinelGptPage : ContentPage
         // Keep this Mac's own agent in step, so a later local turn knows what happened.
         if (_agent is not null)
         {
-            _agent.LoadConversation([.. _agent.Messages, new OllamaChatMessage("user", prompt), new OllamaChatMessage("assistant", answer.Text)]);
+            _agent.LoadConversation((OllamaChatMessage[])[.. _agent.Messages, new OllamaChatMessage("user", prompt), new OllamaChatMessage("assistant", answer.Text)]);
             _currentSessionPath = await _sessions.SaveAsync(
                 _currentSessionPath, snapshot.Model ?? PickerModel(), _agent.Messages, CancellationToken.None,
                 workspaceRoot: _workspaceRoot);

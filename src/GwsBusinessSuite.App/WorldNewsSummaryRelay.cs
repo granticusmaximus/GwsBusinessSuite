@@ -58,7 +58,7 @@ public sealed class WorldNewsSummaryRelay(NativeSessionClient session, OllamaCli
             foreach (var job in jobs)
             {
                 var answer = await ollama.ChatAsync(model,
-                    [new OllamaChatMessage("system", job.SystemPrompt), new OllamaChatMessage("user", job.Prompt)], [], cancellationToken, think: false);
+                    (OllamaChatMessage[])[new OllamaChatMessage("system", job.SystemPrompt), new OllamaChatMessage("user", job.Prompt)], [], cancellationToken, think: false);
                 if (await session.SaveWorldNewsSummaryAsync(job, model, answer.Content, cancellationToken) is null) written++;
             }
             Status = $"World News: {written} summar{(written == 1 ? "y" : "ies")} written with {model} at {DateTime.Now:HH:mm}.";
