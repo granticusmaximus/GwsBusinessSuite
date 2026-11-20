@@ -128,7 +128,7 @@ and zoom lag. Causes found and fixed:
   - Counts: `NativeShapes.Group` (Mac, regrouped on zoom; count disc taps zoom in).
   - Callouts: `OverwatchCallouts` picks three (World News, conflict) on the server; both apps draw them.
   - Focus: `OverwatchFocus` catalog + `focusLayer` (web dims tg-* entities, Mac dims views and overlays).
-  - Not done: per-layer "zoom in" hints in the layer list.
+  - Zoom-in hints: cameras, city traffic, fire hotspots, and (20-11-26) aircraft and ships tag their layer button " · ZOOM IN" while the view is too wide.
   - Grant: check on screen (`open gws` and the web app).
 - [x] 20-11-26 Mac black globe: root cause found. In a Mac Catalyst WKWebView (macOS 27.3) WebKit's GPU
   process can't compile any Metal shader ("Compiler failed to build request"), so every WebGL program

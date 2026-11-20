@@ -385,7 +385,7 @@
             <div class="tg-layer-buttons">
                 <button type="button" data-tg-toggle="aircraft" class="tg-toggle @(_aircraftOn ? "tg-toggle-on" : "")"
                         title="Aircraft in flight (OpenSky Network), refreshed every minute" @onclick="ToggleAircraftAsync">
-                    AIRCRAFT [@(_aircraftOn ? "ON" : "OFF")]
+                    AIRCRAFT [@(_aircraftOn ? "ON" : "OFF")]@(_aircraftOn && NeedsZoom(_aircraftSummary) ? " · ZOOM IN" : "")
                 </button>
                 <button type="button" data-tg-toggle="airquality" class="tg-toggle @(_airQualityOn ? "tg-toggle-on" : "")"
                         title="Air quality index across the view (Open-Meteo, hourly model)" @onclick="ToggleAirQualityAsync">
@@ -431,7 +431,7 @@
             <div class="tg-layer-buttons">
                 <button type="button" data-tg-toggle="ships" class="tg-toggle @(_shipsOn ? "tg-toggle-on" : "")"
                         title="Ships broadcasting AIS: the Baltic from Finland's open AIS, worldwide with an aisstream.io key; refreshed every 30 seconds" @onclick="ToggleShipsAsync">
-                    SHIPS [@(_shipsOn ? "ON" : "OFF")]
+                    SHIPS [@(_shipsOn ? "ON" : "OFF")]@(_shipsOn && NeedsZoom(_shipSummary) ? " · ZOOM IN" : "")
                 </button>
                 <button type="button" data-tg-toggle="chokepoints" class="tg-toggle @(_chokepointsOn ? "tg-toggle-on" : "")"
                         title="Daily ship transits through 28 chokepoints (Suez, Panama, Hormuz, Bab el-Mandeb, Bosporus, Malacca...), the last week against the month before; IMF PortWatch, a few days behind" @onclick="ToggleChokepointsAsync">
@@ -4137,6 +4137,9 @@
     private bool _airQualityOn;
     private string? _airSummary;
     private string? _aircraftSummary;
+    // Aircraft and ships answer "Zoom in to see ..." for wide views (their free feeds cover a few
+    // degrees at a time); the layer button says so too, like fires and city traffic (20-11-26).
+    private static bool NeedsZoom(string? summary) => summary?.StartsWith("Zoom in", StringComparison.OrdinalIgnoreCase) == true;
     private string? _airQualitySummary;
     private CancellationTokenSource? _aircraftCts;
 
