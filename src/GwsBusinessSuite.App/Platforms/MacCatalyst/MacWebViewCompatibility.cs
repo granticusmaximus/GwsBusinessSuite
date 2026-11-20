@@ -22,6 +22,9 @@ internal static class MacWebViewCompatibility
     {
         if (ConfiguredViews.TryGetValue(webView, out _)) return;
         ConfiguredViews.Add(webView, new object());
+        // Safari's Web Inspector can attach (Develop > this Mac > GWS Business Suite), so WebKit's own
+        // console and WebGL errors can be read (20-11-26: the shared globe drew black with no error).
+        webView.Inspectable = true;
 
         MacNativeOverwatchBridge.Attach(webView);
         webView.Configuration.UserContentController.AddUserScript(
