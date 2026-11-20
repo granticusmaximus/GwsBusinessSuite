@@ -200,6 +200,29 @@ public sealed class NativeShapesTests
             "src/GwsBusinessSuite.App/Platforms/MacCatalyst/MacNativeOverwatchBridge.cs"));
         Assert.DoesNotContain("UIColor.System", bridge);
         Assert.Contains("_map.OverrideUserInterfaceStyle = UIUserInterfaceStyle.Dark;", bridge);
-        Assert.Contains("_map.AddOverlay(dim, MKOverlayLevel.AboveRoads);", bridge);
+        Assert.Contains("_map.AddOverlay(new TerminalImageryOverlay(), MKOverlayLevel.AboveRoads);", bridge);
+    }
+
+    // 19-11-26 (Grant): both Overwatch maps identical, a military terminal in greens and blacks. The
+    // web globe and the Mac's MapKit view draw the same Esri tiles with the same numbers.
+    [Fact]
+    public void BothMaps_ShouldUseTheSameTerminalLook()
+    {
+        var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../.."));
+        var js = File.ReadAllText(Path.Combine(root, "src/GwsBusinessSuite.Web/wwwroot/js/tactical-globe.js"));
+        var overlay = File.ReadAllText(Path.Combine(root, "src/GwsBusinessSuite.App/Platforms/MacCatalyst/TerminalImageryOverlay.cs"));
+        string Number(double value) => value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+        Assert.Contains("World_Imagery/MapServer", OverwatchMapLook.ImageryTiles);
+        Assert.Contains("World_Imagery/MapServer'", js);
+        Assert.Contains($"baseLayer.brightness = {Number(OverwatchMapLook.Brightness)};", js);
+        Assert.Contains($"baseLayer.contrast = {Number(OverwatchMapLook.Contrast)};", js);
+        Assert.Contains($"baseLayer.gamma = {Number(OverwatchMapLook.Gamma)};", js);
+        Assert.Contains($"baseLayer.saturation = {Number(OverwatchMapLook.Saturation)};", js);
+        Assert.Contains($"ctx.fillStyle = '{OverwatchMapLook.WashHex}';", js);
+        Assert.Contains($"wash.alpha = {Number(OverwatchMapLook.WashAlpha)};", js);
+        Assert.Contains("await addTerminalWash(viewer);", js);
+        Assert.Contains("CanReplaceMapContent = true;", overlay);
+        Assert.Contains("OverwatchMapLook.WashAlpha", overlay);
     }
 }

@@ -67,6 +67,23 @@ window.tacticalGlobe = (function () {
     // White fill + a baked-in outline color, so a runtime `billboard.color` tint (multiplied
     // against the image) recolors only the fill - a near-black outline stays visually near-black
     // under any tint (black * anything is still ~black), and a bright outline stays legible too.
+    // The phosphor-green wash over the grey imagery (OverwatchMapLook: #19ff7a at 26%), the same
+    // blend the Mac app's tiles get. A failure leaves the grey imagery, which is still usable.
+    async function addTerminalWash(viewer) {
+        try {
+            const canvas = document.createElement('canvas');
+            canvas.width = 1;
+            canvas.height = 1;
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = '#19ff7a';
+            ctx.fillRect(0, 0, 1, 1);
+            const wash = viewer.imageryLayers.addImageryProvider(await Cesium.SingleTileImageryProvider.fromUrl(canvas.toDataURL()));
+            wash.alpha = 0.26;
+        } catch (err) {
+            console.warn('Overwatch: the green map wash could not be added', err);
+        }
+    }
+
     function createPinBillboardImage(outlineColor, outlineWidth) {
         const size = 28;
         const canvas = document.createElement('canvas');
@@ -458,10 +475,12 @@ window.tacticalGlobe = (function () {
             // reads per-frame at draw time, so setting them immediately here is safe. Toned down
             // from the old map-tile values (which pushed hue harder for cartographic flat colors) -
             // a strong hue rotation looks wrong on photographic imagery.
-            baseLayer.brightness = 0.7;
-            baseLayer.contrast = 1.2;
+            // Military-terminal green (19-11-26): the same look as the Mac app's MapKit view
+            // (OverwatchMapLook.cs): darkened, contrast up, no colour, then the green wash below.
+            baseLayer.brightness = 0.55;
+            baseLayer.contrast = 1.35;
             baseLayer.gamma = 0.9;
-            baseLayer.saturation = 0.4;
+            baseLayer.saturation = 0;
 
             // Every default Cesium widget is disabled - this page builds its own retro-terminal
             // chrome around the bare 3D viewport instead (see OverwatchGrid.razor.css). The globe
@@ -512,6 +531,7 @@ window.tacticalGlobe = (function () {
                     }
                 }
             });
+            await addTerminalWash(viewer);
         } catch (error) {
             const message = error && error.message ? error.message : String(error);
             if (isShaderFailureReason(message)) {

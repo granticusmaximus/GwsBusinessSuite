@@ -29,7 +29,6 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
     private CancellationTokenSource? _regionChangeDebounce;
     private bool _pickPointMode;
     private bool _hasInitialRegion;
-    internal const string DimOverlayTitle = "gws-dim";
 
     // The web globe's colours (NativeShapes.ToneHex).
     internal static UIColor Tone(NativeShapes.MarkerTone tone) => Hex(NativeShapes.ToneHex(tone));
@@ -50,15 +49,12 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
             RotateEnabled = true,
             Hidden = true
         };
-        // Styled like the web globe (19-11-26): dark labels, no Apple points of interest, and the
-        // imagery dimmed under the labels (the web dims and desaturates its satellite tiles).
+        // Identical to the web globe (19-11-26): Apple's map is replaced by the same Esri imagery in
+        // the same military-terminal green (TerminalImageryOverlay, OverwatchMapLook). Dark interface
+        // so MapKit's own controls (compass, scale) match.
         _map.OverrideUserInterfaceStyle = UIUserInterfaceStyle.Dark;
         _map.PointOfInterestFilter = MKPointOfInterestFilter.FilterExcludingAllCategories;
-        // The whole world in map points (MapKit's world is 2^28 points square).
-        const double World = 268_435_456;
-        var dim = MKPolygon.FromPoints([new MKMapPoint(0, 0), new MKMapPoint(World, 0), new MKMapPoint(World, World), new MKMapPoint(0, World)]);
-        dim.Title = DimOverlayTitle;
-        _map.AddOverlay(dim, MKOverlayLevel.AboveRoads);
+        _map.AddOverlay(new TerminalImageryOverlay(), MKOverlayLevel.AboveRoads);
         _delegate = new MapDelegate(this);
         _map.Delegate = _delegate;
         webView.Superview?.InsertSubviewBelow(_map, webView);
@@ -988,7 +984,11 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
             }
             if (annotation is not NativeAnnotation native) return new MKAnnotationView(annotation, null) { Image = Disc(new NativeShapes.MarkerStyle("mappin", NativeShapes.MarkerTone.Gray)) };
             var view = mapView.DequeueReusableAnnotation("gws-disc") ?? new MKAnnotationView(annotation, "gws-disc");
-            view.Annotation = native; view.CanShowCallout = false; view.ClusteringIdentifier = native.Operation;
+            // No MapKit grouping (19-11-26): MapKit's clustering crashed the app twice while zooming
+            // (EXC_BAD_ACCESS at 0x20 in MKQuadTrie insert, from requestAddingClusterForAnnotationViews),
+            // first with our own cluster annotations and again, at 18:45 build, with MapKit's own. Overlap
+            // is left to collision: a low-priority pin hides behind another, prominent ones always show.
+            view.Annotation = native; view.CanShowCallout = false; view.ClusteringIdentifier = null;
             var style = NativeShapes.Marker(native.Operation, native.Payload);
             view.DisplayPriority = style.Prominent ? MKFeatureDisplayPriority.DefaultHigh : MKFeatureDisplayPriority.DefaultLow;
             view.CollisionMode = MKAnnotationViewCollisionMode.Circle;
@@ -1063,12 +1063,12 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
 
         public override MKOverlayRenderer OverlayRenderer(MKMapView mapView, IMKOverlay overlay) => overlay switch
         {
+            TerminalImageryOverlay imagery => new MKTileOverlayRenderer(imagery) { Alpha = 1f },
             MKTileOverlay tiles => new MKTileOverlayRenderer(tiles) { Alpha = 0.75f },
             MKMultiPolygon areas => AreaStyle(new MKMultiPolygonRenderer(areas), areas.Title),
             MKMultiPolyline paths => LineStyle(new MKMultiPolylineRenderer(paths), paths.Title),
             MKPolygon polygon => polygon.Title switch
             {
-                DimOverlayTitle => new MKPolygonRenderer(polygon) { FillColor = UIColor.Black.ColorWithAlpha(0.3f), StrokeColor = UIColor.Clear, LineWidth = 0 },
                 "setWeatherAlerts" => new MKPolygonRenderer(polygon) { FillColor = Tone(NativeShapes.MarkerTone.Red).ColorWithAlpha(0.16f), StrokeColor = Tone(NativeShapes.MarkerTone.Red), LineWidth = 1.5f },
                 "setPowerOutages" => new MKPolygonRenderer(polygon) { FillColor = Tone(NativeShapes.MarkerTone.Pink).ColorWithAlpha(0.22f), StrokeColor = Tone(NativeShapes.MarkerTone.Pink), LineWidth = 1 },
                 "setAurora" => new MKPolygonRenderer(polygon) { FillColor = Tone(NativeShapes.MarkerTone.Green).ColorWithAlpha(0.22f), StrokeColor = UIColor.Clear, LineWidth = 0 },

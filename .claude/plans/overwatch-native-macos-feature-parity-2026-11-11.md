@@ -105,3 +105,15 @@ and zoom lag. Causes found and fixed:
   groups, on plain `MKAnnotationView`s with circular collision. HitTest already measures drawn
   frames, and a disc is centred on its point, so clicks land where they look. Guards updated.
 - [ ] Grant: look at it on screen after `open gws`.
+- [x] 19-11-26 19:34: the Mac app crashed again zooming (same EXC_BAD_ACCESS at 0x20 in MKQuadTrie insert, via
+  requestAddingClusterForAnnotationViews), on the 18:45 build that no longer builds its own clusters. So
+  MapKit's grouping itself is the fault on macOS 27: pins no longer set a ClusteringIdentifier; overlap is
+  left to collision and display priority. Guard in `OverwatchPinRenderingTests`. Grouped labels
+  (ClusterLabel) still apply on the web globe.
+- [x] 19-11-26 evening (Grant: both Overwatch views identical, a military terminal in greens and blacks):
+  `OverwatchMapLook` (Application) is the one recipe: Esri World Imagery, brightness 0.55, contrast 1.35,
+  saturation 0, gamma 0.9, then #19ff7a at 26%. Web: the base layer takes those values and
+  `addTerminalWash` adds the green layer. Mac: `TerminalImageryOverlay` replaces Apple's map
+  (CanReplaceMapContent) with the same tiles through the same steps in Core Image; the dim polygon is
+  gone. Drive mode's blue and the time-machine slider's purple are green. Guard:
+  `NativeShapesTests.BothMaps_ShouldUseTheSameTerminalLook`. Grant: check on screen (`open gws`).

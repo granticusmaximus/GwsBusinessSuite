@@ -30,6 +30,9 @@ public sealed class OverwatchPinRenderingTests
     public void MacMap_ShouldLabelMapKitsOwnGroups_NotBuildThem()
     {
         var bridge = File.ReadAllText(Path.Combine(RepoRoot, "src/GwsBusinessSuite.App/Platforms/MacCatalyst/MacNativeOverwatchBridge.cs"));
+        bridge.Should().Contain("view.ClusteringIdentifier = null;",
+            "MapKit's grouping itself crashed the app zooming in (19-11-26, twice); pins don't join groups")
+            .And.NotContain("view.ClusteringIdentifier = native.Operation");
         bridge.Should().NotContain("override MKClusterAnnotation CreateClusterAnnotation")
             .And.NotContain("new MKClusterAnnotation(")
             .And.Contain("LabelCluster(annotation);");
