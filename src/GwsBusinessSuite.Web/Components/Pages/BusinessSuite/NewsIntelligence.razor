@@ -131,7 +131,7 @@
 
                 <button type="button" class="list-group-item list-group-item-action d-flex justify-content-between align-items-center @(_activeFilter == "saved" ? "active" : "")"
                         @onclick='() => SelectFilter("saved")'>
-                    <span><i class="bi bi-bookmark-fill me-2"></i>Saved</span>
+                    <span><i class="bi bi-bookmark-fill me-2"></i>Reading queue</span>
                     @if (_savedHashes.Count > 0)
                     {
                         <span class="badge @(_activeFilter == "saved" ? "text-bg-light" : "text-bg-secondary") rounded-pill">@_savedHashes.Count</span>
@@ -151,6 +151,11 @@
                 <button type="button" class="list-group-item list-group-item-action @(_activeFilter == "settings" ? "active" : "")"
                         @onclick='() => SelectFilter("settings")'>
                     <i class="bi bi-envelope-paper me-2"></i>Digest &amp; settings
+                </button>
+                @* 1. The software development source pack (20-11-26). *@
+                <button type="button" class="list-group-item list-group-item-action text-success" disabled="@_addingPack" @onclick="AddTechPackAsync"
+                        title="A Technical topic with InfoQ, the .NET Blog, GitHub Engineering, Martin Fowler, Simon Willison, Andrew Lock, the Pragmatic Engineer, Cloudflare, Netflix and Lobsters, plus Hacker News and dev.to">
+                    <i class="bi bi-plus-circle me-2"></i>@(HasTechPack ? "Top up the software development pack" : "Add the software development pack")
                 </button>
 
                 @foreach (var topic in _topics)
@@ -321,7 +326,9 @@
               ConfirmText="Delete" OnConfirm="ConfirmDeleteTopicAsync" OnCancel="() => _pendingDeleteTopic = null" />
 
 
-<ArticleReaderModal Url="@_readerUrl" Title="@_readerTitle" Summary="@_readerSummary" OnClose="CloseReader" />
+<ArticleReaderModal Url="@_readerItem?.Url" Title="@_readerItem?.Title" Summary="@ReaderSummary"
+                    Saved="@(_readerItem is not null && IsSaved(_readerItem))" Finished="@ReaderFinished" ClippedPageId="@ReaderClipId"
+                    OnClose="CloseReader" OnReadLater="ReaderReadLaterAsync" OnFinished="ReaderFinishedAsync" Clip="ReaderClipAsync" OnRead="ReaderReadAsync" />
 
 @code {
     // ── State ────────────────────────────────────────────────
@@ -683,7 +690,7 @@
     {
         "all" => "All News",
         "breaking" => "Breaking News",
-        "saved" => "Saved",
+        "saved" => "Reading queue",
         "trends" => "Trends",
         "web" => "Web Search",
         "settings" => "Digest & settings",
@@ -754,11 +761,51 @@
     // reported within six hours (or a fresh "breaking"/"developing" headline) - see NewsStoryClusterer.
     private List<NewsStory> CurrentStories()
     {
-        var stories = NewsStoryClusterer.Cluster(CurrentViewItems().Where(SourceMatches).ToList(), DateTimeOffset.UtcNow);
+        var mutedKeywords = ReadingFilters.Lines(_settings?.MutedKeywords);
+        var mutedSources = ReadingFilters.Lines(_settings?.MutedSources);
+        var items = CurrentViewItems().Where(SourceMatches)
+            .Where(i => !ReadingFilters.IsMuted(i.Title, i.Description, i.Source, i.Url, mutedKeywords, mutedSources))
+            .Where(i => ReadingFilters.MatchesAny(_stackTags, i.Title, i.Description))
+            .ToList();
+        var stories = NewsStoryClusterer.Cluster(items, DateTimeOffset.UtcNow);
         IEnumerable<NewsStory> result = stories;
         if (_activeFilter == "breaking") result = result.Where(st => st.IsBreaking);
         if (_unreadOnly) result = result.Where(st => !IsStoryRead(st));
+        // 2. Best reads: community signal and depth (the best of the story's reports).
+        if (_sort == SortBest)
+            result = TechReadingRank.Order(result, st =>
+            {
+                var reports = st.OtherReports.Prepend(st.Lead).ToList();
+                return (reports.Max(r => r.CommunityScore), reports.Max(r => r.ReadingMinutes), st.Lead.PublishedAt);
+            }, DateTimeOffset.UtcNow);
         return result.ToList();
+    }
+
+    private const string SortNewest = "newest";
+    private const string SortBest = "best";
+    private string _sort = SortNewest;
+    private readonly HashSet<string> _stackTags = new(StringComparer.Ordinal);
+    private bool _addingPack;
+    private bool HasTechPack => _topics.Any(t => string.Equals(t.Name, TechReadingPack.TopicName, StringComparison.OrdinalIgnoreCase));
+
+    private async Task AddTechPackAsync()
+    {
+        _addingPack = true;
+        _statusMessage = _errorMessage = string.Empty;
+        try
+        {
+            var topic = await NewsService.AddTechReadingPackAsync();
+            _statusMessage = $"\"{topic.Name}\" has the software development sources. Refreshing it now…";
+            _topics = (await NewsService.ListTopicsAsync()).ToList();
+            await SelectFilter(topic.Id.ToString());
+            await RefreshTopicAsync(topic.Id);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Adding the software development pack failed");
+            _errorMessage = "The software development pack couldn't be added.";
+        }
+        finally { _addingPack = false; }
     }
 
     private async Task MarkReadAsync(params string[] urls)
@@ -809,43 +856,82 @@
         _saved = await WatchService.ListSavedAsync(_username);
     }
 
-    private async Task ClipAsync(NewsItemDto item)
+    private Task ClipAsync(NewsItemDto item) => ClipWithAsync(item, null);
+
+    // 6. The clip carries the whole readable article, and the reader's notes and highlights.
+    private async Task<bool> ClipWithAsync(NewsItemDto item, ClipExtras? extras)
     {
         _statusMessage = _errorMessage = string.Empty;
         try
         {
-            var pageId = await WatchService.ClipToSentinelAsync(_username, item);
-            _savedHashes.Add(NewsStoryClusterer.UrlHash(item.Url));
-            _clipped[NewsStoryClusterer.UrlHash(item.Url)] = pageId;
-            _statusMessage = "Clipped to Sentinel under \"Media Watch clips\" (and saved).";
+            var hash = NewsStoryClusterer.UrlHash(item.Url);
+            var again = _clipped.ContainsKey(hash) || _saved.Any(x => x.ClippedWikiPageId is not null && NewsStoryClusterer.UrlHash(x.Url) == hash);
+            var pageId = await WatchService.ClipToSentinelAsync(_username, item, extras);
+            _savedHashes.Add(hash);
+            _clipped[hash] = pageId;
+            _saved = await WatchService.ListSavedAsync(_username);
+            _statusMessage = again ? "Your notes were added to the clip in Sentinel." : "Clipped to Sentinel under \"Media Watch clips\" (and queued).";
+            // The reader calls this as a plain function (not an EventCallback), so redraw here.
+            StateHasChanged();
+            return true;
         }
         catch (Exception ex)
         {
             Logger.LogError(ex, "Clipping an article to Sentinel failed");
             _errorMessage = "Clipping to Sentinel failed.";
+            StateHasChanged();
+            return false;
         }
     }
 
-    private Task ClipSavedAsync(SavedArticleView saved) =>
-        ClipAsync(new NewsItemDto(saved.Id, null, saved.TopicName, "", saved.Title, saved.Url, saved.Source, saved.PublishedAt,
-            string.Empty, saved.Summary, saved.SavedAt));
+    private Task ClipSavedAsync(SavedArticleView saved) => ClipAsync(FromSaved(saved));
+
+    private static NewsItemDto FromSaved(SavedArticleView saved) =>
+        new(saved.Id, null, saved.TopicName, "", saved.Title, saved.Url, saved.Source, saved.PublishedAt,
+            string.Empty, saved.Summary, saved.SavedAt, ReadingMinutes: saved.ReadingMinutes);
 
     private readonly Dictionary<string, Guid> _clipped = new();
 
     // The article reader (20-11-26): the outlet's page, formatted in a modal.
-    private string? _readerUrl;
-    private string? _readerTitle;
-    private string? _readerSummary;
+    private NewsItemDto? _readerItem;
 
-    private async Task OpenReaderAsync(string url, string? title, string? summary)
+    private string? ReaderSummary => _readerItem is null ? null : string.IsNullOrWhiteSpace(_readerItem.OllamaSummary) ? _readerItem.Description : _readerItem.OllamaSummary;
+    private SavedArticleView? ReaderSaved => _readerItem is null ? null : _saved.FirstOrDefault(x => NewsStoryClusterer.UrlHash(x.Url) == NewsStoryClusterer.UrlHash(_readerItem.Url));
+    private bool ReaderFinished => ReaderSaved?.FinishedAt is not null;
+    private Guid? ReaderClipId => _readerItem is null ? null
+        : _clipped.TryGetValue(NewsStoryClusterer.UrlHash(_readerItem.Url), out var id) ? id : ReaderSaved?.ClippedWikiPageId;
+
+    private async Task OpenReaderAsync(NewsItemDto item)
     {
-        _readerUrl = url;
-        _readerTitle = title;
-        _readerSummary = summary;
-        await MarkReadAsync(url);
+        _readerItem = item;
+        await MarkReadAsync(item.Url);
     }
 
-    private void CloseReader() => _readerUrl = _readerTitle = _readerSummary = null;
+    private void CloseReader() => _readerItem = null;
+
+    private async Task ReaderReadLaterAsync()
+    {
+        if (_readerItem is null) return;
+        await WatchService.SaveArticleAsync(_username, _readerItem);
+        _savedHashes.Add(NewsStoryClusterer.UrlHash(_readerItem.Url));
+        _saved = await WatchService.ListSavedAsync(_username);
+    }
+
+    private async Task ReaderFinishedAsync(bool finished)
+    {
+        if (_readerItem is null) return;
+        await SetFinishedAsync(_readerItem.Url, finished);
+    }
+
+    private Task<bool> ReaderClipAsync(ClipExtras extras) => _readerItem is null ? Task.FromResult(false) : ClipWithAsync(_readerItem, extras);
+
+    // The reader knows the reading time; a queued article keeps it.
+    private async Task ReaderReadAsync(ReaderArticle article)
+    {
+        if (_readerItem is null || !IsSaved(_readerItem) || ReaderSaved?.ReadingMinutes == article.Minutes) return;
+        await WatchService.SetReadingMinutesAsync(_username, _readerItem.Url, article.Minutes);
+        _saved = await WatchService.ListSavedAsync(_username);
+    }
 
     private async Task DiscoverFeedsAsync()
     {
@@ -885,10 +971,48 @@
         _setDigestFrequency = settings.DigestFrequency;
         _setDigestHour = settings.DigestHourLocal;
         _setDigestDay = settings.DigestDayOfWeek;
+        _setMutedKeywords = settings.MutedKeywords;
+        _setMutedSources = settings.MutedSources;
     }
 
     private NewsWatchSettingsView SettingsFromForm() =>
-        new(_setRetention, _setDigestEnabled, _setDigestRecipient, _setDigestFrequency, _setDigestHour, _setDigestDay);
+        new(_setRetention, _setDigestEnabled, _setDigestRecipient, _setDigestFrequency, _setDigestHour, _setDigestDay,
+            MutedKeywords: _setMutedKeywords, MutedSources: _setMutedSources);
+
+    private string _setMutedKeywords = string.Empty;
+    private string _setMutedSources = string.Empty;
+    private int? _queueFits;
+    private string _queueSort = ReadingQueue.SortSaved;
+    private bool _queueShowFinished;
+    private bool _buildingDigest;
+    private Guid? _readingPageId;
+
+    private async Task BuildReadingPageAsync()
+    {
+        _buildingDigest = true;
+        _statusMessage = _errorMessage = string.Empty;
+        try
+        {
+            _readingPageId = await WatchService.BuildReadingDigestAsync(_username);
+            _statusMessage = "Your weekly reading page is ready in Sentinel.";
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Building the weekly reading page failed");
+            _errorMessage = "The weekly reading page couldn't be built.";
+        }
+        finally { _buildingDigest = false; }
+    }
+
+    private async Task SetFinishedAsync(string url, bool finished)
+    {
+        try
+        {
+            await WatchService.SetFinishedAsync(_username, url, finished);
+            _saved = await WatchService.ListSavedAsync(_username);
+        }
+        catch (Exception ex) { Logger.LogError(ex, "Marking an article finished failed"); }
+    }
 
     private async Task SaveSettingsAsync()
     {
@@ -945,9 +1069,15 @@
             </div>
         }
         <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3 media-watch-toolbar">
-            <div class="form-check form-switch mb-0">
-                <input class="form-check-input" type="checkbox" id="unread-only" checked="@_unreadOnly" @onchange="e => _unreadOnly = e.Value is true" />
-                <label class="form-check-label small" for="unread-only">Unread only</label>
+            <div class="d-flex flex-wrap align-items-center gap-3">
+                <div class="form-check form-switch mb-0">
+                    <input class="form-check-input" type="checkbox" id="unread-only" checked="@_unreadOnly" @onchange="e => _unreadOnly = e.Value is true" />
+                    <label class="form-check-label small" for="unread-only">Unread only</label>
+                </div>
+                <select class="form-select form-select-sm w-auto" aria-label="Order" value="@_sort" @onchange="e => _sort = e.Value?.ToString() ?? SortNewest">
+                    <option value="@SortNewest">Newest first</option>
+                    <option value="@SortBest">Best reads first</option>
+                </select>
             </div>
             <div class="d-flex align-items-center gap-2">
                 <span class="small text-secondary">@stories.Count @(stories.Count == 1 ? "story" : "stories")</span>
@@ -955,6 +1085,19 @@
                     <i class="bi bi-check2-all"></i> Mark all read
                 </button>
             </div>
+        </div>
+        @* 4. Your stack as filters (20-11-26): any chosen tag matches. *@
+        <div class="d-flex flex-wrap gap-2 mb-3 media-watch-stack" role="group" aria-label="Filter by stack">
+            @foreach (var tag in ReadingFilters.Tags)
+            {
+                var on = _stackTags.Contains(tag.Key);
+                <button type="button" class="btn btn-sm rounded-pill @(on ? "btn-primary" : "btn-outline-secondary")" aria-pressed="@(on ? "true" : "false")"
+                        @onclick="() => { if (!_stackTags.Remove(tag.Key)) _stackTags.Add(tag.Key); }">@tag.Label</button>
+            }
+            @if (_stackTags.Count > 0)
+            {
+                <button type="button" class="btn btn-sm btn-link" @onclick="() => _stackTags.Clear()">Clear</button>
+            }
         </div>
         @if (CurrentViewItems().Count == 0)
         {
@@ -998,6 +1141,18 @@
                         @(string.IsNullOrWhiteSpace(item.Source) ? "?" : item.Source.Trim()[..1].ToUpperInvariant())
                     </span>
                     <span class="fw-semibold">@item.Source</span>
+                    @{
+                        var bestScore = story.OtherReports.Prepend(item).Max(r => r.CommunityScore);
+                        var minutes = story.OtherReports.Prepend(item).Max(r => r.ReadingMinutes);
+                    }
+                    @if (minutes is > 0)
+                    {
+                        <span class="badge rounded-pill text-bg-light media-watch-minutes" title="About @minutes min to read">@minutes min</span>
+                    }
+                    @if (bestScore is > 0)
+                    {
+                        <span class="badge rounded-pill text-bg-light media-watch-score" title="@bestScore points on Hacker News or Lobsters"><i class="bi bi-caret-up-fill" aria-hidden="true"></i>@bestScore</span>
+                    }
                     @if (item.PublishedAt.HasValue)
                     {
                         <span>&middot; @TimeAgo(item.PublishedAt.Value)</span>
@@ -1013,7 +1168,7 @@
                 </div>
                 @* The headline opens the article in the reader (20-11-26); middle-click or "Open" still goes to the original. *@
                 <a href="@item.Url" target="_blank" rel="noopener noreferrer" class="h6 d-block mb-2 text-body text-decoration-none"
-                   @onclick="() => OpenReaderAsync(item.Url, item.Title, string.IsNullOrWhiteSpace(item.OllamaSummary) ? item.Description : item.OllamaSummary)" @onclick:preventDefault="true">@item.Title</a>
+                   @onclick="() => OpenReaderAsync(item)" @onclick:preventDefault="true">@item.Title</a>
                 @{
                     var takeText = string.IsNullOrWhiteSpace(item.OllamaSummary) ? item.Description : item.OllamaSummary;
                 }
@@ -1036,7 +1191,7 @@
                             {
                                 <li class="mb-1">
                                     <a href="@other.Url" target="_blank" rel="noopener noreferrer" class="@(IsRead(other) ? "text-secondary" : "")"
-                                       @onclick="() => OpenReaderAsync(other.Url, other.Title, other.Description)" @onclick:preventDefault="true">@other.Source</a>
+                                       @onclick="() => OpenReaderAsync(other)" @onclick:preventDefault="true">@other.Source</a>
                                     <span class="text-secondary">@(other.PublishedAt is { } p ? $" · {TimeAgo(p)}" : "")</span>
                                 </li>
                             }
@@ -1053,8 +1208,8 @@
                             <i class="bi bi-check2"></i>
                         </button>
                     }
-                    <button type="button" class="btn btn-sm btn-link text-secondary" title="@(IsSaved(item) ? "Remove from saved" : "Save")"
-                            aria-label="@(IsSaved(item) ? "Remove from saved" : "Save")" aria-pressed="@(IsSaved(item) ? "true" : "false")" @onclick="() => ToggleSavedAsync(item)">
+                    <button type="button" class="btn btn-sm btn-link text-secondary" title="@(IsSaved(item) ? "Remove from the reading queue" : "Read later")"
+                            aria-label="@(IsSaved(item) ? "Remove from the reading queue" : "Read later")" aria-pressed="@(IsSaved(item) ? "true" : "false")" @onclick="() => ToggleSavedAsync(item)">
                         <i class="bi @(IsSaved(item) ? "bi-bookmark-fill" : "bi-bookmark")"></i>
                     </button>
                     @if (_clipped.TryGetValue(NewsStoryClusterer.UrlHash(item.Url), out var clipPage))
@@ -1075,23 +1230,52 @@
     </div>;
 
     private RenderFragment RenderSavedView() => @<text>
+        @{
+            var queue = ReadingQueue.Arrange(_saved, _queueFits, _queueSort, _queueShowFinished);
+            var finishedCount = _saved.Count(x => x.FinishedAt is not null);
+        }
         @if (_saved.Count == 0)
         {
-            <EmptyState Icon="bi-bookmark" Message="Nothing saved yet." CssClass="text-center py-5">
-                <p class="mb-0">Use the bookmark on any article to keep it here after it leaves the feed.</p>
+            <EmptyState Icon="bi-bookmark" Message="Your reading queue is empty." CssClass="text-center py-5">
+                <p class="mb-0">Use the bookmark on any article (or Read later in the reader) to queue it here; it stays after it leaves the feed.</p>
             </EmptyState>
         }
         else
         {
+            @* 3. The reading queue (20-11-26): what fits the time you have. *@
+            <div class="d-flex flex-wrap align-items-center gap-2 mb-3 media-watch-queue-tools">
+                <span class="small text-secondary">I have</span>
+                <div class="btn-group btn-group-sm" role="group" aria-label="Time available">
+                    @foreach (var (label, fits) in new (string, int?)[] { ("any time", null), ("5 min", 5), ("15 min", 15), ("30 min", 30) })
+                    {
+                        <button type="button" class="btn @(_queueFits == fits ? "btn-primary" : "btn-outline-secondary")" aria-pressed="@(_queueFits == fits ? "true" : "false")" @onclick="() => _queueFits = fits">@label</button>
+                    }
+                </div>
+                <select class="form-select form-select-sm w-auto" aria-label="Order" value="@_queueSort" @onchange="e => _queueSort = e.Value?.ToString() ?? ReadingQueue.SortSaved">
+                    <option value="@ReadingQueue.SortSaved">Newest saved</option>
+                    <option value="@ReadingQueue.SortShortest">Shortest first</option>
+                    <option value="@ReadingQueue.SortLongest">Longest first</option>
+                </select>
+                <div class="form-check form-switch mb-0 ms-auto">
+                    <input class="form-check-input" type="checkbox" id="queue-finished" checked="@_queueShowFinished" @onchange="e => _queueShowFinished = e.Value is true" />
+                    <label class="form-check-label small" for="queue-finished">Show finished (@finishedCount)</label>
+                </div>
+            </div>
+            @if (queue.Count == 0)
+            {
+                <EmptyState Icon="bi-hourglass" Message="Nothing in the queue fits that." CssClass="text-center py-4" />
+            }
             <ul class="list-group list-group-flush card border-0 shadow-sm">
-                @foreach (var saved in _saved)
+                @foreach (var saved in queue)
                 {
-                    <li class="list-group-item d-flex justify-content-between align-items-start gap-2">
+                    <li class="list-group-item d-flex justify-content-between align-items-start gap-2 @(saved.FinishedAt is not null ? "media-watch-finished" : "")">
                         <div class="min-w-0">
                             <a href="@saved.Url" target="_blank" rel="noopener noreferrer" class="fw-semibold text-body"
-                               @onclick="() => OpenReaderAsync(saved.Url, saved.Title, saved.Summary)" @onclick:preventDefault="true">@saved.Title</a>
+                               @onclick="() => OpenReaderAsync(FromSaved(saved))" @onclick:preventDefault="true">@saved.Title</a>
                             <div class="small text-secondary">
-                                @saved.Source@(string.IsNullOrWhiteSpace(saved.TopicName) ? "" : $" · {saved.TopicName}") · saved @saved.SavedAt.ToLocalTime().ToString("dd-MM-yy")
+                                @saved.Source@(string.IsNullOrWhiteSpace(saved.TopicName) ? "" : $" · {saved.TopicName}") · saved @saved.SavedAt.ToLocalGwsDate()
+                                @if (saved.ReadingMinutes is > 0) { <span> · @saved.ReadingMinutes min read</span> }
+                                @if (saved.FinishedAt is { } done) { <span> · finished @done.ToLocalGwsDate()</span> }
                             </div>
                             @if (!string.IsNullOrWhiteSpace(saved.Summary))
                             {
@@ -1099,6 +1283,8 @@
                             }
                         </div>
                         <div class="d-flex gap-1 flex-shrink-0">
+                            <button type="button" class="btn btn-sm @(saved.FinishedAt is null ? "btn-outline-success" : "btn-success")" title="@(saved.FinishedAt is null ? "Mark finished" : "Finished - click to put back")"
+                                    aria-label="@(saved.FinishedAt is null ? "Mark finished" : "Put back in the queue"): @saved.Title" @onclick="() => SetFinishedAsync(saved.Url, saved.FinishedAt is null)"><i class="bi bi-check2-circle"></i></button>
                             @if (saved.ClippedWikiPageId is { } pageId || _clipped.TryGetValue(NewsStoryClusterer.UrlHash(saved.Url), out pageId))
                             {
                                 <a class="btn btn-sm btn-outline-secondary" href="/admin/sentinel?page=@pageId" title="Open in Sentinel" aria-label="Open @saved.Title in Sentinel"><i class="bi bi-journal-text"></i></a>
@@ -1107,7 +1293,7 @@
                             {
                                 <button type="button" class="btn btn-sm btn-outline-secondary" title="Clip to Sentinel" aria-label="Clip @saved.Title to Sentinel" @onclick="() => ClipSavedAsync(saved)"><i class="bi bi-journal-plus"></i></button>
                             }
-                            <button type="button" class="btn btn-sm btn-outline-danger" title="Remove" aria-label="Remove @saved.Title from saved" @onclick="() => UnsaveAsync(saved)"><i class="bi bi-trash"></i></button>
+                            <button type="button" class="btn btn-sm btn-outline-danger" title="Remove" aria-label="Remove @saved.Title from the queue" @onclick="() => UnsaveAsync(saved)"><i class="bi bi-trash"></i></button>
                         </div>
                     </li>
                 }
@@ -1115,9 +1301,6 @@
         }
     </text>;
 
-    // One small bar chart per topic (single series each, so the heading names it - no legend).
-    // Bars carry a native tooltip with the date and count; the figure has a text summary for
-    // screen readers.
     private RenderFragment RenderTrendsView() => @<text>
         @if (_trends is not { } trends || trends.Topics.All(t => t.DailyCounts.Sum() == 0))
         {
@@ -1224,6 +1407,36 @@
                     <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@(_sendingDigest || string.IsNullOrWhiteSpace(_setDigestRecipient))" @onclick="SendDigestNowAsync">
                         @(_sendingDigest ? "Sending…" : "Send a digest now")
                     </button>
+                </div>
+
+                @* 4. Muted keywords and sites (20-11-26). *@
+                <h2 class="h6 mt-4">Mute</h2>
+                <div class="row g-2 mb-2">
+                    <div class="col-md-6">
+                        <label class="form-label small" for="mw-muted-keywords">Keywords (one per line)</label>
+                        <textarea id="mw-muted-keywords" class="form-control form-control-sm" rows="4" placeholder="crypto" @bind="_setMutedKeywords" @bind:event="oninput"></textarea>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label small" for="mw-muted-sources">Outlets or sites (one per line)</label>
+                        <textarea id="mw-muted-sources" class="form-control form-control-sm" rows="4" placeholder="example.com" @bind="_setMutedSources" @bind:event="oninput"></textarea>
+                    </div>
+                </div>
+                <p class="small text-secondary">Articles that mention a muted keyword, or come from a muted outlet or site, are hidden from every feed and the weekly reading page.</p>
+                <button type="button" class="btn btn-sm btn-primary" @onclick="SaveSettingsAsync">Save</button>
+
+                @* 7. The weekly reading page (20-11-26). *@
+                <h2 class="h6 mt-4">Weekly reading page</h2>
+                <p class="small text-secondary mb-2">
+                    Every Monday at 07:00, a page in your Sentinel lists the week's best technical reads you haven't opened, deepest and most discussed first.
+                </p>
+                <div class="d-flex gap-2 align-items-center mb-2">
+                    <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@_buildingDigest" @onclick="BuildReadingPageAsync">
+                        @(_buildingDigest ? "Building…" : "Build my page now")
+                    </button>
+                    @if (_readingPageId is { } readingPage)
+                    {
+                        <a class="btn btn-sm btn-link" href="/admin/sentinel?page=@readingPage">Open it in Sentinel</a>
+                    }
                 </div>
 
                 <h2 class="h6 mt-4">Automations</h2>

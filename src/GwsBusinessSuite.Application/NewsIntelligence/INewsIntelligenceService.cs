@@ -6,6 +6,8 @@ public interface INewsIntelligenceService
     Task<WatchedTopicSummary> CreateTopicAsync(string name, string keywords, string colorHex, string topicType, string trustedFeedUrls, CancellationToken ct = default);
     Task<WatchedTopicSummary> UpdateTopicAsync(Guid id, string name, string keywords, string colorHex, bool isActive, string topicType, string trustedFeedUrls, CancellationToken ct = default);
     Task DeleteTopicAsync(Guid id, CancellationToken ct = default);
+    // The software development source pack (TechReadingPack): makes the topic, or tops up its feeds.
+    Task<WatchedTopicSummary> AddTechReadingPackAsync(CancellationToken ct = default);
 
     Task<NewsFeedResult> GetFeedAsync(Guid? topicId, CancellationToken ct = default);
 
@@ -39,7 +41,9 @@ public sealed record NewsItemDto(
     string Description,
     string OllamaSummary,
     DateTimeOffset FetchedAt,
-    string? ImageUrl = null);
+    string? ImageUrl = null,
+    int? CommunityScore = null,
+    int? ReadingMinutes = null);
 
 public sealed record NewsFeedResult(
     IReadOnlyList<NewsItemDto> Items,

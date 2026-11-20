@@ -1485,3 +1485,13 @@ document.addEventListener('click', function (event) {
 	}
 	if (document.body) start(); else document.addEventListener('DOMContentLoaded', start);
 })();
+
+// Media Watch's reader (20-11-26): the text selected in the article, for "Add selection as highlight".
+window.gwsReader = {
+	selection: function () {
+		var selection = window.getSelection ? window.getSelection() : null;
+		if (!selection || selection.isCollapsed) return '';
+		var body = document.querySelector('.gws-reader-body');
+		return body && body.contains(selection.anchorNode) ? String(selection).trim() : '';
+	}
+};

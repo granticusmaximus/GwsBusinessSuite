@@ -113,6 +113,22 @@ public sealed class NewsIntelligenceService(
             countMap.GetValueOrDefault(t.Id, 0), t.TopicType, t.TrustedFeedUrls, t.LastRefreshIssue)).ToList();
     }
 
+    public async Task<WatchedTopicSummary> AddTechReadingPackAsync(CancellationToken ct = default)
+    {
+        WatchedTopic? existing;
+        await using (var db = await dbContextFactory.CreateDbContextAsync(ct))
+        {
+            existing = (await db.WatchedTopics.AsNoTracking().ToListAsync(ct))
+                .FirstOrDefault(t => string.Equals(t.Name, TechReadingPack.TopicName, StringComparison.OrdinalIgnoreCase));
+        }
+        if (existing is null)
+            return await CreateTopicAsync(TechReadingPack.TopicName, TechReadingPack.Keywords, TechReadingPack.ColorHex,
+                WatchedTopicTypes.Technical, TechReadingPack.MergeFeeds(null), ct);
+        return await UpdateTopicAsync(existing.Id, existing.Name,
+            string.IsNullOrWhiteSpace(existing.Keywords) ? TechReadingPack.Keywords : existing.Keywords,
+            existing.ColorHex, true, WatchedTopicTypes.Technical, TechReadingPack.MergeFeeds(existing.TrustedFeedUrls), ct);
+    }
+
     public async Task<WatchedTopicSummary> CreateTopicAsync(string name, string keywords, string colorHex, string topicType, string trustedFeedUrls, CancellationToken ct = default)
     {
         await WriteLock.WaitAsync(ct);
@@ -212,7 +228,7 @@ public sealed class NewsIntelligenceService(
             var topicName = topic?.Name ?? "Top News";
             var topicColor = topic?.ColorHex ?? "#64748b";
             return new NewsItemDto(n.Id, n.TopicId, topicName, topicColor, n.Title, n.Url,
-                n.Source, n.PublishedAt, n.Description, n.OllamaSummary, n.FetchedAt, n.ImageUrl);
+                n.Source, n.PublishedAt, n.Description, n.OllamaSummary, n.FetchedAt, n.ImageUrl, n.CommunityScore, n.ReadingMinutes);
         }).ToList();
 
         var lastRefresh = items.Count > 0 ? (DateTimeOffset?)items.Max(n => n.FetchedAt) : null;
@@ -425,7 +441,10 @@ public sealed class NewsIntelligenceService(
             .Select((retry, i) => (retry.Id, Summary: summarized.Summaries.ElementAtOrDefault(selected.Count + i) ?? string.Empty))
             .Where(take => !string.IsNullOrWhiteSpace(take.Summary))
             .ToList();
-        return new PreparedRefresh(workItem, selected, summarized.Summaries.Take(selected.Count).ToList(), retriedTakes, issue);
+        var minutes = fullTexts.Take(selected.Count).Select(text => string.IsNullOrWhiteSpace(text) ? (int?)null : TechReadingRank.MinutesFor(text)).ToList();
+        if (workItem.TopicType == WatchedTopicTypes.Technical)
+            selected = await MeasureStageAsync(workItem.Name, "Community scores", selected.Count, () => AddCommunityScoresAsync(selected, ct), timings);
+        return new PreparedRefresh(workItem, selected, summarized.Summaries.Take(selected.Count).ToList(), retriedTakes, issue, minutes);
     }
 
     private async Task CommitPreparedAsync(
@@ -456,6 +475,8 @@ public sealed class NewsIntelligenceService(
                     Description = Truncate(article.Description, 1000),
                     OllamaSummary = prepared.Summaries.ElementAtOrDefault(i) ?? string.Empty,
                     ImageUrl = string.IsNullOrWhiteSpace(article.ImageUrl) ? null : Truncate(article.ImageUrl, 1000),
+                    CommunityScore = article.Score,
+                    ReadingMinutes = prepared.Minutes?.ElementAtOrDefault(i),
                     FetchedAt = fetchedAt,
                     FetchedAtUnixSeconds = fetchedAt.ToUnixTimeSeconds()
                 });
@@ -641,7 +662,9 @@ public sealed class NewsIntelligenceService(
             workItem, "Curated blogs", 0, () => FetchCuratedTechBlogsAsync(ct), timings);
         var trustedFeedsTask = MeasureStageAsync(
             workItem, "Trusted feeds", 0, () => FetchTrustedFeedsAsync(trustedFeedUrls, ct), timings);
-        await Task.WhenAll(hackerNewsTask, devToTask, techBlogsTask, trustedFeedsTask);
+        var lobstersTask = MeasureStageAsync(
+            workItem, "Lobsters", 0, () => FetchLobstersAsync(ct), timings);
+        await Task.WhenAll(hackerNewsTask, devToTask, techBlogsTask, trustedFeedsTask, lobstersTask);
 
         // Curated blogs have no keyword-search API (unlike HN Algolia / dev.to tags), so
         // match the topic's keywords via case-insensitive substring search against each
@@ -652,13 +675,22 @@ public sealed class NewsIntelligenceService(
                 a.Description.Contains(k, StringComparison.OrdinalIgnoreCase)))
             .ToList();
 
+        // Lobsters (20-11-26): its hottest stories carry a community score. Keyword matches join the
+        // topic, and any story already here from another source takes its score.
+        var lobsterScores = lobstersTask.Result.GroupBy(a => NewsStoryClusterer.UrlHash(a.Url)).ToDictionary(g => g.Key, g => g.Max(a => a.Score));
+        var matchedLobsters = lobstersTask.Result
+            .Where(a => keywords.Any(k => a.Title.Contains(k, StringComparison.OrdinalIgnoreCase) || a.Description.Contains(k, StringComparison.OrdinalIgnoreCase)))
+            .ToList();
+
         var seenUrls = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var merged = new List<RawArticle>();
 
-        foreach (var article in hackerNewsTask.Result.Concat(devToTask.Result).Concat(matchedTechBlogs).Concat(trustedFeedsTask.Result))
+        foreach (var article in hackerNewsTask.Result.Concat(devToTask.Result).Concat(matchedTechBlogs).Concat(trustedFeedsTask.Result).Concat(matchedLobsters))
         {
-            if (seenUrls.Add(article.Url))
-                merged.Add(article);
+            if (!seenUrls.Add(article.Url)) continue;
+            merged.Add(article.Score is null && lobsterScores.TryGetValue(NewsStoryClusterer.UrlHash(article.Url), out var score) && score is not null
+                ? article with { Score = score }
+                : article);
         }
 
         return merged
@@ -790,7 +822,8 @@ public sealed class NewsIntelligenceService(
                     string.IsNullOrWhiteSpace(hit.Url) ? $"https://news.ycombinator.com/item?id={hit.ObjectId}" : hit.Url!,
                     "Hacker News",
                     DateTimeOffset.TryParse(hit.CreatedAt, out var created) ? created : null,
-                    string.Empty))
+                    string.Empty,
+                    Score: hit.Points))
                 .ToList();
         }
         catch (Exception ex)
@@ -815,7 +848,83 @@ public sealed class NewsIntelligenceService(
         string? Title,
         string? Url,
         [property: System.Text.Json.Serialization.JsonPropertyName("objectID")] string? ObjectId,
-        [property: System.Text.Json.Serialization.JsonPropertyName("created_at")] string? CreatedAt);
+        [property: System.Text.Json.Serialization.JsonPropertyName("created_at")] string? CreatedAt,
+        [property: System.Text.Json.Serialization.JsonPropertyName("points")] int? Points = null);
+
+    // ── Lobsters and Hacker News points (20-11-26) ────────────
+    private const string LobstersCacheKey = "news-intel:lobsters-hottest";
+    public const int MaxScoreLookupsPerRefresh = 12;
+
+    private async Task<List<RawArticle>> FetchLobstersAsync(CancellationToken ct)
+    {
+        if (cache.TryGetValue(LobstersCacheKey, out List<RawArticle>? cached) && cached is not null) return cached;
+        try
+        {
+            var stories = await http.GetFromJsonAsync<LobstersStory[]>("https://lobste.rs/hottest.json", ct) ?? [];
+            var articles = stories
+                .Where(story => !string.IsNullOrWhiteSpace(story.Title))
+                .Select(story => new RawArticle(
+                    story.Title!,
+                    string.IsNullOrWhiteSpace(story.Url) ? story.CommentsUrl ?? $"https://lobste.rs/s/{story.ShortId}" : story.Url!,
+                    "Lobsters",
+                    DateTimeOffset.TryParse(story.CreatedAt, out var created) ? created : null,
+                    string.Join(", ", story.Tags ?? []),
+                    Score: story.Score))
+                .ToList();
+            cache.Set(LobstersCacheKey, articles, TechBlogCacheDuration);
+            return articles;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            logger.LogDebug(ex, "Lobsters wasn't reachable");
+            return [];
+        }
+    }
+
+    private sealed record LobstersStory(
+        [property: System.Text.Json.Serialization.JsonPropertyName("short_id")] string? ShortId,
+        [property: System.Text.Json.Serialization.JsonPropertyName("title")] string? Title,
+        [property: System.Text.Json.Serialization.JsonPropertyName("url")] string? Url,
+        [property: System.Text.Json.Serialization.JsonPropertyName("comments_url")] string? CommentsUrl,
+        [property: System.Text.Json.Serialization.JsonPropertyName("created_at")] string? CreatedAt,
+        [property: System.Text.Json.Serialization.JsonPropertyName("score")] int? Score,
+        [property: System.Text.Json.Serialization.JsonPropertyName("tags")] string[]? Tags);
+
+    // A new article from a blog or feed may be on Hacker News too: its points are looked up by URL
+    // (one Algolia search each, at most MaxScoreLookupsPerRefresh a refresh, remembered for 6 hours).
+    private async Task<List<RawArticle>> AddCommunityScoresAsync(List<RawArticle> articles, CancellationToken ct)
+    {
+        var result = new List<RawArticle>(articles.Count);
+        var lookups = 0;
+        foreach (var article in articles)
+        {
+            if (article.Score is not null || lookups >= MaxScoreLookupsPerRefresh || article.Url.Contains("news.ycombinator.com", StringComparison.OrdinalIgnoreCase))
+            {
+                result.Add(article);
+                continue;
+            }
+            var key = "news-intel:hn-points:" + NewsStoryClusterer.UrlHash(article.Url);
+            if (!cache.TryGetValue(key, out int? points))
+            {
+                lookups++;
+                try
+                {
+                    var url = "https://hn.algolia.com/api/v1/search?tags=story&restrictSearchableAttributes=url&hitsPerPage=3&query=" + Uri.EscapeDataString(article.Url);
+                    var payload = await http.GetFromJsonAsync<HackerNewsResponse>(url, ct);
+                    points = payload?.Hits?.Where(hit => string.Equals(hit.Url?.TrimEnd('/'), article.Url.TrimEnd('/'), StringComparison.OrdinalIgnoreCase))
+                        .Max(hit => hit.Points);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+                {
+                    logger.LogDebug(ex, "Hacker News points lookup skipped for {Url}", article.Url);
+                    points = null;
+                }
+                cache.Set(key, points, TimeSpan.FromHours(6));
+            }
+            result.Add(points is null ? article : article with { Score = points });
+        }
+        return result;
+    }
 
     // ── Curated engineering blogs (Technical topics only) ─────
     // These feeds have no search API, so the whole set is fetched in full and then
@@ -1109,7 +1218,8 @@ public sealed class NewsIntelligenceService(
         string Source,
         DateTimeOffset? PublishedAt,
         string Description,
-        string? ImageUrl = null);
+        string? ImageUrl = null,
+        int? Score = null);
 
     private sealed record RefreshWorkItem(
         Guid? TopicId,
@@ -1128,5 +1238,6 @@ public sealed class NewsIntelligenceService(
         List<RawArticle> Articles,
         List<string> Summaries,
         List<(Guid Id, string Summary)> RetriedTakes,
-        string? Issue);
+        string? Issue,
+        List<int?>? Minutes = null);
 }

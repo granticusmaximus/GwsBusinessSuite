@@ -46,6 +46,10 @@ public sealed class NewsRefreshBackgroundService(
             // The hourly tick doubles as the digest clock: it sends once the chosen hour has passed.
             var digest = await scope.ServiceProvider.GetRequiredService<INewsWatchService>().SendDigestAsync(force: false, ct);
             if (digest.Sent) logger.LogInformation("Media Watch digest: {Message}", digest.Message);
+
+            // Mondays: each reader's weekly reading page in Sentinel (20-11-26).
+            var pages = await scope.ServiceProvider.GetRequiredService<INewsWatchService>().RunReadingDigestsIfDueAsync(ct);
+            if (pages > 0) logger.LogInformation("Media Watch: weekly reading page rebuilt for {Count} readers", pages);
         }
         catch (OperationCanceledException)
         {

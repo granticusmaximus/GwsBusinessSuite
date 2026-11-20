@@ -14,7 +14,9 @@ public sealed record ReaderArticle(
     DateTimeOffset? PublishedAt,
     string Html,
     int Minutes,
-    string? Problem)
+    string? Problem,
+    string Markdown = "",
+    string Text = "")
 {
     public bool Readable => Problem is null && Html.Length > 0;
 }
@@ -22,4 +24,7 @@ public sealed record ReaderArticle(
 public interface IArticleReader
 {
     Task<ReaderArticle> ReadAsync(string url, string? fallbackTitle = null, CancellationToken cancellationToken = default);
+
+    // Three takeaways and one line on what it means for GWS, from the local model (20-11-26).
+    Task<ReaderTakeaways> TakeawaysAsync(string url, CancellationToken cancellationToken = default);
 }

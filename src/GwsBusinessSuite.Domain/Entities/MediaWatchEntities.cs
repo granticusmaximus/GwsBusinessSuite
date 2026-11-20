@@ -13,6 +13,11 @@ public sealed class NewsWatchSettings : AuditableEntity
     // 0 = Sunday ... 6 = Saturday; only used for the weekly digest.
     public int DigestDayOfWeek { get; set; } = 1;
     public DateTimeOffset? LastDigestSentAt { get; set; }
+    // Stack filters (20-11-26): one keyword or outlet per line; matching articles are hidden.
+    public string MutedKeywords { get; set; } = string.Empty;
+    public string MutedSources { get; set; } = string.Empty;
+    // The weekly reading page in Sentinel (Mondays): when it last ran.
+    public DateTimeOffset? LastReadingDigestAt { get; set; }
 }
 
 public static class NewsRetention
@@ -48,6 +53,9 @@ public sealed class SavedNewsArticle : AuditableEntity
     public DateTimeOffset? PublishedAt { get; set; }
     public string Summary { get; set; } = string.Empty;
     public Guid? ClippedWikiPageId { get; set; }
+    // The reading queue (20-11-26): how long it takes, and when it was read to the end.
+    public int? ReadingMinutes { get; set; }
+    public DateTimeOffset? FinishedAt { get; set; }
 }
 
 // Per topic per day: how many new articles arrived and which title terms they used. Kept for

@@ -5146,6 +5146,9 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("TEXT");
 
+                    b.Property<int?>("CommunityScore")
+                        .HasColumnType("INTEGER");
+
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("TEXT");
 
@@ -5174,6 +5177,9 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<long?>("PublishedAtUnixSeconds")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("ReadingMinutes")
                         .HasColumnType("INTEGER");
 
                     b.Property<string>("Source")
@@ -5318,6 +5324,17 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<DateTimeOffset?>("LastDigestSentAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("LastReadingDigestAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("MutedKeywords")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("MutedSources")
+                        .IsRequired()
                         .HasColumnType("TEXT");
 
                     b.Property<int>("RetentionHours")
@@ -6153,8 +6170,14 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<DateTimeOffset?>("FinishedAt")
+                        .HasColumnType("TEXT");
+
                     b.Property<DateTimeOffset?>("PublishedAt")
                         .HasColumnType("TEXT");
+
+                    b.Property<int?>("ReadingMinutes")
+                        .HasColumnType("INTEGER");
 
                     b.Property<string>("Source")
                         .IsRequired()

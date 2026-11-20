@@ -17,7 +17,19 @@ public interface INewsWatchService
 
     // Creates a Sentinel page for the article under a shared "Media Watch clips" page, saving the
     // article too. Returns the new page's id (or the existing one if it was clipped before).
+    // The page carries the whole readable article (when the reader can read it) and any notes and
+    // highlights; clipping an article clipped before appends the new notes to its page.
     Task<Guid> ClipToSentinelAsync(string username, NewsItemDto item, CancellationToken ct = default);
+    Task<Guid> ClipToSentinelAsync(string username, NewsItemDto item, ClipExtras? extras, CancellationToken ct = default);
+
+    // The reading queue (20-11-26).
+    Task SetFinishedAsync(string username, string url, bool finished, CancellationToken ct = default);
+    Task SetReadingMinutesAsync(string username, string url, int minutes, CancellationToken ct = default);
+
+    // The weekly reading page in the person's Sentinel: builds it now and returns its id.
+    Task<Guid> BuildReadingDigestAsync(string username, CancellationToken ct = default);
+    // Mondays: rebuilds it for everyone who has used Media Watch lately. Returns how many.
+    Task<int> RunReadingDigestsIfDueAsync(CancellationToken ct = default);
 
     Task<NewsTrendsView> GetTrendsAsync(int days = 14, CancellationToken ct = default);
 
@@ -33,7 +45,8 @@ public interface INewsWatchService
 }
 
 public sealed record SavedArticleView(Guid Id, string Url, string Title, string Source, string TopicName,
-    DateTimeOffset? PublishedAt, string Summary, DateTimeOffset SavedAt, Guid? ClippedWikiPageId);
+    DateTimeOffset? PublishedAt, string Summary, DateTimeOffset SavedAt, Guid? ClippedWikiPageId,
+    int? ReadingMinutes = null, DateTimeOffset? FinishedAt = null);
 
 public sealed record DiscoveredFeed(string Url, string Title, int ItemCount);
 
@@ -45,7 +58,9 @@ public sealed record NewsWatchSettingsView(
     int DigestHourLocal,
     int DigestDayOfWeek,
     DateTimeOffset? LastDigestSentAt = null,
-    bool CanSendEmail = false);
+    bool CanSendEmail = false,
+    string MutedKeywords = "",
+    string MutedSources = "");
 
 public sealed record NewsDigestResult(bool Sent, string Message);
 

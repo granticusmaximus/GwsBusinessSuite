@@ -1,7 +1,10 @@
 @using GwsBusinessSuite.Application.NewsIntelligence
 @inject IArticleReader Reader
+@inject IJSRuntime JS
 @* Media Watch's reader (20-11-26): the article from the outlet's own page, formatted here, with
-   the original one click away. Copying works as in every modal (app.js adds the Copy button). *@
+   the original one click away. Read later and finished (the reading queue), why it matters
+   (three takeaways from the local model), notes and highlights, and a full-text clip to Sentinel.
+   Copying works as in every modal (app.js adds the Copy button). *@
 
 @if (Url is not null)
 {
@@ -31,7 +34,50 @@
                     }
                     else if (_article is { Readable: true } article)
                     {
+                        @if (_takeaways is not null || _thinking)
+                        {
+                            <section class="gws-reader-takeaways" aria-label="Why it matters">
+                                <h3 class="h6">Why it matters</h3>
+                                @if (_thinking)
+                                {
+                                    <LoadingIndicator Message="Reading it for takeaways…" />
+                                }
+                                else if (_takeaways is { Problem: { } problem } && _takeaways.Points.Count == 0)
+                                {
+                                    <p class="mb-0 text-warning-emphasis">@problem</p>
+                                }
+                                else if (_takeaways is { } takeaways)
+                                {
+                                    <ul class="mb-2">
+                                        @foreach (var point in takeaways.Points) { <li>@point</li> }
+                                    </ul>
+                                    @if (!string.IsNullOrWhiteSpace(takeaways.ForGws)) { <p class="mb-0"><strong>For GWS:</strong> @takeaways.ForGws</p> }
+                                }
+                            </section>
+                        }
                         <article class="gws-reader-body">@((MarkupString)article.Html)</article>
+                        <section class="gws-reader-notes" aria-label="Notes">
+                            <h3 class="h6">Notes and highlights</h3>
+                            @if (_highlights.Count > 0)
+                            {
+                                <ul class="list-unstyled mb-2">
+                                    @foreach (var highlight in _highlights.ToList())
+                                    {
+                                        <li class="gws-reader-highlight">
+                                            <blockquote class="mb-0">@highlight</blockquote>
+                                            <button type="button" class="btn btn-sm btn-link text-danger" aria-label="Remove highlight" @onclick="() => _highlights.Remove(highlight)"><i class="bi bi-x-lg"></i></button>
+                                        </li>
+                                    }
+                                </ul>
+                            }
+                            <textarea class="form-control form-control-sm mb-2" rows="3" placeholder="Your notes on this article…" aria-label="Notes" @bind="_notes" @bind:event="oninput"></textarea>
+                            <div class="d-flex flex-wrap gap-2 align-items-center">
+                                <button type="button" class="btn btn-sm btn-outline-secondary" @onmousedown:preventDefault="true" @onclick="AddHighlightAsync">
+                                    <i class="bi bi-highlighter" aria-hidden="true"></i> Add selection as highlight
+                                </button>
+                                @if (!string.IsNullOrWhiteSpace(_highlightHint)) { <span class="small text-secondary">@_highlightHint</span> }
+                            </div>
+                        </section>
                     }
                     else
                     {
@@ -42,8 +88,33 @@
                         }
                     }
                 </div>
-                <div class="modal-footer">
-                    <a class="btn btn-outline-secondary btn-sm" href="@Url" target="_blank" rel="noopener noreferrer">
+                <div class="modal-footer gws-reader-actions">
+                    @if (_article is { Readable: true })
+                    {
+                        <button type="button" class="btn btn-outline-primary btn-sm" disabled="@_thinking" @onclick="TakeawaysAsync">
+                            <i class="bi bi-lightbulb" aria-hidden="true"></i> Why it matters
+                        </button>
+                    }
+                    @if (!Saved)
+                    {
+                        <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="() => OnReadLater.InvokeAsync()">
+                            <i class="bi bi-bookmark" aria-hidden="true"></i> Read later
+                        </button>
+                    }
+                    else
+                    {
+                        <button type="button" class="btn btn-sm @(Finished ? "btn-success" : "btn-outline-success")" @onclick="() => OnFinished.InvokeAsync(!Finished)">
+                            <i class="bi bi-check2-circle" aria-hidden="true"></i> @(Finished ? "Finished" : "Mark finished")
+                        </button>
+                    }
+                    <button type="button" class="btn btn-outline-secondary btn-sm" disabled="@_clipping" @onclick="ClipAsync">
+                        <i class="bi bi-journal-plus" aria-hidden="true"></i> @(_clipping ? "Clipping…" : ClippedPageId is null ? "Clip to Sentinel" : HasNotes ? "Add notes to the clip" : "Clipped")
+                    </button>
+                    @if (ClippedPageId is { } pageId)
+                    {
+                        <a class="btn btn-link btn-sm" href="/admin/sentinel?page=@pageId">Open the clip</a>
+                    }
+                    <a class="btn btn-outline-secondary btn-sm ms-auto" href="@Url" target="_blank" rel="noopener noreferrer">
                         Open the original <i class="bi bi-box-arrow-up-right" aria-hidden="true"></i>
                     </a>
                     <button type="button" class="btn btn-primary btn-sm" @onclick="CloseAsync">Close</button>
@@ -58,28 +129,85 @@
     [Parameter] public string? Title { get; set; }
     // The feed's own summary, shown when the page can't be read here.
     [Parameter] public string? Summary { get; set; }
+    [Parameter] public bool Saved { get; set; }
+    [Parameter] public bool Finished { get; set; }
+    [Parameter] public Guid? ClippedPageId { get; set; }
     [Parameter] public EventCallback OnClose { get; set; }
+    [Parameter] public EventCallback OnReadLater { get; set; }
+    [Parameter] public EventCallback<bool> OnFinished { get; set; }
+    // Clips (or adds notes to the clip); true when it worked, so the notes are only cleared then.
+    [Parameter] public Func<ClipExtras, Task<bool>>? Clip { get; set; }
+    // The article once read (the page keeps its reading time for the queue).
+    [Parameter] public EventCallback<ReaderArticle> OnRead { get; set; }
 
     private ReaderArticle? _article;
     private bool _loading;
     private string? _loadedUrl;
+    private ReaderTakeaways? _takeaways;
+    private bool _thinking;
+    private string _notes = string.Empty;
+    private readonly List<string> _highlights = [];
+    private string? _highlightHint;
+    private bool _clipping;
+
+    private bool HasNotes => !string.IsNullOrWhiteSpace(_notes) || _highlights.Count > 0;
 
     protected override async Task OnParametersSetAsync()
     {
         if (Url is null || Url == _loadedUrl) return;
         _loadedUrl = Url;
         _article = null;
+        _takeaways = null;
+        _notes = string.Empty;
+        _highlights.Clear();
+        _highlightHint = null;
         _loading = true;
         var url = Url;
         try
         {
             var article = await Reader.ReadAsync(url, Title);
-            if (url == _loadedUrl) _article = article;
+            if (url != _loadedUrl) return;
+            _article = article;
+            if (article.Readable) await OnRead.InvokeAsync(article);
         }
         finally
         {
             if (url == _loadedUrl) _loading = false;
         }
+    }
+
+    private async Task TakeawaysAsync()
+    {
+        if (Url is null) return;
+        _thinking = true;
+        try { _takeaways = await Reader.TakeawaysAsync(Url); }
+        finally { _thinking = false; }
+    }
+
+    private async Task AddHighlightAsync()
+    {
+        var text = await JS.InvokeAsync<string>("gwsReader.selection");
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            _highlightHint = "Select some of the article's text first.";
+            return;
+        }
+        _highlightHint = null;
+        if (!_highlights.Contains(text)) _highlights.Add(text.Length > 1500 ? text[..1500] + "…" : text);
+    }
+
+    private async Task ClipAsync()
+    {
+        _clipping = true;
+        try
+        {
+            if (Clip is not null && await Clip(new ClipExtras(_notes, _highlights.ToList())))
+            {
+                _notes = string.Empty;
+                _highlights.Clear();
+            }
+        }
+        finally { _clipping = false; }
     }
 
     private async Task CloseAsync()

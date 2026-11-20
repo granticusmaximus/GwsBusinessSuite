@@ -2595,6 +2595,11 @@ public sealed class NewsItem : AuditableEntity
 
     public DateTimeOffset FetchedAt { get; set; } = DateTimeOffset.UtcNow;
     public long FetchedAtUnixSeconds { get; set; }
+
+    // Community signal (20-11-26): Hacker News points or Lobsters score, when the story is there.
+    public int? CommunityScore { get; set; }
+    // About how long the article takes to read, from its own text (230 words a minute).
+    public int? ReadingMinutes { get; set; }
 }
 
 public sealed class PodcastShow : AuditableEntity

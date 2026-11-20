@@ -8,7 +8,7 @@ public static class CuratedTechBlogFeeds
 {
     public static readonly IReadOnlyList<(string Name, string Url)> Feeds =
     [
-        ("GitHub Engineering", "http://githubengineering.com/atom.xml"),
+        ("GitHub Engineering", "https://github.blog/engineering/feed/"), // githubengineering.com/atom.xml is gone (20-11-26)
         ("Stripe Blog", "https://stripe.com/blog/feed.rss"),
         ("The Cloudflare Blog", "https://blog.cloudflare.com/rss/"),
         // Uber Engineering Blog taken out 05-11-26: eng.uber.com/feed is gone (404) and its new blog answers 406.

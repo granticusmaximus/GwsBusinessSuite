@@ -21,7 +21,8 @@ public sealed partial class NewsWatchService(
     IMailTransport mailTransport,
     IOptions<GrowthReportEmailOptions> smtpOptions,
     TimeProvider timeProvider,
-    ILogger<NewsWatchService> logger) : INewsWatchService
+    ILogger<NewsWatchService> logger,
+    IArticleReader? articleReader = null) : INewsWatchService
 {
     public const string ClipsParentTitle = "Media Watch clips";
     private const int DigestStoriesPerTopic = 5;
@@ -77,7 +78,7 @@ public sealed partial class NewsWatchService(
         await using var db = await dbContextFactory.CreateDbContextAsync(ct);
         var rows = await db.SavedNewsArticles.AsNoTracking().Where(s => s.Username == username).ToListAsync(ct);
         return rows.OrderByDescending(s => s.CreatedAt)
-            .Select(s => new SavedArticleView(s.Id, s.Url, s.Title, s.Source, s.TopicName, s.PublishedAt, s.Summary, s.CreatedAt, s.ClippedWikiPageId))
+            .Select(s => new SavedArticleView(s.Id, s.Url, s.Title, s.Source, s.TopicName, s.PublishedAt, s.Summary, s.CreatedAt, s.ClippedWikiPageId, s.ReadingMinutes, s.FinishedAt))
             .ToList();
     }
 
@@ -116,6 +117,7 @@ public sealed partial class NewsWatchService(
             TopicName = Truncate(item.TopicName, 200),
             PublishedAt = item.PublishedAt,
             Summary = Truncate(string.IsNullOrWhiteSpace(item.OllamaSummary) ? item.Description : item.OllamaSummary, 1000),
+            ReadingMinutes = item.ReadingMinutes,
             CreatedBy = username,
             CreatedAt = timeProvider.GetUtcNow()
         };
@@ -125,37 +127,68 @@ public sealed partial class NewsWatchService(
 
     // ---- Sentinel clips -------------------------------------------------------------------
 
-    public async Task<Guid> ClipToSentinelAsync(string username, NewsItemDto item, CancellationToken ct = default)
+    // The clips folder is one per person (Sentinel is private per person, 12-11-26): found by its
+    // personal key, or a "Media Watch clips" page this person made before keys were used.
+    public const string ClipsFolderSystemKey = "media-watch-clips";
+
+    public Task<Guid> ClipToSentinelAsync(string username, NewsItemDto item, CancellationToken ct = default) => ClipToSentinelAsync(username, item, null, ct);
+
+    public async Task<Guid> ClipToSentinelAsync(string username, NewsItemDto item, ClipExtras? extras, CancellationToken ct = default)
     {
         await using var db = await dbContextFactory.CreateDbContextAsync(ct);
         var saved = await FindOrSaveAsync(db, username, item, ct);
+        var now = timeProvider.GetLocalNow();
         if (saved.ClippedWikiPageId is { } existingId
-            && await db.WikiPages.AnyAsync(p => p.Id == existingId && p.TrashedAt == null, ct))
+            && await db.WikiPages.FirstOrDefaultAsync(p => p.Id == existingId && p.TrashedAt == null, ct) is { } existing)
         {
             await db.SaveChangesAsync(ct);
+            // Clipped before: new notes and highlights are added to its page.
+            var addition = NotesMarkdown(extras, now);
+            if (addition.Length > 0)
+            {
+                var blocks = WikiBlockJson.ParseBlocks(existing.BlocksJson).ToList();
+                blocks.AddRange(WikiBlockJson.FromMarkdown(addition));
+                await wikiService.SavePageAsync(new WikiPageEditorModel
+                {
+                    WikiPageId = existing.Id,
+                    Title = existing.Title,
+                    Slug = existing.Slug,
+                    Icon = existing.Icon,
+                    CoverImageUrl = existing.CoverImageUrl,
+                    ParentWikiPageId = existing.ParentWikiPageId,
+                    IsFullWidth = existing.IsFullWidth,
+                    FontStyle = existing.FontStyle,
+                    ExpectedContentVersion = existing.ContentVersion,
+                    BaseBlocksJson = existing.BlocksJson,
+                    BlocksJson = WikiBlockJson.Serialize(blocks)
+                }, username, cancellationToken: ct);
+            }
             return existingId;
         }
 
-        var parentId = await db.WikiPages.AsNoTracking()
-            .Where(p => p.Title == ClipsParentTitle && p.ParentWikiPageId == null && p.TrashedAt == null)
-            .Select(p => (Guid?)p.Id).FirstOrDefaultAsync(ct);
-        if (parentId is null)
+        var folderId = await EnsureClipsFolderAsync(db, username, ct);
+        // The whole readable article (6. full-text clips); the summary alone when it can't be read.
+        string? articleMarkdown = null;
+        if (articleReader is not null)
         {
-            var parent = await wikiService.SavePageAsync(new WikiPageEditorModel
+            try
             {
-                Title = ClipsParentTitle,
-                Icon = "📰",
-                BlocksJson = WikiBlockJson.Serialize(WikiBlockJson.FromMarkdown("Articles clipped from Media Watch. Each page links to the original."))
-            }, username, cancellationToken: ct);
-            parentId = parent.Id;
+                var article = await articleReader.ReadAsync(item.Url, item.Title, ct);
+                if (article.Readable && article.Markdown.Length > 0) articleMarkdown = article.Markdown;
+                if (article.Readable && article.Minutes > 0 && saved.ReadingMinutes is null) saved.ReadingMinutes = article.Minutes;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                logger.LogDebug(ex, "Clip went ahead without the article text for {Url}", item.Url);
+            }
         }
 
         var page = await wikiService.SavePageAsync(new WikiPageEditorModel
         {
             Title = Truncate(item.Title, 200),
             Icon = "📰",
-            ParentWikiPageId = parentId,
-            BlocksJson = WikiBlockJson.Serialize(WikiBlockJson.FromMarkdown(ClipMarkdown(item, username, timeProvider.GetUtcNow())))
+            ParentWikiPageId = folderId,
+            BlocksJson = WikiBlockJson.Serialize(WikiBlockJson.FromMarkdown(ClipMarkdown(item, username, now, articleMarkdown, extras)))
         }, username, cancellationToken: ct);
 
         saved.ClippedWikiPageId = page.Id;
@@ -163,7 +196,182 @@ public sealed partial class NewsWatchService(
         return page.Id;
     }
 
-    public static string ClipMarkdown(NewsItemDto item, string username, DateTimeOffset clippedAt)
+    private async Task<Guid> EnsureClipsFolderAsync(IAppDbContext db, string username, CancellationToken ct)
+    {
+        var folder = await SentinelPersonalPages.FindAsync(db, ClipsFolderSystemKey, username, ct);
+        if (folder is null)
+        {
+            // A folder this person made before personal keys: adopt it.
+            var legacy = (await db.WikiPages.Where(p => p.Title == ClipsParentTitle && p.ParentWikiPageId == null && p.TrashedAt == null && p.SystemKey == null)
+                    .ToListAsync(ct))
+                .FirstOrDefault(p => string.Equals(p.CreatedBy, username, StringComparison.OrdinalIgnoreCase));
+            if (legacy is not null)
+            {
+                legacy.SystemKey = SentinelPersonalPages.KeyFor(ClipsFolderSystemKey, username);
+                await db.SaveChangesAsync(ct);
+                return legacy.Id;
+            }
+            var created = await wikiService.SavePageAsync(new WikiPageEditorModel
+            {
+                Title = ClipsParentTitle,
+                Icon = "📰",
+                BlocksJson = WikiBlockJson.Serialize(WikiBlockJson.FromMarkdown("Articles clipped from Media Watch. Each page links to the original."))
+            }, username, cancellationToken: ct);
+            var page = await db.WikiPages.FirstAsync(p => p.Id == created.Id, ct);
+            page.SystemKey = SentinelPersonalPages.KeyFor(ClipsFolderSystemKey, username);
+            await db.SaveChangesAsync(ct);
+            return page.Id;
+        }
+        return folder.Id;
+    }
+
+    public static string NotesMarkdown(ClipExtras? extras, DateTimeOffset nowLocal)
+    {
+        if (extras is null) return string.Empty;
+        var highlights = extras.Highlights.Where(h => !string.IsNullOrWhiteSpace(h)).ToList();
+        if (string.IsNullOrWhiteSpace(extras.Notes) && highlights.Count == 0) return string.Empty;
+        var md = new StringBuilder();
+        md.AppendLine($"## My notes ({nowLocal.ToGwsDateTime()})");
+        md.AppendLine();
+        foreach (var highlight in highlights)
+        {
+            md.AppendLine("> " + highlight.Trim().Replace("\n", " "));
+            md.AppendLine();
+        }
+        if (!string.IsNullOrWhiteSpace(extras.Notes)) { md.AppendLine(extras.Notes.Trim()); md.AppendLine(); }
+        return md.ToString();
+    }
+
+    // ---- Reading queue (20-11-26) -----------------------------------------------------------
+
+    public async Task SetFinishedAsync(string username, string url, bool finished, CancellationToken ct = default)
+    {
+        var hash = NewsStoryClusterer.UrlHash(url);
+        await using var db = await dbContextFactory.CreateDbContextAsync(ct);
+        var saved = await db.SavedNewsArticles.FirstOrDefaultAsync(s => s.Username == username && s.UrlHash == hash, ct);
+        if (saved is null) return;
+        saved.FinishedAt = finished ? timeProvider.GetUtcNow() : null;
+        await db.SaveChangesAsync(ct);
+    }
+
+    public async Task SetReadingMinutesAsync(string username, string url, int minutes, CancellationToken ct = default)
+    {
+        if (minutes <= 0) return;
+        var hash = NewsStoryClusterer.UrlHash(url);
+        await using var db = await dbContextFactory.CreateDbContextAsync(ct);
+        var saved = await db.SavedNewsArticles.FirstOrDefaultAsync(s => s.Username == username && s.UrlHash == hash, ct);
+        if (saved is null || saved.ReadingMinutes == minutes) return;
+        saved.ReadingMinutes = minutes;
+        await db.SaveChangesAsync(ct);
+    }
+
+    // ---- Weekly reading page (20-11-26) ------------------------------------------------------
+
+    public async Task<Guid> BuildReadingDigestAsync(string username, CancellationToken ct = default)
+    {
+        await using var db = await dbContextFactory.CreateDbContextAsync(ct);
+        var now = timeProvider.GetUtcNow();
+        var since = now.AddDays(-7).ToUnixTimeSeconds();
+        var technical = await db.WatchedTopics.AsNoTracking().Where(t => t.TopicType == WatchedTopicTypes.Technical)
+            .Select(t => new { t.Id, t.Name }).ToListAsync(ct);
+        var names = technical.ToDictionary(t => t.Id, t => t.Name);
+        var ids = names.Keys.ToList();
+        var items = await db.NewsItems.AsNoTracking()
+            .Where(n => n.TopicId != null && ids.Contains(n.TopicId.Value) && n.FetchedAtUnixSeconds >= since)
+            .ToListAsync(ct);
+        var settings = await db.NewsWatchSettings.AsNoTracking().OrderBy(row => row.Id).FirstOrDefaultAsync(ct) ?? new NewsWatchSettings();
+        var mutedKeywords = ReadingFilters.Lines(settings.MutedKeywords);
+        var mutedSources = ReadingFilters.Lines(settings.MutedSources);
+        var read = (await db.NewsReadMarks.AsNoTracking().Where(m => m.Username == username).Select(m => m.UrlHash).ToListAsync(ct)).ToHashSet();
+        var candidates = items
+            .Where(n => !ReadingFilters.IsMuted(n.Title, n.Description, n.Source, n.Url, mutedKeywords, mutedSources))
+            .Select(n => new ReadingDigest.Candidate(n.Title, n.Url, n.Source, names.GetValueOrDefault(n.TopicId!.Value, ""), n.PublishedAt,
+                n.CommunityScore, n.ReadingMinutes, string.IsNullOrWhiteSpace(n.OllamaSummary) ? n.Description : n.OllamaSummary));
+        var picks = ReadingDigest.Pick(candidates, read, NewsStoryClusterer.UrlHash, now);
+        var blocks = WikiBlockJson.Serialize(WikiBlockJson.FromMarkdown(ReadingDigest.Markdown(picks, timeProvider.GetLocalNow())));
+
+        var page = await SentinelPersonalPages.FindAsync(db, ReadingDigest.PageSystemKey, username, ct);
+        if (page is null)
+        {
+            var created = await wikiService.SavePageAsync(new WikiPageEditorModel
+            {
+                Title = ReadingDigest.PageTitle,
+                Icon = "📚",
+                BlocksJson = blocks
+            }, username, cancellationToken: ct);
+            var stored = await db.WikiPages.FirstAsync(p => p.Id == created.Id, ct);
+            stored.SystemKey = SentinelPersonalPages.KeyFor(ReadingDigest.PageSystemKey, username);
+            await db.SaveChangesAsync(ct);
+            return stored.Id;
+        }
+        await wikiService.SavePageAsync(new WikiPageEditorModel
+        {
+            WikiPageId = page.Id,
+            Title = page.Title,
+            Slug = page.Slug,
+            Icon = page.Icon,
+            CoverImageUrl = page.CoverImageUrl,
+            ParentWikiPageId = page.ParentWikiPageId,
+            IsFullWidth = page.IsFullWidth,
+            FontStyle = page.FontStyle,
+            ExpectedContentVersion = page.ContentVersion,
+            BaseBlocksJson = page.BlocksJson,
+            BlocksJson = blocks
+        }, username, cancellationToken: ct);
+        return page.Id;
+    }
+
+    // Due on Mondays from 07:00 local, once a week.
+    public static bool ReadingDigestDue(DateTimeOffset? lastRun, DateTimeOffset nowLocal)
+    {
+        var daysSinceMonday = ((int)nowLocal.DayOfWeek + 6) % 7;
+        var mondaySeven = new DateTimeOffset(nowLocal.Date.AddDays(-daysSinceMonday).AddHours(7), nowLocal.Offset);
+        // A first run waits for a Monday, so a deploy midweek doesn't build everyone a page.
+        return nowLocal >= mondaySeven && (lastRun is null ? nowLocal.DayOfWeek == DayOfWeek.Monday : lastRun.Value < mondaySeven);
+    }
+
+    public async Task<int> RunReadingDigestsIfDueAsync(CancellationToken ct = default)
+    {
+        List<string> readers;
+        await using (var db = await dbContextFactory.CreateDbContextAsync(ct))
+        {
+            var settings = await db.NewsWatchSettings.OrderBy(row => row.Id).FirstOrDefaultAsync(ct);
+            if (!ReadingDigestDue(settings?.LastReadingDigestAt, timeProvider.GetLocalNow())) return 0;
+            if (settings is null)
+            {
+                settings = new NewsWatchSettings { CreatedAt = timeProvider.GetUtcNow() };
+                db.NewsWatchSettings.Add(settings);
+            }
+            settings.LastReadingDigestAt = timeProvider.GetUtcNow();
+            await db.SaveChangesAsync(ct);
+            // Everyone who opened or saved an article in the last 30 days.
+            var cutoff = timeProvider.GetUtcNow().AddDays(-30);
+            var marks = (await db.NewsReadMarks.AsNoTracking().Select(m => new { m.Username, m.ReadAt }).ToListAsync(ct))
+                .Where(m => m.ReadAt >= cutoff).Select(m => m.Username);
+            var saves = (await db.SavedNewsArticles.AsNoTracking().Select(m => new { m.Username, m.CreatedAt }).ToListAsync(ct))
+                .Where(m => m.CreatedAt >= cutoff).Select(m => m.Username);
+            readers = marks.Concat(saves).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        }
+        var built = 0;
+        foreach (var reader in readers)
+        {
+            try
+            {
+                await BuildReadingDigestAsync(reader, ct);
+                built++;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                logger.LogWarning(ex, "The weekly reading page couldn't be built for {User}", reader);
+            }
+        }
+        return built;
+    }
+
+    public static string ClipMarkdown(NewsItemDto item, string username, DateTimeOffset clippedAt) =>
+        ClipMarkdown(item, username, clippedAt, null, null);
+
+    public static string ClipMarkdown(NewsItemDto item, string username, DateTimeOffset clippedAt, string? articleMarkdown, ClipExtras? extras)
     {
         var md = new StringBuilder();
         md.AppendLine($"**{Escape(item.Source)}**{(item.PublishedAt is { } published ? $" · {published:dd-MM-yy}" : "")} · [Read the original]({item.Url})");
@@ -173,7 +381,19 @@ public sealed partial class NewsWatchService(
             md.AppendLine($"> {Escape(item.OllamaSummary)}");
             md.AppendLine();
         }
-        if (!string.IsNullOrWhiteSpace(item.Description)) { md.AppendLine(Escape(item.Description)); md.AppendLine(); }
+        if (!string.IsNullOrWhiteSpace(articleMarkdown))
+        {
+            md.Append(NotesMarkdown(extras, clippedAt));
+            md.AppendLine("## Article");
+            md.AppendLine();
+            md.AppendLine(articleMarkdown.Trim());
+            md.AppendLine();
+        }
+        else
+        {
+            if (!string.IsNullOrWhiteSpace(item.Description)) { md.AppendLine(Escape(item.Description)); md.AppendLine(); }
+            md.Append(NotesMarkdown(extras, clippedAt));
+        }
         md.AppendLine($"Clipped from Media Watch ({Escape(item.TopicName)}) by {username} on {clippedAt:dd-MM-yy}.");
         return md.ToString();
     }
@@ -327,7 +547,8 @@ public sealed partial class NewsWatchService(
         await using var db = await dbContextFactory.CreateDbContextAsync(ct);
         var s = await db.NewsWatchSettings.AsNoTracking().OrderBy(oneRow => oneRow.Id).FirstOrDefaultAsync(ct) ?? new NewsWatchSettings();
         return new NewsWatchSettingsView(s.RetentionHours, s.DigestEnabled, s.DigestRecipient, s.DigestFrequency,
-            s.DigestHourLocal, s.DigestDayOfWeek, s.LastDigestSentAt, mailTransport.Describe(smtpOptions.Value).CanSend);
+            s.DigestHourLocal, s.DigestDayOfWeek, s.LastDigestSentAt, mailTransport.Describe(smtpOptions.Value).CanSend,
+            s.MutedKeywords, s.MutedSources);
     }
 
     public async Task SaveSettingsAsync(NewsWatchSettingsView settings, CancellationToken ct = default)
@@ -351,6 +572,8 @@ public sealed partial class NewsWatchService(
         row.DigestFrequency = settings.DigestFrequency == NewsDigestFrequencies.Weekly ? NewsDigestFrequencies.Weekly : NewsDigestFrequencies.Daily;
         row.DigestHourLocal = Math.Clamp(settings.DigestHourLocal, 0, 23);
         row.DigestDayOfWeek = Math.Clamp(settings.DigestDayOfWeek, 0, 6);
+        row.MutedKeywords = Truncate(string.Join('\n', ReadingFilters.Lines(settings.MutedKeywords)), 4000);
+        row.MutedSources = Truncate(string.Join('\n', ReadingFilters.Lines(settings.MutedSources)), 4000);
         row.UpdatedAt = timeProvider.GetUtcNow();
         await db.SaveChangesAsync(ct);
     }
