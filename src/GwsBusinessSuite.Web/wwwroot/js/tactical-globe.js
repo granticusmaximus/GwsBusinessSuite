@@ -167,10 +167,6 @@ window.tacticalGlobe = (function () {
             if (scene.skyBox) scene.skyBox.show = false;
             if (scene.sun) scene.sun.show = false;
             if (scene.moon) scene.moon.show = false;
-            if (scene.skyAtmosphere) {
-                scene.skyAtmosphere.hueShift = -0.25;
-                scene.skyAtmosphere.brightnessShift = -0.35;
-            }
         } catch (err) {
             console.warn('Overwatch: the holo globe settings could not be applied', err);
         }
@@ -354,7 +350,8 @@ window.tacticalGlobe = (function () {
     let latestNativeFragmentShaderSource = '';
 
     function reportNativeRendererFailure(reason) {
-        if (nativeRendererFailureReported || typeof window.__gwsNativeRendererDiagnostic !== 'function') return;
+        if (nativeRendererFailureReported) return;
+        if (typeof window.__gwsNativeRendererDiagnostic !== 'function' && !(window.gwsClientLog && window.gwsClientLog.report)) return;
         nativeRendererFailureReported = true;
         const shader = latestNativeFragmentShaderSource;
         const shaderExcerpt = shader.length > 1_500
@@ -363,7 +360,10 @@ window.tacticalGlobe = (function () {
         const diagnostic = shaderExcerpt
             ? String(reason || '') + '\nLast fragment shader:\n' + shaderExcerpt
             : String(reason || '');
-        window.__gwsNativeRendererDiagnostic(diagnostic.slice(0, 2000));
+        if (typeof window.__gwsNativeRendererDiagnostic === 'function') window.__gwsNativeRendererDiagnostic(diagnostic.slice(0, 2000));
+        // Since the Mac app stopped providing a diagnostics channel (11-11-26), the failure goes to
+        // /admin/logs, which is how a Mac that can't run the globe is noticed (20-11-26).
+        else window.gwsClientLog.report({ origin: 'mac-app', kind: 'native', message: 'Overwatch globe failed in the Mac app; using the Apple map: ' + diagnostic.slice(0, 1800) });
     }
 
     function installNativeShaderDiagnostics() {
@@ -417,10 +417,10 @@ window.tacticalGlobe = (function () {
                 });
                 if (!window.__gwsNativeFloatExtensionBlocked) {
                     window.__gwsNativeFloatExtensionBlocked = true;
-                    window.__gwsNativeRendererDiagnostic('Blocked float-texture extensions on the Cesium WebGL context.');
+                    if (typeof window.__gwsNativeRendererDiagnostic === 'function') window.__gwsNativeRendererDiagnostic('Blocked float-texture extensions on the Cesium WebGL context.');
                 }
             } catch (error) {
-                window.__gwsNativeRendererDiagnostic('Could not block float-texture extensions: ' + String(error));
+                if (typeof window.__gwsNativeRendererDiagnostic === 'function') window.__gwsNativeRendererDiagnostic('Could not block float-texture extensions: ' + String(error));
             }
             return context;
         };
@@ -429,8 +429,34 @@ window.tacticalGlobe = (function () {
     installNativeShaderDiagnostics();
     installNativeWebGlCompatibility();
 
+    // One Overwatch on web and Mac (20-11-26, Grant: "identical in everything"). The Mac app runs
+    // this same Cesium globe. Only if WebKit can't run it (the shader failures of 10-11-26) does the
+    // page remember that for a day and reload on the Apple map (the native branch at the end of
+    // this file); a day later the globe is tried again, so an OS update that fixes WebKit is used.
+    const NATIVE_MAP_KEY = 'gws-overwatch-native-map';
+    const NATIVE_MAP_RETRY_MS = 24 * 60 * 60 * 1000;
+    function macUsesNativeMap() {
+        if (window.__gwsForceNativeMap === true) return true;
+        try {
+            const at = Number(window.localStorage.getItem(NATIVE_MAP_KEY));
+            return at > 0 && Date.now() - at < NATIVE_MAP_RETRY_MS;
+        } catch {
+            return true;
+        }
+    }
+    function fallBackToNativeMap() {
+        try {
+            window.localStorage.setItem(NATIVE_MAP_KEY, String(Date.now()));
+        } catch {
+            return false;
+        }
+        window.location.reload();
+        return true;
+    }
+
     function showGlobeFallback(container, reason) {
         if (!container || container.dataset.globeFallback === 'true') return;
+        if (window.__gwsMacCatalystWebView === true && !macUsesNativeMap() && fallBackToNativeMap()) return;
         container.dataset.globeFallback = 'true';
         container.replaceChildren();
         const fallback = document.createElement('div');
@@ -649,7 +675,9 @@ window.tacticalGlobe = (function () {
                 // WKWebView reports multiple render targets while compiling Cesium's
                 // order-independent-transparency compositor fails. The effect is optional and
                 // has no bearing on the globe, imagery, or map interaction.
-                orderIndependentTranslucency: window.__gwsMacCatalystWebView !== true,
+                // Off everywhere (20-11-26): WebKit couldn't compile it, and the web and Mac globes draw
+                // the same pixels.
+                orderIndependentTranslucency: false,
                 // WKWebView's Metal-backed WebGL path has failed compiling Cesium's HDR,
                 // logarithmic-depth and multisample fragment variants on real Macs. These
                 // options keep the full 3D globe while selecting the portable shader path.
@@ -689,17 +717,16 @@ window.tacticalGlobe = (function () {
         // tiles beside the view so its edges are ready as it moves.
         viewer.scene.globe.tileCacheSize = 1000;
         viewer.scene.globe.preloadSiblings = true;
-        if (window.__gwsMacCatalystWebView === true) {
-            // WebKit's Metal backend rejects Cesium's cosmetic SunTextureFS burst shader. The
-            // sun and moon have no tactical value here; hiding them preserves the interactive
-            // 3D globe while avoiding their incompatible shaders.
-            viewer.scene.sun.show = false;
-            viewer.scene.moon.show = false;
-            viewer.scene.skyAtmosphere.show = false;
-            viewer.scene.fog.enabled = false;
-            viewer.scene.fog.renderable = false;
-            viewer.scene.postProcessStages.enabled = false;
-        }
+        // The same scene on every platform (20-11-26, Grant: web and Mac identical in every
+        // detail). WebKit's Metal backend rejects Cesium's sun, sky and post-process shaders, so
+        // they're off for everyone: the holo globe doesn't use them, and the Mac and the web then
+        // draw exactly the same thing.
+        viewer.scene.sun.show = false;
+        viewer.scene.moon.show = false;
+        viewer.scene.skyAtmosphere.show = false;
+        viewer.scene.fog.enabled = false;
+        viewer.scene.fog.renderable = false;
+        viewer.scene.postProcessStages.enabled = false;
 
         // Viewer construction can succeed while WebKit/Metal fails only when Cesium compiles a
         // later globe/material variant. Cesium reports that path through Scene.renderError; it
@@ -5235,11 +5262,12 @@ window.tacticalGlobe = (function () {
         dismissCoverageBanner: dismissCoverageBanner
     };
 
-    // Mac Catalyst's WKWebView can lose all WebGL program compilation at the OS level. The Mac
-    // app therefore supplies an MKMapView behind this transparent viewport. Keep the Blazor page
-    // as the authenticated controller and forward its existing renderer vocabulary unchanged;
-    // browser and PWA sessions never enter this branch and continue to use Cesium above.
-    if (window.__gwsMacCatalystWebView === true) {
+    // The Apple map fallback. Mac Catalyst's WKWebView could lose WebGL program compilation at the
+    // OS level (10-11-26), so the Mac app supplies an MKMapView behind this transparent viewport.
+    // Since 20-11-26 it's used only when the Cesium globe failed on this Mac in the last day
+    // (macUsesNativeMap); otherwise the Mac runs the same globe as the web. Browser and PWA
+    // sessions never enter this branch.
+    if (window.__gwsMacCatalystWebView === true && macUsesNativeMap()) {
         let nativeDotNetRef = null;
         let nativeContainerId = 'tg-viewport';
         let nativeDriveWatch = null;

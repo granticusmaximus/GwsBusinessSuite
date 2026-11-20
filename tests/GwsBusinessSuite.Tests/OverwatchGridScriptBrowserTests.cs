@@ -158,7 +158,9 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
     // file in this repo already uses `await using var page = await fixture.Browser.NewPageAsync();`
     // directly; this file can't do that inline since page creation lives in this shared helper,
     // hence the two-line pattern at each call site instead.
-    internal static async Task<(IPage Page, List<string> ConsoleErrors)> OpenHarnessAsync(IBrowser browser, bool macApp = false)
+    // macApp: what the Mac app injects. nativeMap: also force the Apple-map fallback (since 20-11-26
+    // the Mac runs the Cesium globe unless it failed there; these tests cover the fallback).
+    internal static async Task<(IPage Page, List<string> ConsoleErrors)> OpenHarnessAsync(IBrowser browser, bool macApp = false, bool nativeMap = true)
     {
         var script = await File.ReadAllTextAsync(ScriptPath);
 
@@ -169,7 +171,7 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
         {
             // What the Mac app injects (MacWebViewCompatibility), plus a stand-in for its native
             // message handler that records each message instead of drawing MapKit.
-            await page.AddInitScriptAsync("""
+            await page.AddInitScriptAsync((nativeMap ? "window.__gwsForceNativeMap = true;" : string.Empty) + """
                 window.__gwsMacCatalystWebView = true;
                 window.__nativeMessages = [];
                 window.webkit = { messageHandlers: { gwsNativeOverwatch: {
@@ -233,6 +235,19 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
     // tests can assert whether (and with what arguments) a given method was actually called.
     private static readonly Lazy<string> HoloLand = new(() => File.ReadAllText(Path.Combine(
         Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../..")), "src/GwsBusinessSuite.Web/wwwroot/data/overwatch-land.json")));
+
+    // 20-11-26 (Grant: Mac Overwatch identical in everything): the Mac app runs the same Cesium globe,
+    // not the Apple map, until the globe fails there; a failure is remembered for a day.
+    [Fact]
+    public async Task MacApp_ShouldRunTheSameGlobe_AndFallBackToTheAppleMapOnlyAfterAFailure()
+    {
+        var (page, _) = await OpenHarnessAsync(fixture.Browser, macApp: true, nativeMap: false);
+        await InitAsync(page);
+        (await page.EvaluateAsync<int>("() => window.__nativeMessages.length")).Should().Be(0, "nothing goes to the Apple map");
+        (await page.EvaluateAsync<bool>("() => !!document.querySelector('#tg-viewport canvas')")).Should().BeTrue("the Cesium globe is drawn");
+        (await page.EvaluateAsync<string?>("() => window.localStorage.getItem('gws-overwatch-native-map')")).Should().BeNull();
+        await page.CloseAsync();
+    }
 
     internal static async Task<string?> InitAsync(IPage page) => await page.EvaluateAsync<string?>("""
         async () => {

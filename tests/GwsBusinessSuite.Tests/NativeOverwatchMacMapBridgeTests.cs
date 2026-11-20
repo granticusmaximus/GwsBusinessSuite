@@ -71,7 +71,7 @@ public sealed class NativeOverwatchMacMapBridgeTests
     {
         var script = File.ReadAllText(Path.Combine(RepoRoot, "src/GwsBusinessSuite.Web/wwwroot/js/tactical-globe.js"));
 
-        script.Should().Contain("if (window.__gwsMacCatalystWebView === true) {");
+        script.Should().Contain("if (window.__gwsMacCatalystWebView === true && macUsesNativeMap()) {");
         script.Should().NotContain("&& window.webkit.messageHandlers.gwsNativeOverwatch) {");
         script.Should().Contain("const waitForNativeHandler = function ()");
         script.Should().Contain("await waitForNativeHandler();");
