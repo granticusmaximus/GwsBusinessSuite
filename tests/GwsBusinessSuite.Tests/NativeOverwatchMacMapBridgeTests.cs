@@ -14,7 +14,7 @@ public sealed class NativeOverwatchMacMapBridgeTests
         var script = File.ReadAllText(Path.Combine(RepoRoot, "src/GwsBusinessSuite.Web/wwwroot/js/tactical-globe.js"));
         var block = Regex.Match(script, @"const nativeOperations = new Set\(\[(?<operations>[\s\S]*?)\]\);");
         block.Success.Should().BeTrue();
-        var forwarded = Regex.Matches(block.Groups["operations"].Value, @"'(?<operation>(?:set|clear)[A-Z]\w*)'")
+        var forwarded = Regex.Matches(block.Groups["operations"].Value, @"'(?<operation>(?:set|clear|focus)[A-Z]\w*)'")
             .Select(match => match.Groups["operation"].Value)
             .ToHashSet(StringComparer.Ordinal);
 

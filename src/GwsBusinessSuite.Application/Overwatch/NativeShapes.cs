@@ -15,25 +15,20 @@ public static class NativeShapes
     public sealed record MarkerStyle(string Symbol, MarkerTone Tone, bool Prominent = false);
     public enum MarkerTone { Red, Orange, Yellow, Green, Teal, Cyan, Blue, Purple, Pink, Gray }
 
-    // The web globe's palette (tactical-globe.js), so the Mac map's pins and areas match it
-    // (19-11-26): green cameras, purple news, red/orange/yellow severity, pink outages.
+    // Holo Wireframe's palette (19-11-26), the same on the web globe: green carries information,
+    // amber and red only mean worse. Every kind of thing is green and told apart by its symbol;
+    // Orange and Yellow are amber (moderate), Red is red (major), Gray is dim green (context).
     public static string ToneHex(MarkerTone tone) => tone switch
     {
         MarkerTone.Red => "#ff3b3b",
-        MarkerTone.Orange => "#ff9d3b",
-        MarkerTone.Yellow => "#ffe83b",
-        MarkerTone.Green => "#7dffb0",
-        MarkerTone.Teal => "#3fe0c5",
-        MarkerTone.Cyan => "#00e5ff",
-        MarkerTone.Blue => "#5ec8ff",
-        MarkerTone.Purple => "#c77dff",
-        MarkerTone.Pink => "#ff8bd1",
-        _ => "#b0b8c4",
+        MarkerTone.Orange => "#ffb000",
+        MarkerTone.Yellow => "#ffb000",
+        MarkerTone.Gray => "#3f8f62",
+        _ => "#7dffb0",
     };
 
-    // The web palette is bright, so most pins take the web's near-black glyph; white reads better
-    // only on the strong red, orange and purple.
-    public static bool DarkGlyph(MarkerTone tone) => tone is not (MarkerTone.Red or MarkerTone.Orange or MarkerTone.Purple);
+    // The glyph is near-black on every tone except red, where white reads better.
+    public static bool DarkGlyph(MarkerTone tone) => tone is not MarkerTone.Red;
 
     public const string GlyphHex = "#05080a";
 
@@ -68,6 +63,70 @@ public static class NativeShapes
     // 14-11-26 the bridge serialized the whole payload as its key, so every aircraft/ship move was
     // a remove plus add. Most payloads carry id; the ordered fallbacks cover country shading,
     // stations and provider data that use a different natural key.
+    // Crowds become counts (19-11-26, Holo Wireframe): the Mac map groups crowded pins itself, since
+    // Apple's grouping crashed the app. Pins in the same grid cell (cellLon by cellLat degrees) become
+    // one count item ({ id: "group:...", lat, lon, count, title, groupBounds: [south, west, north,
+    // east] }); a lone pin, or one carrying a callout, stays as it is. Only past GroupAbove pins.
+    public const int GroupAbove = 40;
+
+    public static IReadOnlySet<string> Groupable { get; } = new HashSet<string>(StringComparer.Ordinal)
+    {
+        NativeOverwatchOperations.SetCameraPins, NativeOverwatchOperations.SetWorldNews,
+        NativeOverwatchOperations.SetTrafficIncidents, NativeOverwatchOperations.SetConflict,
+    };
+
+    public static IReadOnlyList<Dictionary<string, object?>> Group(IReadOnlyList<Dictionary<string, object?>> items, double cellLon, double cellLat, string noun)
+    {
+        if (items.Count <= GroupAbove || cellLon <= 0 || cellLat <= 0) return items;
+        var output = new List<Dictionary<string, object?>>();
+        var cells = new Dictionary<(long X, long Y), List<(Dictionary<string, object?> Item, double Lat, double Lon)>>();
+        foreach (var item in items)
+        {
+            if (!TryPoint(item, out var lat, out var lon) || TextValue(item, "callout") is { Length: > 0 })
+            {
+                output.Add(item);
+                continue;
+            }
+            var key = ((long)Math.Floor(lon / cellLon), (long)Math.Floor(lat / cellLat));
+            if (!cells.TryGetValue(key, out var members)) cells[key] = members = [];
+            members.Add((item, lat, lon));
+        }
+        foreach (var ((x, y), members) in cells)
+        {
+            if (members.Count == 1)
+            {
+                output.Add(members[0].Item);
+                continue;
+            }
+            output.Add(new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["id"] = FormattableString.Invariant($"group:{x}:{y}"),
+                ["lat"] = members.Average(m => m.Lat),
+                ["lon"] = members.Average(m => m.Lon),
+                ["count"] = members.Count,
+                ["title"] = FormattableString.Invariant($"{members.Count} {noun}"),
+                ["groupBounds"] = new object?[] { members.Min(m => m.Lat), members.Min(m => m.Lon), members.Max(m => m.Lat), members.Max(m => m.Lon) },
+            });
+        }
+        return output;
+    }
+
+    public static string GroupNoun(string operation) => operation switch
+    {
+        NativeOverwatchOperations.SetCameraPins => "cameras",
+        NativeOverwatchOperations.SetWorldNews => "news stories",
+        NativeOverwatchOperations.SetTrafficIncidents => "incidents",
+        NativeOverwatchOperations.SetConflict => "conflict reports",
+        _ => "items",
+    };
+
+    // focusLayer's payload: { web: [...], native: ["setWorldNews", ...] } focuses those layers; null
+    // (or nothing) ends the focus.
+    public static IReadOnlySet<string>? FocusOperations(object?[] arguments) =>
+        arguments.FirstOrDefault() is Dictionary<string, object?> spec && spec.TryGetValue("native", out var value) && value is object?[] operations
+            ? operations.OfType<string>().ToHashSet(StringComparer.Ordinal)
+            : null;
+
     public static string Identity(string operation, Dictionary<string, object?> item)
     {
         foreach (var key in new[] { "id", "eventId", "cameraId", "icao24", "mmsi", "code", "stationId" })

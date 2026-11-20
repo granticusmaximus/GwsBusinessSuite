@@ -67,21 +67,163 @@ window.tacticalGlobe = (function () {
     // White fill + a baked-in outline color, so a runtime `billboard.color` tint (multiplied
     // against the image) recolors only the fill - a near-black outline stays visually near-black
     // under any tint (black * anything is still ~black), and a bright outline stays legible too.
-    // The phosphor-green wash over the grey imagery (OverwatchMapLook: #19ff7a at 26%), the same
-    // blend the Mac app's tiles get. A failure leaves the grey imagery, which is still usable.
-    async function addTerminalWash(viewer) {
+    // Option B, Holo Wireframe (19-11-26, Grant: the web and Mac Overwatch identical). One look,
+    // the numbers in OverwatchMapLook.cs and here (a test keeps them equal), drawn the same way
+    // by the Mac's MapKit view: a black-green globe, faint land with glowing coastlines from
+    // /data/overwatch-land.json, a 15-degree grid, and Esri's dark street map under a green wash
+    // fading in as the camera comes down from HOLO.streetsBelowMetres to HOLO.streetsFullMetres.
+    const HOLO = {
+        green: '#7dffb0',
+        globe: '#04160c',
+        landAlpha: 0.07,
+        coastAlpha: 0.9,
+        gridAlpha: 0.14,
+        gridStep: 15,
+        streetsBelowMetres: 400000,
+        streetsFullMetres: 60000,
+        streetAlpha: 0.95,
+        washAlpha: 0.32
+    };
+
+    // How much of the street map shows at a camera height: 0 above streetsBelowMetres, 1 below
+    // streetsFullMetres (OverwatchMapLook.StreetShare does the same on the Mac).
+    function holoStreetShare(heightMetres) {
+        return Math.max(0, Math.min(1, (HOLO.streetsBelowMetres - heightMetres) / (HOLO.streetsBelowMetres - HOLO.streetsFullMetres)));
+    }
+
+    // Focus one layer (19-11-26; OverwatchFocus.cs): every other 'tg-' layer dims to a quarter,
+    // the same as the Mac map. spec: { web: ['tg-world-news', ...], native: [...] }, or null to end it.
+    // Each dimmed entity keeps its own colours (_tgUndim) so ending the focus puts them back, and
+    // entities a layer adds while dimmed are dimmed as they arrive.
+    const FOCUS_DIM = 0.25;
+    const focusExempt = new Set(['tg-holo-land', 'tg-measure']);
+    function dimColor(property, factor) {
+        if (!property) return property;
+        const value = typeof property.getValue === 'function' ? property.getValue(Cesium.JulianDate.now()) : property;
+        return value instanceof Cesium.Color ? value.withAlpha(value.alpha * factor) : property;
+    }
+    function dimEntity(entity) {
+        if (entity._tgUndim) return;
+        const saved = {};
+        if (entity.billboard) { saved.billboard = entity.billboard.color; entity.billboard.color = dimColor(entity.billboard.color || Cesium.Color.WHITE, FOCUS_DIM); }
+        if (entity.point) { saved.point = entity.point.color; entity.point.color = dimColor(entity.point.color || Cesium.Color.WHITE, FOCUS_DIM); }
+        if (entity.label) { saved.label = entity.label.fillColor; entity.label.fillColor = dimColor(entity.label.fillColor || Cesium.Color.WHITE, FOCUS_DIM); }
+        if (entity.polyline && entity.polyline.material instanceof Cesium.ColorMaterialProperty) { saved.polyline = entity.polyline.material; entity.polyline.material = new Cesium.ColorMaterialProperty(dimColor(entity.polyline.material.color, FOCUS_DIM)); }
+        if (entity.polygon && entity.polygon.material instanceof Cesium.ColorMaterialProperty) { saved.polygon = entity.polygon.material; entity.polygon.material = new Cesium.ColorMaterialProperty(dimColor(entity.polygon.material.color, FOCUS_DIM)); }
+        entity._tgUndim = saved;
+    }
+    function undimEntity(entity) {
+        const saved = entity._tgUndim;
+        if (!saved) return;
+        if ('billboard' in saved && entity.billboard) entity.billboard.color = saved.billboard;
+        if ('point' in saved && entity.point) entity.point.color = saved.point;
+        if ('label' in saved && entity.label) entity.label.fillColor = saved.label;
+        if ('polyline' in saved && entity.polyline) entity.polyline.material = saved.polyline;
+        if ('polygon' in saved && entity.polygon) entity.polygon.material = saved.polygon;
+        delete entity._tgUndim;
+    }
+    function focusLayer(spec, containerId) {
+        const entry = viewers.get(containerId || 'tg-viewport');
+        if (!entry || entry.viewer.isDestroyed()) return;
+        const keep = new Set(spec && spec.web ? spec.web : []);
+        const sources = entry.viewer.dataSources;
+        for (let i = 0; i < sources.length; i++) {
+            const source = sources.get(i);
+            const name = source.name || '';
+            if (!name.startsWith('tg-') || focusExempt.has(name)) continue;
+            const dim = spec !== null && spec !== undefined && !keep.has(name);
+            if (source._tgFocusListener) { source._tgFocusListener(); source._tgFocusListener = null; }
+            source.entities.values.forEach(dim ? dimEntity : undimEntity);
+            if (dim) source._tgFocusListener = source.entities.collectionChanged.addEventListener(function (_, added) { added.forEach(dimEntity); });
+        }
+        entry.viewer.scene.requestRender();
+    }
+
+    // A callout box beside an item the server picked (OverwatchCallouts: at most three in view),
+    // the same text the Mac map draws beside the pin.
+    function calloutLabel(text, colour) {
+        return {
+            text: text,
+            font: '600 11px "JetBrains Mono", ui-monospace, monospace',
+            fillColor: Cesium.Color.fromCssColorString(colour || '#b8ffd6'),
+            showBackground: true,
+            backgroundColor: Cesium.Color.fromCssColorString('#020c07').withAlpha(0.88),
+            backgroundPadding: new Cesium.Cartesian2(7, 5),
+            horizontalOrigin: Cesium.HorizontalOrigin.LEFT,
+            verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+            pixelOffset: new Cesium.Cartesian2(14, -12),
+            disableDepthTestDistance: 0
+        };
+    }
+
+    async function applyHoloLook(viewer, streets) {
+        const scene = viewer.scene;
+        const green = Cesium.Color.fromCssColorString(HOLO.green);
+        try {
+            scene.backgroundColor = Cesium.Color.fromCssColorString('#020604');
+            scene.globe.baseColor = Cesium.Color.fromCssColorString(HOLO.globe);
+            scene.globe.showGroundAtmosphere = false;
+            scene.globe.enableLighting = false;
+            if (scene.skyBox) scene.skyBox.show = false;
+            if (scene.sun) scene.sun.show = false;
+            if (scene.moon) scene.moon.show = false;
+            if (scene.skyAtmosphere) {
+                scene.skyAtmosphere.hueShift = -0.25;
+                scene.skyAtmosphere.brightnessShift = -0.35;
+            }
+        } catch (err) {
+            console.warn('Overwatch: the holo globe settings could not be applied', err);
+        }
+        let wash = null;
         try {
             const canvas = document.createElement('canvas');
             canvas.width = 1;
             canvas.height = 1;
             const ctx = canvas.getContext('2d');
-            ctx.fillStyle = '#19ff7a';
+            ctx.fillStyle = HOLO.green;
             ctx.fillRect(0, 0, 1, 1);
-            const wash = viewer.imageryLayers.addImageryProvider(await Cesium.SingleTileImageryProvider.fromUrl(canvas.toDataURL()));
-            wash.alpha = 0.26;
+            wash = viewer.imageryLayers.addImageryProvider(await Cesium.SingleTileImageryProvider.fromUrl(canvas.toDataURL()));
+            wash.alpha = 0;
         } catch (err) {
-            console.warn('Overwatch: the green map wash could not be added', err);
+            console.warn('Overwatch: the street tint could not be added', err);
         }
+        const land = new Cesium.CustomDataSource('tg-holo-land');
+        try {
+            const response = await fetch('/data/overwatch-land.json', { cache: 'force-cache' });
+            const data = await response.json();
+            (data.rings || []).forEach(function (ring) {
+                const flat = [];
+                ring.forEach(function (point) { flat.push(point[0], point[1]); });
+                const positions = Cesium.Cartesian3.fromDegreesArray(flat);
+                land.entities.add({ polygon: { hierarchy: positions, material: green.withAlpha(HOLO.landAlpha), height: 0, outline: false } });
+                land.entities.add({ polyline: { positions: positions, width: 2, arcType: Cesium.ArcType.GEODESIC,
+                    material: new Cesium.PolylineGlowMaterialProperty({ glowPower: 0.25, color: green.withAlpha(HOLO.coastAlpha) }) } });
+            });
+        } catch (err) {
+            console.warn('Overwatch: the coastlines could not be loaded', err);
+        }
+        for (let lon = -180; lon < 180; lon += HOLO.gridStep) {
+            land.entities.add({ polyline: { positions: Cesium.Cartesian3.fromDegreesArray([lon, -85, lon, 0, lon, 85]), width: 1,
+                arcType: Cesium.ArcType.GEODESIC, material: green.withAlpha(HOLO.gridAlpha) } });
+        }
+        for (let lat = -75; lat <= 75; lat += HOLO.gridStep) {
+            const line = [];
+            for (let lon = -180; lon <= 180; lon += 5) line.push(lon, lat);
+            land.entities.add({ polyline: { positions: Cesium.Cartesian3.fromDegreesArray(line), width: 1,
+                arcType: Cesium.ArcType.RHUMB, material: green.withAlpha(HOLO.gridAlpha) } });
+        }
+        await viewer.dataSources.add(land);
+        const fade = function () {
+            const share = holoStreetShare(viewer.camera.positionCartographic.height);
+            if (streets) streets.alpha = share * HOLO.streetAlpha;
+            if (wash) wash.alpha = share * HOLO.washAlpha;
+            land.show = share < 0.98;
+            scene.requestRender();
+        };
+        viewer.camera.percentageChanged = 0.05;
+        viewer.camera.changed.addEventListener(fade);
+        fade();
+        return land;
     }
 
     function createPinBillboardImage(outlineColor, outlineWidth) {
@@ -102,7 +244,7 @@ window.tacticalGlobe = (function () {
     }
 
     const pinBillboardImage = createPinBillboardImage('#05080a', 2);
-    const pinBillboardImageSelected = createPinBillboardImage('#ffe066', 4);
+    const pinBillboardImageSelected = createPinBillboardImage('#b8ffd6', 4);
 
     // Camera pins by what the camera offers (19-11-26, camera availability phase 3), by shape so
     // colour isn't the only cue (billboard.color stays the alert tint): a still image is the disc,
@@ -131,7 +273,7 @@ window.tacticalGlobe = (function () {
         }
         if (hollow) {
             ctx.lineWidth = outlineWidth + 4;
-            ctx.strokeStyle = selected ? '#ffe066' : '#05080a';
+            ctx.strokeStyle = selected ? '#b8ffd6' : '#05080a';
             ctx.stroke();
             ctx.lineWidth = 3;
             ctx.strokeStyle = '#ffffff';
@@ -140,7 +282,7 @@ window.tacticalGlobe = (function () {
             ctx.fillStyle = '#ffffff';
             ctx.fill();
             ctx.lineWidth = outlineWidth;
-            ctx.strokeStyle = selected ? '#ffe066' : '#05080a';
+            ctx.strokeStyle = selected ? '#b8ffd6' : '#05080a';
             ctx.stroke();
         }
         image = canvas.toDataURL();
@@ -469,18 +611,13 @@ window.tacticalGlobe = (function () {
         try {
             baseLayer = new Cesium.ImageryLayer(
                 await Cesium.ArcGisMapServerImageryProvider.fromUrl(
-                    'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer'));
-            // A dark, high-contrast tint reads more "military terminal" than the raw aerial
-            // photography's natural daylight colors - these are plain mutable properties Cesium
-            // reads per-frame at draw time, so setting them immediately here is safe. Toned down
-            // from the old map-tile values (which pushed hue harder for cartographic flat colors) -
-            // a strong hue rotation looks wrong on photographic imagery.
-            // Military-terminal green (19-11-26): the same look as the Mac app's MapKit view
-            // (OverwatchMapLook.cs): darkened, contrast up, no colour, then the green wash below.
-            baseLayer.brightness = 0.55;
-            baseLayer.contrast = 1.35;
-            baseLayer.gamma = 0.9;
+                    'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer'));
+            // Holo Wireframe (19-11-26, Grant's option B; OverwatchMapLook.cs): a dark globe with
+            // glowing coastlines and a 15-degree grid (applyHoloLook). This dark street map fades in
+            // from city zoom down under a green wash, the same as the Mac app's map.
+            baseLayer.alpha = 0;
             baseLayer.saturation = 0;
+            baseLayer.brightness = 1.6;
 
             // Every default Cesium widget is disabled - this page builds its own retro-terminal
             // chrome around the bare 3D viewport instead (see OverwatchGrid.razor.css). The globe
@@ -531,7 +668,7 @@ window.tacticalGlobe = (function () {
                     }
                 }
             });
-            await addTerminalWash(viewer);
+            await applyHoloLook(viewer, baseLayer);
         } catch (error) {
             const message = error && error.message ? error.message : String(error);
             if (isShaderFailureReason(message)) {
@@ -668,7 +805,7 @@ window.tacticalGlobe = (function () {
             cluster.billboard.image = pinBillboardImage;
             cluster.billboard.width = 18;
             cluster.billboard.height = 18;
-            cluster.billboard.color = Cesium.Color.fromCssColorString('#ffb347');
+            cluster.billboard.color = Cesium.Color.fromCssColorString('#7dffb0');
             cluster.billboard.disableDepthTestDistance = 0;
             cluster.point.show = false;
             cluster.label.show = true;
@@ -692,7 +829,7 @@ window.tacticalGlobe = (function () {
             cluster.billboard.image = pinBillboardImage;
             cluster.billboard.width = 20;
             cluster.billboard.height = 20;
-            cluster.billboard.color = Cesium.Color.fromCssColorString('#c77dff');
+            cluster.billboard.color = Cesium.Color.fromCssColorString('#7dffb0');
             cluster.billboard.disableDepthTestDistance = 0;
             cluster.point.show = false;
             cluster.label.show = true;
@@ -1124,7 +1261,7 @@ window.tacticalGlobe = (function () {
         const photo = Object.assign({ name: name || 'Photo' }, info);
         const pin = entities.add({
             position: Cesium.Cartesian3.fromDegrees(info.longitude, info.latitude),
-            billboard: { image: pinBillboardImage, width: 22, height: 22, color: Cesium.Color.fromCssColorString('#ff8bd1'), disableDepthTestDistance: 0 },
+            billboard: { image: pinBillboardImage, width: 22, height: 22, color: Cesium.Color.fromCssColorString('#7dffb0'), disableDepthTestDistance: 0 },
             label: {
                 text: 'PHOTO', font: '600 11px monospace', fillColor: Cesium.Color.WHITE, outlineColor: Cesium.Color.BLACK, outlineWidth: 3,
                 style: Cesium.LabelStyle.FILL_AND_OUTLINE, pixelOffset: new Cesium.Cartesian2(0, -20), disableDepthTestDistance: 0
@@ -1140,7 +1277,7 @@ window.tacticalGlobe = (function () {
             entry.photoEntities.push(entities.add({
                 polyline: {
                     positions: Cesium.Cartesian3.fromDegreesArray([info.longitude, info.latitude, toLon, toLat]),
-                    width: 3, material: Cesium.Color.fromCssColorString('#ff8bd1'), clampToGround: true
+                    width: 3, material: Cesium.Color.fromCssColorString('#7dffb0'), clampToGround: true
                 }
             }));
         }
@@ -1538,7 +1675,7 @@ window.tacticalGlobe = (function () {
     // Time machine: the past view drawn on its own layers - an archived radar mosaic, plus the
     // incidents and earthquakes that were active then - so the live layers (which the page
     // switches off meanwhile) never mix with history.
-    const TIME_MACHINE_COLOURS = { crash: '#ff4d4d', closure: '#ff9f1c', hazard: '#ffd166', earthquake: '#c77dff',
+    const TIME_MACHINE_COLOURS = { crash: '#ff4d4d', closure: '#ff9f1c', hazard: '#ffd166', earthquake: '#7dffb0',
         aircraft: '#e6f1ff', ship: '#4cc9f0', outage: '#f72585' };
 
     function setTimeMachine(containerId, snapshot) {
@@ -1641,8 +1778,8 @@ window.tacticalGlobe = (function () {
         });
     }
 
-    const AIRCRAFT_COLOUR = '#00e5ff';
-    const AIRCRAFT_PATH_COLOUR = '#ffd166';
+    const AIRCRAFT_COLOUR = '#7dffb0';
+    const AIRCRAFT_PATH_COLOUR = '#b8ffd6';
 
     // Recolours the clicked plane straight away rather than waiting for the next minute's refresh.
     function highlightAircraft(entry, id, on) {
@@ -2182,7 +2319,7 @@ window.tacticalGlobe = (function () {
         (notes || []).forEach(function (note) {
             const points = (note.points || []).filter(function (p) { return p && p.length === 2; });
             if (points.length === 0) return;
-            const colour = Cesium.Color.fromCssColorString(note.color || '#ffd166');
+            const colour = Cesium.Color.fromCssColorString(note.color || '#b8ffd6');
             if (note.kind === 'area' && points.length >= 3) {
                 const ring = Cesium.Cartesian3.fromDegreesArray(points.flatMap(function (p) { return [Number(p[1]), Number(p[0])]; }));
                 const area = entry.viewer.entities.add({
@@ -2206,7 +2343,7 @@ window.tacticalGlobe = (function () {
             added.push(pin);
         });
         if (draft && draft.points && draft.points.length > 0) {
-            const colour = Cesium.Color.fromCssColorString(draft.color || '#ffd166');
+            const colour = Cesium.Color.fromCssColorString(draft.color || '#b8ffd6');
             const positions = Cesium.Cartesian3.fromDegreesArray(draft.points.flatMap(function (p) { return [Number(p[1]), Number(p[0])]; }));
             positions.forEach(function (position) {
                 added.push(entry.viewer.entities.add({ position: position,
@@ -2841,7 +2978,7 @@ window.tacticalGlobe = (function () {
         switch (severity) {
             case 'Extreme': return Cesium.Color.fromCssColorString('#ff3b3b');
             case 'Severe': return Cesium.Color.fromCssColorString('#ff9d3b');
-            case 'Moderate': return Cesium.Color.fromCssColorString('#ffe83b');
+            case 'Moderate': return Cesium.Color.fromCssColorString('#ffb000');
             default: return Cesium.Color.fromCssColorString('#7dffb0');
         }
     }
@@ -2912,7 +3049,7 @@ window.tacticalGlobe = (function () {
             // Sized by independent sources (wire copies count once, 19-11-26), else outlets.
             const outletSize = Math.min(30, 8 + Math.log2(Math.max(2, Number(signal.independentCount) || Number(signal.outletCount) || 2)) * 4);
             const size = iconsReady && signal.icon ? Math.max(18, outletSize) : outletSize;
-            const color = Cesium.Color.fromCssColorString('#c77dff').withAlpha(signal.active === false ? 0.45 : 1);
+            const color = Cesium.Color.fromCssColorString('#7dffb0').withAlpha(signal.active === false ? 0.45 : 1);
             const billboard = {
                 image: iconsReady ? iconPinImage(signal.icon) : pinBillboardImage,
                 width: size,
@@ -2931,7 +3068,7 @@ window.tacticalGlobe = (function () {
                 label = {
                     text: 'SURGING',
                     font: 'bold 11px "Share Tech Mono", monospace',
-                    fillColor: Cesium.Color.fromCssColorString('#f3e3ff'),
+                    fillColor: Cesium.Color.fromCssColorString('#b8ffd6'),
                     outlineColor: Cesium.Color.fromCssColorString('#05080a'),
                     outlineWidth: 3,
                     style: Cesium.LabelStyle.FILL_AND_OUTLINE,
@@ -2939,6 +3076,8 @@ window.tacticalGlobe = (function () {
                     disableDepthTestDistance: 0
                 };
             }
+            // One of the three callouts in view (OverwatchCallouts), unless the pin is surging.
+            if (!label && signal.callout) label = calloutLabel(signal.callout);
             const entity = entry.worldNewsDataSource.entities.add({
                 position: Cesium.Cartesian3.fromDegrees(signal.lon, signal.lat),
                 billboard: billboard,
@@ -3070,7 +3209,7 @@ window.tacticalGlobe = (function () {
                     positions: Cesium.Cartesian3.fromDegreesArray([c.lon, c.lat, signal.lon, signal.lat]),
                     width: Math.min(6, 1 + Math.log2(Math.max(1, c.outlets))),
                     arcType: Cesium.ArcType.GEODESIC,
-                    material: Cesium.Color.fromCssColorString('#c77dff').withAlpha(0.7)
+                    material: Cesium.Color.fromCssColorString('#7dffb0').withAlpha(0.7)
                 }
             });
             line._tgNewsLine = true;
@@ -3116,8 +3255,8 @@ window.tacticalGlobe = (function () {
             position: Cesium.Cartesian3.fromDegrees(steps[0].lon, steps[0].lat),
             point: {
                 pixelSize: 14,
-                color: Cesium.Color.fromCssColorString('#f3e3ff'),
-                outlineColor: Cesium.Color.fromCssColorString('#c77dff'),
+                color: Cesium.Color.fromCssColorString('#b8ffd6'),
+                outlineColor: Cesium.Color.fromCssColorString('#7dffb0'),
                 outlineWidth: 3,
                 disableDepthTestDistance: 0
             }
@@ -3155,7 +3294,7 @@ window.tacticalGlobe = (function () {
 
     // Five steps of one hue, lighter to darker for more outlets; translucent over the imagery.
     const newsShades = [0.12, 0.2, 0.3, 0.42, 0.56].map(function (alpha) {
-        return Cesium.Color.fromCssColorString('#c77dff').withAlpha(alpha);
+        return Cesium.Color.fromCssColorString('#7dffb0').withAlpha(alpha);
     });
     let newsOutlines = null;
 
@@ -3359,22 +3498,13 @@ window.tacticalGlobe = (function () {
             case 'accidentsAndIncidents': return Cesium.Color.fromCssColorString('#ff3b3b');
             case 'closure':
             case 'closures': return Cesium.Color.fromCssColorString('#ff9d3b');
-            case 'roadwork': return Cesium.Color.fromCssColorString('#ffe83b');
-            case 'hazard': return Cesium.Color.fromCssColorString('#c77dff');
+            case 'roadwork': return Cesium.Color.fromCssColorString('#ffb000');
+            case 'hazard': return Cesium.Color.fromCssColorString('#7dffb0');
             case 'event': return Cesium.Color.fromCssColorString('#7dffb0');
-            default: return Cesium.Color.fromCssColorString('#8fd3ff');
+            default: return Cesium.Color.fromCssColorString('#7dffb0');
         }
     }
 
-    const hazardColors = {
-        earthquake: '#ff6bd6', wildfire: '#ff5a1f', river: '#3ba7ff',
-        cyclone: '#00e0c6', flood: '#2f6bff', volcano: '#ff2e4d', drought: '#d4a72c', internet: '#9dff3c', airport: '#ffe14d',
-        // 07-11-26: NASA EONET's natural events, and the travel, fire, conflict and humanitarian layers.
-        landslide: '#b5794a', dust: '#d9b26f', ice: '#bfe8ff',
-        // 19-11-26: national weather services' warnings worldwide (WMO SWIC), one pin per country.
-        'weather-warning': '#ff9f1c',
-        travel: '#ffd166', chokepoint: '#7ae0ff', hotspot: '#ff7b00', conflict: '#ff4d6d', 'conflict-confirmed': '#c1121f', humanitarian: '#4cc9f0'
-    };
     const hazardSizes = { major: 20, moderate: 15, minor: 11 };
 
     function setHazards(hazards, containerId) {
@@ -3587,8 +3717,9 @@ window.tacticalGlobe = (function () {
     //   data: { operator, about, layer, tileMatrixSet, format, time, maxLevel, snapshot, snapshotCaption, crew: [..], link } }].
     // Since 07-11-26 only satellites with public data are sent (a dozen or so), coloured by the kind
     // of data and always named. Drawn at their real height; the ISS carries its next orbit as a line.
+    // Holo Wireframe (19-11-26): every satellite is green; the label says what kind it is.
     const satelliteColors = {
-        'space station': '#7ff3ff', 'whole-Earth imagery': '#9dff3c', 'land imagery': '#ffd166', 'geostationary weather': '#ff9dfc'
+        'space station': '#b8ffd6', 'whole-Earth imagery': '#7dffb0', 'land imagery': '#7dffb0', 'geostationary weather': '#7dffb0'
     };
 
     function setSatellites(satellites, containerId) {
@@ -3819,9 +3950,13 @@ window.tacticalGlobe = (function () {
                     image: pinBillboardImage,
                     width: size,
                     height: size,
-                    color: Cesium.Color.fromCssColorString(hazardColors[hazard.kind] || '#ffffff'),
+                    // Holo Wireframe (19-11-26): green, amber when moderate, red when major; the kind
+                    // shows in the window and the pin's size.
+                    color: Cesium.Color.fromCssColorString(hazard.severity === 'major' ? '#ff3b3b' : hazard.severity === 'moderate' ? '#ffb000' : '#7dffb0'),
                     disableDepthTestDistance: 0
-                }
+                },
+                // One of the three callouts in view (OverwatchCallouts), in its severity colour.
+                label: hazard.callout ? calloutLabel(hazard.callout, hazard.severity === 'major' ? '#ff3b3b' : hazard.severity === 'moderate' ? '#ffb000' : '#b8ffd6') : undefined
             });
             entity._tacticalGlobeHazard = hazard;
         });
@@ -3879,7 +4014,7 @@ window.tacticalGlobe = (function () {
     // A reporting blackout: a dashed perimeter with no fill, because the point is what's missing.
     // cell: { blackout: true, south, west, north, east, lat, lon, label, kinds, reason, signals }
     function addReportingBlackout(entities, cell) {
-        const color = Cesium.Color.fromCssColorString('#b0b8c4');
+        const color = Cesium.Color.fromCssColorString('#3f8f62');
         const perimeter = entities.add({
             polyline: {
                 positions: Cesium.Cartesian3.fromDegreesArray([
@@ -3947,7 +4082,7 @@ window.tacticalGlobe = (function () {
         if (entry) entry.signDataSource.entities.removeAll();
     }
 
-    const roadRiskColors = { 'ice-likely': '#ff3b3b', 'near-freezing': '#5ec8ff', 'clear': '#7dffb0' };
+    const roadRiskColors = { 'ice-likely': '#ff3b3b', 'near-freezing': '#ffb000', 'clear': '#7dffb0' };
     const roadRiskLabels = { 'ice-likely': 'ICE LIKELY', 'near-freezing': 'NEAR FREEZING', 'clear': 'NO ICE RISK' };
 
     // stations: [{ id, name, lat, lon, pavementF, airF, dewpointF, precipitation, observedAt, risk,
@@ -4153,7 +4288,7 @@ window.tacticalGlobe = (function () {
             const text = i === 0 ? 'S' : i === all.length - 1 ? 'F' : String(i);
             return entry.viewer.entities.add({
                 position: Cesium.Cartesian3.fromDegrees(Number(stop.lon), Number(stop.lat)),
-                point: { pixelSize: 16, color: Cesium.Color.fromCssColorString('#00e5ff'), outlineColor: Cesium.Color.BLACK, outlineWidth: 2,
+                point: { pixelSize: 16, color: Cesium.Color.fromCssColorString('#7dffb0'), outlineColor: Cesium.Color.BLACK, outlineWidth: 2,
                     disableDepthTestDistance: 0 },
                 label: { text: text, font: 'bold 11px monospace', fillColor: Cesium.Color.BLACK, disableDepthTestDistance: 0 }
             });
@@ -4164,7 +4299,7 @@ window.tacticalGlobe = (function () {
             polyline: {
                 positions: Cesium.Cartesian3.fromDegreesArray(flat),
                 width: 4,
-                material: Cesium.Color.fromCssColorString('#00e5ff').withAlpha(0.85),
+                material: Cesium.Color.fromCssColorString('#7dffb0').withAlpha(0.85),
                 clampToGround: true
             }
         });
@@ -4296,7 +4431,7 @@ window.tacticalGlobe = (function () {
         if (!entry) return;
         clearCoverageMarkers(containerId);
         entry.coverageEntities = (regions || []).map(function (region) {
-            const color = Cesium.Color.fromCssColorString(region.ok ? '#7dffb0' : '#9aa5b1');
+            const color = Cesium.Color.fromCssColorString(region.ok ? '#7dffb0' : '#3f8f62');
             return entry.viewer.entities.add({
                 position: Cesium.Cartesian3.fromDegrees(Number(region.lon), Number(region.lat)),
                 point: { pixelSize: 9, color: color.withAlpha(0.85), outlineColor: Cesium.Color.BLACK, outlineWidth: 1 },
@@ -5030,6 +5165,7 @@ window.tacticalGlobe = (function () {
         setMeasure: setMeasure,
         clearMeasure: clearMeasure,
         setCameraPins: setCameraPins,
+        focusLayer: focusLayer,
         updateCameraPins: updateCameraPins,
         resetCameraPins: resetCameraPins,
         setSelectModeEnabled: setSelectModeEnabled,
@@ -5271,7 +5407,7 @@ window.tacticalGlobe = (function () {
             'clearConvergence', 'setAirportStatus', 'clearAirportStatus', 'setChokepoints', 'clearChokepoints', 'setWeatherWarnings', 'clearWeatherWarnings', 'setAurora', 'clearAurora',
             'setSatellites', 'clearSatellites', 'setTravelAdvice', 'clearTravelAdvice',
             'setFireHotspots', 'clearFireHotspots', 'setConflict', 'clearConflict',
-            'setHumanitarian', 'clearHumanitarian', 'setWeatherSnapshot'
+            'setHumanitarian', 'clearHumanitarian', 'setWeatherSnapshot', 'focusLayer'
         ]);
 
         // Ops that also draw page HTML (not the map) keep running on the page: the weather panel

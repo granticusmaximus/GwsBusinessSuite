@@ -117,3 +117,16 @@ and zoom lag. Causes found and fixed:
   (CanReplaceMapContent) with the same tiles through the same steps in Core Image; the dim polygon is
   gone. Drive mode's blue and the time-machine slider's purple are green. Guard:
   `NativeShapesTests.BothMaps_ShouldUseTheSameTerminalLook`. Grant: check on screen (`open gws`).
+- [x] 19-11-26 night: **Holo Wireframe (Grant's option B), identical on web and Mac** (kit:
+  claude.ai artifact "Overwatch Holo Layer Kit"). Replaces the tinted-imagery look Grant rejected.
+  - `OverwatchMapLook` holds every number; web `HOLO` + `applyHoloLook` (black-green globe, land and
+    glowing coasts from `/data/overwatch-land.json`, 15° grid, Esri Dark Gray streets plus green wash
+    fading in by camera height); Mac `HoloMap` (Apple's flyover globe kept for the round view, an
+    opaque veil above its labels, the same land, coasts, grid and streets through the same steps in
+    Core Image, faded by camera distance). Test: `BothMaps_ShouldDrawTheSameHoloLook`.
+  - Palette: categories all green, amber moderate, red major (`NativeShapes.ToneHex`; web colours).
+  - Counts: `NativeShapes.Group` (Mac, regrouped on zoom; count disc taps zoom in).
+  - Callouts: `OverwatchCallouts` picks three (World News, conflict) on the server; both apps draw them.
+  - Focus: `OverwatchFocus` catalog + `focusLayer` (web dims tg-* entities, Mac dims views and overlays).
+  - Not done: per-layer "zoom in" hints in the layer list.
+  - Grant: check on screen (`open gws` and the web app).

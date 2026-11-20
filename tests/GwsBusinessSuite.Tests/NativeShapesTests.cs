@@ -186,43 +186,98 @@ public sealed class NativeShapesTests
     public void MacMapPalette_ShouldMatchTheWebGlobe()
     {
         Assert.Equal("#7dffb0", NativeShapes.ToneHex(NativeShapes.MarkerTone.Green));
-        Assert.Equal("#c77dff", NativeShapes.ToneHex(NativeShapes.MarkerTone.Purple));
+        Assert.Equal("#7dffb0", NativeShapes.ToneHex(NativeShapes.MarkerTone.Purple));
+        Assert.Equal("#ffb000", NativeShapes.ToneHex(NativeShapes.MarkerTone.Orange));
         Assert.Equal("#ff3b3b", NativeShapes.ToneHex(NativeShapes.MarkerTone.Red));
         Assert.True(NativeShapes.DarkGlyph(NativeShapes.MarkerTone.Green));
         Assert.False(NativeShapes.DarkGlyph(NativeShapes.MarkerTone.Red));
 
         var js = File.ReadAllText(Path.Combine(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../..")),
             "src/GwsBusinessSuite.Web/wwwroot/js/tactical-globe.js"));
-        foreach (var tone in new[] { NativeShapes.MarkerTone.Green, NativeShapes.MarkerTone.Purple, NativeShapes.MarkerTone.Red, NativeShapes.MarkerTone.Pink })
+        foreach (var tone in new[] { NativeShapes.MarkerTone.Green, NativeShapes.MarkerTone.Purple, NativeShapes.MarkerTone.Red, NativeShapes.MarkerTone.Orange })
             Assert.Contains(NativeShapes.ToneHex(tone), js, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("#c77dff", js);
 
         var bridge = File.ReadAllText(Path.Combine(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../..")),
             "src/GwsBusinessSuite.App/Platforms/MacCatalyst/MacNativeOverwatchBridge.cs"));
         Assert.DoesNotContain("UIColor.System", bridge);
         Assert.Contains("_map.OverrideUserInterfaceStyle = UIUserInterfaceStyle.Dark;", bridge);
-        Assert.Contains("_map.AddOverlay(new TerminalImageryOverlay(), MKOverlayLevel.AboveRoads);", bridge);
+        Assert.Contains("_map.AddOverlay(HoloMap.Veil(), MKOverlayLevel.AboveLabels);", bridge);
     }
 
-    // 19-11-26 (Grant): both Overwatch maps identical, a military terminal in greens and blacks. The
-    // web globe and the Mac's MapKit view draw the same Esri tiles with the same numbers.
+    // 19-11-26 (Grant): the web and Mac Overwatch identical, in his option B (Holo Wireframe). The web
+    // globe's HOLO numbers, the Mac's HoloMap and OverwatchMapLook must be one look.
     [Fact]
-    public void BothMaps_ShouldUseTheSameTerminalLook()
+    public void BothMaps_ShouldDrawTheSameHoloLook()
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../.."));
         var js = File.ReadAllText(Path.Combine(root, "src/GwsBusinessSuite.Web/wwwroot/js/tactical-globe.js"));
-        var overlay = File.ReadAllText(Path.Combine(root, "src/GwsBusinessSuite.App/Platforms/MacCatalyst/TerminalImageryOverlay.cs"));
-        string Number(double value) => value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        var holo = File.ReadAllText(Path.Combine(root, "src/GwsBusinessSuite.App/Platforms/MacCatalyst/HoloMap.cs"));
+        string N(double value) => value.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
-        Assert.Contains("World_Imagery/MapServer", OverwatchMapLook.ImageryTiles);
-        Assert.Contains("World_Imagery/MapServer'", js);
-        Assert.Contains($"baseLayer.brightness = {Number(OverwatchMapLook.Brightness)};", js);
-        Assert.Contains($"baseLayer.contrast = {Number(OverwatchMapLook.Contrast)};", js);
-        Assert.Contains($"baseLayer.gamma = {Number(OverwatchMapLook.Gamma)};", js);
-        Assert.Contains($"baseLayer.saturation = {Number(OverwatchMapLook.Saturation)};", js);
-        Assert.Contains($"ctx.fillStyle = '{OverwatchMapLook.WashHex}';", js);
-        Assert.Contains($"wash.alpha = {Number(OverwatchMapLook.WashAlpha)};", js);
-        Assert.Contains("await addTerminalWash(viewer);", js);
-        Assert.Contains("CanReplaceMapContent = true;", overlay);
-        Assert.Contains("OverwatchMapLook.WashAlpha", overlay);
+        Assert.Contains($"green: '{OverwatchMapLook.Green}',", js);
+        Assert.Contains($"globe: '{OverwatchMapLook.Globe}',", js);
+        Assert.Contains($"landAlpha: {N(OverwatchMapLook.LandAlpha)},", js);
+        Assert.Contains($"coastAlpha: {N(OverwatchMapLook.CoastAlpha)},", js);
+        Assert.Contains($"gridAlpha: {N(OverwatchMapLook.GridAlpha)},", js);
+        Assert.Contains($"gridStep: {OverwatchMapLook.GridStep},", js);
+        Assert.Contains($"streetsBelowMetres: {N(OverwatchMapLook.StreetsBelowMetres)},", js);
+        Assert.Contains($"streetsFullMetres: {N(OverwatchMapLook.StreetsFullMetres)},", js);
+        Assert.Contains($"streetAlpha: {N(OverwatchMapLook.StreetAlpha)},", js);
+        Assert.Contains($"washAlpha: {N(OverwatchMapLook.WashAlpha)}", js);
+        Assert.Contains($"baseLayer.brightness = {N(OverwatchMapLook.StreetBrightness)};", js);
+        Assert.Contains("Canvas/World_Dark_Gray_Base/MapServer'", js);
+        Assert.Contains("Canvas/World_Dark_Gray_Base/MapServer/tile/", OverwatchMapLook.StreetTiles);
+        Assert.Contains($"fetch('{OverwatchMapLook.LandPath}'", js);
+        Assert.Contains("await applyHoloLook(viewer, baseLayer);", js);
+        Assert.Contains("OverwatchMapLook.StreetTiles", holo);
+        Assert.Contains("OverwatchMapLook.WashAlpha", holo);
+        Assert.Contains("MKOverlayLevel.AboveLabels", File.ReadAllText(Path.Combine(root, "src/GwsBusinessSuite.App/Platforms/MacCatalyst/MacNativeOverwatchBridge.cs")));
+
+        Assert.Equal(0, OverwatchMapLook.StreetShare(1_000_000));
+        Assert.Equal(1, OverwatchMapLook.StreetShare(10_000));
+        Assert.Equal(0.5, OverwatchMapLook.StreetShare(230_000), 3);
+
+        using var land = System.Text.Json.JsonDocument.Parse(File.ReadAllText(Path.Combine(root, "src/GwsBusinessSuite.Web/wwwroot/data/overwatch-land.json")));
+        Assert.True(land.RootElement.GetProperty("rings").GetArrayLength() > 200, "both maps draw the land from this one file");
+    }
+
+    // Crowds become counts on the Mac (19-11-26): Apple's grouping crashed the app.
+    [Fact]
+    public void Group_ShouldTurnCrowdsIntoCounts_AndLeaveLonePinsAndCalloutsAlone()
+    {
+        var items = new List<Dictionary<string, object?>>();
+        for (var i = 0; i < 45; i++) items.Add(O(("id", $"a{i}"), ("lat", 33.70 + i * 0.0001), ("lon", -84.40)));
+        items.Add(O(("id", "lone"), ("lat", 40.0), ("lon", -74.0)));
+        items.Add(O(("id", "boxed"), ("lat", 33.70), ("lon", -84.40), ("callout", "ATLANTA · 12 SOURCES")));
+
+        var grouped = NativeShapes.Group(items, 0.5, 0.5, "cameras");
+
+        var count = Assert.Single(grouped, g => g.ContainsKey("count"));
+        Assert.Equal(45, count["count"]);
+        Assert.Equal("45 cameras", count["title"]);
+        Assert.StartsWith("group:", (string)count["id"]!);
+        Assert.Contains(grouped, g => (string?)g["id"] == "lone");
+        Assert.Contains(grouped, g => (string?)g["id"] == "boxed");
+        Assert.Equal(10, NativeShapes.Group(items.Take(10).ToList(), 0.5, 0.5, "cameras").Count);
+    }
+
+    [Fact]
+    public void Focus_ShouldNameRealLayersOnBothApps_AndCalloutsPickTheMostSerious()
+    {
+        var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../.."));
+        var js = File.ReadAllText(Path.Combine(root, "src/GwsBusinessSuite.Web/wwwroot/js/tactical-globe.js"));
+        foreach (var layer in OverwatchFocus.All)
+        {
+            foreach (var source in layer.WebSources) Assert.Contains($"new Cesium.CustomDataSource('{source}')", js);
+            Assert.All(layer.NativeOperations, op => Assert.Contains(op, NativeOverwatchOperations.All));
+        }
+        Assert.Contains(NativeOverwatchOperations.FocusLayer, NativeOverwatchOperations.All);
+        Assert.Null(NativeShapes.FocusOperations([null]));
+        Assert.Equal(new HashSet<string> { "setWorldNews" }, NativeShapes.FocusOperations([O(("web", new object?[] { "tg-world-news" }), ("native", new object?[] { "setWorldNews" }))]));
+
+        var picked = OverwatchCallouts.Pick(new[] { ("a", "minor", 9), ("b", "major", 1), ("c", "moderate", 5), ("d", "minor", 20) },
+            x => OverwatchCallouts.SeverityRank(x.Item2), x => x.Item3);
+        Assert.Equal(new[] { "b", "c", "d" }.ToHashSet(), picked.Select(x => x.Item1).ToHashSet());
     }
 }

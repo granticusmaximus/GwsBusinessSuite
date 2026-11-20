@@ -858,7 +858,7 @@
     width: min(720px, calc(100% - 7rem));
     padding: 0.5rem 0.7rem;
     background: rgba(5, 8, 10, 0.9);
-    border: 1px solid #c77dff;
+    border: 1px solid #7dffb0;
     font-size: var(--gws-type-xs);
 }
 .tg-tm-row { display: flex; align-items: center; gap: 0.5rem; }

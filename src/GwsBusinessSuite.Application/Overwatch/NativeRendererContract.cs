@@ -70,6 +70,8 @@ public sealed record NativeOverwatchCommand(string Operation, JsonElement Payloa
 public static class NativeOverwatchOperations
 {
     public const string SetCameraPins = "setCameraPins";
+    // Focus one layer: every other layer dims (OverwatchFocus, 19-11-26).
+    public const string FocusLayer = "focusLayer";
     public const string SetWeatherSnapshot = "setWeatherSnapshot";
     public const string SetRadarVisible = "setRadarVisible";
     public const string SetRadarTimeline = "setRadarTimeline";
@@ -149,7 +151,7 @@ public static class NativeOverwatchOperations
         SetSatellites, ClearSatellites, SetTravelAdvice, ClearTravelAdvice, SetFireHotspots,
         ClearFireHotspots, SetConflict, ClearConflict, SetHumanitarian, ClearHumanitarian,
         SetHazards, ClearHazards, SetShips, SetCoverageMarkers, ClearCoverageMarkers, SetRoute,
-        ClearRoute, SetRouteHighlights, SetRouteConditions, SetStreetViewMarker, ClearStreetViewMarker
+        ClearRoute, SetRouteHighlights, SetRouteConditions, SetStreetViewMarker, ClearStreetViewMarker, FocusLayer
     ];
 
     /// <summary>

@@ -324,7 +324,7 @@
 
 /* World News panel: surging note and the outlets' own reports. */
 .tg-world-news-surge {
-    color: #e2c2ff;
+    color: #b8ffd6;
     font-weight: 700;
     letter-spacing: 0.05em;
     margin-bottom: 0.4rem;
@@ -449,7 +449,7 @@
 .tg-world-news-playback-row input[type="range"] {
     flex: 1 1 auto;
     min-width: 0;
-    accent-color: #c77dff;
+    accent-color: #7dffb0;
 }
 
 .tg-world-news-play {

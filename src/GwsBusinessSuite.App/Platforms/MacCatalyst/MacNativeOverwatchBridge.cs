@@ -29,6 +29,78 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
     private CancellationTokenSource? _regionChangeDebounce;
     private bool _pickPointMode;
     private bool _hasInitialRegion;
+    private readonly HoloStreetOverlay _streets = new();
+    private const double GroupCellsAcross = 14;
+    private readonly Dictionary<string, object?[]> _ungrouped = new(StringComparer.Ordinal);
+    private double _groupedAtSpan;
+    private IReadOnlySet<string>? _focus;
+
+    // A zoom of more than half again either way regroups the crowded layers.
+    internal void RegroupIfZoomed()
+    {
+        var span = _map.Region.Span.LongitudeDelta;
+        if (_groupedAtSpan <= 0 || (span < _groupedAtSpan * 1.5 && span > _groupedAtSpan / 1.5)) return;
+        foreach (var (operation, arguments) in _ungrouped.ToList())
+        {
+            _signatures.Remove(operation);
+            Render(operation, arguments);
+        }
+    }
+
+    // Focus one layer (OverwatchFocus): the rest dim to a quarter, pins and areas alike.
+    private void SetFocus(object?[] arguments)
+    {
+        _focus = NativeShapes.FocusOperations(arguments);
+        foreach (var view in AnnotationViews(_map))
+            if (Resolve(view.Annotation) is NativeAnnotation native) view.Alpha = FocusAlpha(native.Operation);
+        foreach (var (operation, overlays) in _overlays)
+            foreach (var overlay in overlays)
+                if (_map.RendererForOverlay(overlay) is { } renderer) { renderer.Alpha = FocusAlpha(operation); renderer.SetNeedsDisplay(); }
+        MapLog(_focus is null ? "focus ended" : $"focus: {string.Join(", ", _focus)}");
+    }
+
+    internal nfloat FocusAlpha(string operation) => _focus is null || _focus.Contains(operation) ? 1 : (nfloat)OverwatchFocus.DimAlpha;
+
+    private MKOverlayRenderer? _streetRenderer;
+    private MKOverlayRenderer? _landRenderer;
+
+    // The land the web globe draws, from the same file on the same server.
+    private async Task LoadHoloLandAsync()
+    {
+        try
+        {
+            using var http = new HttpClient { BaseAddress = new Uri(AppEndpoints.BaseUrl), Timeout = TimeSpan.FromSeconds(30) };
+            var json = await http.GetStringAsync(OverwatchMapLook.LandPath.TrimStart('/'));
+            var overlays = HoloMap.Land(json);
+            UIApplication.SharedApplication.InvokeOnMainThread(() =>
+            {
+                foreach (var overlay in overlays) _map.InsertOverlayBelow(overlay, _streets);
+                UpdateHolo();
+            });
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or System.Text.Json.JsonException or KeyNotFoundException)
+        {
+            MapLog($"holo land not loaded: {ex.GetType().Name}: {ex.Message}");
+        }
+    }
+
+    // Streets fade in as the camera comes down, and the land fill fades out over them, at the same
+    // heights as the web globe (OverwatchMapLook.StreetShare).
+    internal void UpdateHolo()
+    {
+        var share = OverwatchMapLook.StreetShare(_map.Camera.CenterCoordinateDistance);
+        if (_streetRenderer is not null) { _streetRenderer.Alpha = (nfloat)(share * OverwatchMapLook.StreetAlpha); _streetRenderer.SetNeedsDisplay(); }
+        if (_landRenderer is not null) { _landRenderer.Alpha = share >= 0.98 ? 0 : 1; _landRenderer.SetNeedsDisplay(); }
+    }
+
+    internal MKOverlayRenderer? HoloRenderer(IMKOverlay overlay)
+    {
+        if (HoloMap.Renderer(overlay) is not { } renderer) return null;
+        if (overlay is HoloStreetOverlay) _streetRenderer = renderer;
+        if (overlay is MKMultiPolygon { Title: HoloMap.LandTitle }) _landRenderer = renderer;
+        UpdateHolo();
+        return renderer;
+    }
 
     // The web globe's colours (NativeShapes.ToneHex).
     internal static UIColor Tone(NativeShapes.MarkerTone tone) => Hex(NativeShapes.ToneHex(tone));
@@ -49,12 +121,15 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
             RotateEnabled = true,
             Hidden = true
         };
-        // Identical to the web globe (19-11-26): Apple's map is replaced by the same Esri imagery in
-        // the same military-terminal green (TerminalImageryOverlay, OverwatchMapLook). Dark interface
-        // so MapKit's own controls (compass, scale) match.
+        // Holo Wireframe, identical to the web globe (19-11-26; HoloMap, OverwatchMapLook). Apple's
+        // globe stays underneath (round when zoomed out) behind an opaque veil above its labels;
+        // the grid, then the land and coastlines once loaded, and the street map go on top.
         _map.OverrideUserInterfaceStyle = UIUserInterfaceStyle.Dark;
         _map.PointOfInterestFilter = MKPointOfInterestFilter.FilterExcludingAllCategories;
-        _map.AddOverlay(new TerminalImageryOverlay(), MKOverlayLevel.AboveRoads);
+        _map.AddOverlay(HoloMap.Veil(), MKOverlayLevel.AboveLabels);
+        _map.AddOverlay(_streets, MKOverlayLevel.AboveLabels);
+        _map.AddOverlay(HoloMap.Grid(), MKOverlayLevel.AboveLabels);
+        _ = LoadHoloLandAsync();
         _delegate = new MapDelegate(this);
         _map.Delegate = _delegate;
         webView.Superview?.InsertSubviewBelow(_map, webView);
@@ -174,6 +249,7 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
             case "setThreeD": SetThreeD(arguments); return;
             case "setNightLights": SetNightLights(arguments); return;
             case "setSatelliteScene": SetSatelliteScene(arguments); return;
+            case NativeOverwatchOperations.FocusLayer: SetFocus(arguments); return;
             case "clearSatelliteScene": SetSatelliteScene([]); return;
             case "setMeasure": SetMeasure(arguments); return;
             case "clearMeasure": SetMeasure([]); return;
@@ -237,6 +313,14 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
         if (payload is null) { Clear(operation); return; }
         var shapedItems = NativeShapes.Items(payload);
         if (operation == "setCameraPins") shapedItems = shapedItems.Take(MaximumNativeCameraPins);
+        // Crowds become counts, regrouped when the zoom changes (NativeShapes.Group, Holo Wireframe).
+        if (NativeShapes.Groupable.Contains(operation))
+        {
+            _ungrouped[operation] = arguments;
+            var span = _map.Region.Span;
+            _groupedAtSpan = span.LongitudeDelta;
+            shapedItems = NativeShapes.Group(shapedItems.ToList(), span.LongitudeDelta / GroupCellsAcross, span.LatitudeDelta / GroupCellsAcross, NativeShapes.GroupNoun(operation));
+        }
         var items = shapedItems.Select(item =>
             (Key: NativeShapes.Identity(operation, item), Fingerprint: JsonSerializer.Serialize(item), Item: item)).ToList();
         var signature = string.Join('\n', items.Select(entry => entry.Fingerprint));
@@ -259,7 +343,8 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
                 // A pin whose symbol changes (a camera found not working, say) is replaced: MapKit
                 // doesn't restyle a view it has already drawn.
                 if (previous.TryGetValue(key, out var kept) && kept is NativeAnnotation native
-                    && NativeShapes.Marker(operation, native.Payload) == NativeShapes.Marker(operation, item))
+                    && NativeShapes.Marker(operation, native.Payload) == NativeShapes.Marker(operation, item)
+                    && Face(native.Payload) == Face(item))
                 {
                     previous.Remove(key);
                     native.Update(item, coordinate);
@@ -504,6 +589,16 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
     // choose from (before 12-11-26 it opened only "the first", and a news pile opened nothing).
     private void Activate(IMKAnnotation? target)
     {
+        // A count disc zooms to the pins it stands for.
+        if (Resolve(target) is NativeAnnotation { } group && group.Payload.TryGetValue("groupBounds", out var bounds) && bounds is object?[] { Length: 4 } box
+            && AsDouble(box[0], out var south) && AsDouble(box[1], out var west) && AsDouble(box[2], out var north) && AsDouble(box[3], out var east))
+        {
+            var pad = Math.Max(0.002, Math.Max(north - south, east - west) * 0.25);
+            _map.SetRegion(new MKCoordinateRegion(new CLLocationCoordinate2D((north + south) / 2, (east + west) / 2),
+                new MKCoordinateSpan(Math.Min(170, north - south + pad * 2), Math.Min(350, east - west + pad * 2))), true);
+            MapLog("count disc: zooming to its pins");
+            return;
+        }
         if (ClusterMembers(target) is { } members)
         {
             if (members.Length == 0) return;
@@ -906,6 +1001,10 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
         return result;
     }
 
+    // What a pin's picture shows besides its symbol: a count disc's number, a callout's text.
+    private static string Face(Dictionary<string, object?> item) =>
+        $"{(item.TryGetValue("count", out var count) ? Convert.ToString(count, System.Globalization.CultureInfo.InvariantCulture) : "")}|{ReadString(item, "callout")}";
+
     private static string? ReadString(Dictionary<string, object?> item, params string[] keys) =>
         keys.Select(key => item.GetValueOrDefault(key)?.ToString()).FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
     private static bool TryDouble(Dictionary<string, object?> item, out double value, params string[] keys)
@@ -992,7 +1091,28 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
             var style = NativeShapes.Marker(native.Operation, native.Payload);
             view.DisplayPriority = style.Prominent ? MKFeatureDisplayPriority.DefaultHigh : MKFeatureDisplayPriority.DefaultLow;
             view.CollisionMode = MKAnnotationViewCollisionMode.Circle;
-            view.Image = Disc(style);
+            view.CenterOffset = CoreGraphics.CGPoint.Empty;
+            view.Alpha = owner.FocusAlpha(native.Operation);
+            if (ReadString(native.Payload, "id") is { } groupId && groupId.StartsWith("group:", StringComparison.Ordinal)
+                && native.Payload.TryGetValue("count", out var count) && AsDouble(count, out var n))
+            {
+                // A crowd as one count disc (NativeShapes.Group); always shown.
+                view.Image = CountDisc((int)n);
+                view.DisplayPriority = MKFeatureDisplayPriority.Required;
+            }
+            else if (ReadString(native.Payload, "callout") is { Length: > 0 } callout)
+            {
+                // One of the three callouts (OverwatchCallouts): the disc with its box beside it,
+                // offset so the disc stays on the place.
+                var (image, discWidth) = CalloutImage(style, callout);
+                view.Image = image;
+                view.CenterOffset = new CoreGraphics.CGPoint((image.Size.Width - discWidth) / 2, 0);
+                view.DisplayPriority = MKFeatureDisplayPriority.Required;
+            }
+            else
+            {
+                view.Image = Disc(style);
+            }
             return view;
         }
 
@@ -1022,6 +1142,36 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
             });
             Discs[key] = image;
             return image;
+        }
+
+        // A pin with its callout box to the right: place/kind text in a dark box with a green (or
+        // severity) rim, as the web globe draws it. Returns the image and the disc's width.
+        private static (UIImage Image, double DiscWidth) CalloutImage(NativeShapes.MarkerStyle style, string text)
+        {
+            var disc = Disc(style);
+            var colour = style.Tone is NativeShapes.MarkerTone.Red or NativeShapes.MarkerTone.Orange or NativeShapes.MarkerTone.Yellow
+                ? Tone(style.Tone) : HoloMap.Hex(OverwatchMapLook.Bright);
+            var attributes = new UIStringAttributes { Font = UIFont.FromName("Menlo-Bold", 10) ?? UIFont.BoldSystemFontOfSize(10), ForegroundColor = colour };
+            var label = new NSString(text);
+            var measured = label.GetSizeUsingAttributes(attributes);
+            var boxWidth = measured.Width + 14;
+            var boxHeight = measured.Height + 8;
+            var gap = 8.0;
+            var width = disc.Size.Width + gap + boxWidth;
+            var height = Math.Max(disc.Size.Height, boxHeight);
+            var image = new UIGraphicsImageRenderer(new CoreGraphics.CGSize(width, height)).CreateImage(_ =>
+            {
+                disc.Draw(new CoreGraphics.CGPoint(0, (height - disc.Size.Height) / 2));
+                var box = new CoreGraphics.CGRect(disc.Size.Width + gap, (height - boxHeight) / 2, boxWidth, boxHeight);
+                HoloMap.Hex("#020c07", 0.88).SetFill();
+                UIBezierPath.FromRect(box).Fill();
+                colour.ColorWithAlpha(0.7f).SetStroke();
+                var rim = UIBezierPath.FromRect(box);
+                rim.LineWidth = 0.8f;
+                rim.Stroke();
+                label.DrawString(new CoreGraphics.CGRect(box.X + 7, box.Y + 4, measured.Width, measured.Height), attributes);
+            });
+            return (image, disc.Size.Width);
         }
 
         // A group: a green disc, wider for a bigger count, with the number in the glyph colour.
@@ -1061,9 +1211,8 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
             return image;
         }
 
-        public override MKOverlayRenderer OverlayRenderer(MKMapView mapView, IMKOverlay overlay) => overlay switch
+        public override MKOverlayRenderer OverlayRenderer(MKMapView mapView, IMKOverlay overlay) => owner.HoloRenderer(overlay) ?? overlay switch
         {
-            TerminalImageryOverlay imagery => new MKTileOverlayRenderer(imagery) { Alpha = 1f },
             MKTileOverlay tiles => new MKTileOverlayRenderer(tiles) { Alpha = 0.75f },
             MKMultiPolygon areas => AreaStyle(new MKMultiPolygonRenderer(areas), areas.Title),
             MKMultiPolyline paths => LineStyle(new MKMultiPolylineRenderer(paths), paths.Title),
@@ -1124,6 +1273,8 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
 
         public override void RegionChanged(MKMapView mapView, bool animated)
         {
+            owner.UpdateHolo();
+            owner.RegroupIfZoomed();
             owner.RegionDidChange(mapView.Region);
         }
     }

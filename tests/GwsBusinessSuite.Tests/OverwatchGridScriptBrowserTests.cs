@@ -192,6 +192,13 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
             ContentType = "application/javascript; charset=utf-8",
             Body = script
         }));
+        // The holo globe's land (19-11-26), the real file as the server serves it.
+        await page.RouteAsync("http://localhost/data/overwatch-land.json", route => route.FulfillAsync(new()
+        {
+            Status = 200,
+            ContentType = "application/json",
+            Body = HoloLand.Value
+        }));
         // Close zooms ask Esri for imagery and road-label tiles, and Esri sometimes answers one
         // without its CORS header, which Chrome logs as a console error (a pre-push run, and CI on
         // 29-10-26, failed on exactly that). Every test gets those tiles as a blank image, so the
@@ -224,6 +231,9 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
     // ReverseGeocodeAsync on OverwatchGrid.razor), not a client-side fetch(), so there is no HTTP
     // request for this harness to intercept. Every call is recorded in window.__invokedMethods so
     // tests can assert whether (and with what arguments) a given method was actually called.
+    private static readonly Lazy<string> HoloLand = new(() => File.ReadAllText(Path.Combine(
+        Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../..")), "src/GwsBusinessSuite.Web/wwwroot/data/overwatch-land.json")));
+
     internal static async Task<string?> InitAsync(IPage page) => await page.EvaluateAsync<string?>("""
         async () => {
           window.__invokedMethods = [];

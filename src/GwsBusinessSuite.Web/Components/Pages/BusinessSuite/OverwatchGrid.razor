@@ -135,6 +135,18 @@
        buttons by data-tg-toggle, work with the panel closed. *@
     <div class="tg-floating-panel tg-layers-panel @(_layersOpen ? "" : "is-hidden")" id="tg-layers" aria-label="Map layers">
         <div class="tg-coverage-panel-header"><span>LAYERS</span><button type="button" class="tg-panel-close" aria-label="Close layers" @onclick="ToggleLayersPanel">&times;</button></div>
+        @* Focus one layer (19-11-26, Holo Wireframe): every other layer dims to a quarter, on the web
+           globe and the Mac map alike (OverwatchFocus). *@
+        <div class="tg-layer-group tg-focus">
+            <label class="tg-layer-group-title" for="tg-focus">FOCUS</label>
+            <select id="tg-focus" class="tg-input" value="@(_focusKey ?? "")" @onchange="SetFocusAsync">
+                <option value="">ALL LAYERS EQUAL</option>
+                @foreach (var layer in GwsBusinessSuite.Application.Overwatch.OverwatchFocus.All)
+                {
+                    <option value="@layer.Key">@layer.Label.ToUpperInvariant()</option>
+                }
+            </select>
+        </div>
         <div class="tg-layer-group">
             <div class="tg-layer-group-title">WEATHER</div>
             <div class="tg-layer-buttons">
@@ -296,7 +308,7 @@
                 </div>
                 @if (_worldNewsShading)
                 {
-                    <div class="tg-hazard-summary">Lighter to darker purple: fewer to more outlets on the stories placed in a country</div>
+                    <div class="tg-hazard-summary">Fainter to brighter green: fewer to more outlets on the stories placed in a country</div>
                 }
                 <div class="tg-layer-buttons" role="group" aria-label="How far back to look">
                     @foreach (var hours in GwsBusinessSuite.Infrastructure.Services.WorldNewsMapService.WindowHours)
@@ -1645,6 +1657,15 @@
     private bool _hasSettledOnce;
     private bool _radarOn;
     private bool _alertsOn;
+    private string? _focusKey;
+
+    private async Task SetFocusAsync(ChangeEventArgs e)
+    {
+        var layer = GwsBusinessSuite.Application.Overwatch.OverwatchFocus.Find(e.Value?.ToString());
+        _focusKey = layer?.Key;
+        await JS.InvokeVoidAsync("tacticalGlobe.focusLayer", layer is null ? null : new { web = layer.WebSources, native = layer.NativeOperations });
+    }
+
     private bool _hideUnhealthy;
     private bool _liveVideoOnly;
     private bool _hazardsOn;
@@ -2359,7 +2380,10 @@
         var (signals, subtypes) = GwsBusinessSuite.Infrastructure.Services.WorldNewsMapService.BySubtype(all, _worldNewsSubtype);
         _worldNewsSubtypes = subtypes;
         _worldNewsCount = signals.Count;
-        await JS.InvokeVoidAsync("tacticalGlobe.setWorldNews", signals.Select(ToWorldNewsPayload).ToList());
+        // The three callouts (19-11-26, Holo Wireframe): surging stories first, then the most sources.
+        var callouts = GwsBusinessSuite.Application.Overwatch.OverwatchCallouts.Pick(signals, s => s.Surge is null ? 0 : 1,
+            s => s.IndependentCount > 0 ? s.IndependentCount : s.OutletCount);
+        await JS.InvokeVoidAsync("tacticalGlobe.setWorldNews", signals.Select(s => ToWorldNewsPayload(s, callouts.Contains(s) ? NewsCallout(s) : null)).ToList());
     }
 
     // A situation the layer would show, read off the page's connection.
@@ -2553,9 +2577,11 @@
         JS.InvokeVoidAsync("tacticalGlobe.flyTo", "tg-viewport", signal.Latitude, signal.Longitude,
             signal.Location.City is null ? 3_000_000 : 60_000, 1.5).AsTask();
 
-    private static object ToWorldNewsPayload(GwsBusinessSuite.Infrastructure.Services.WorldNewsMapSignal signal) => new
+    // callout: the box text when this is one of the three callouts in view (OverwatchCallouts).
+    private static object ToWorldNewsPayload(GwsBusinessSuite.Infrastructure.Services.WorldNewsMapSignal signal, string? callout = null) => new
     {
         id = signal.SituationId,
+        callout,
         title = signal.Title,
         latest = signal.Latest,
         country = signal.Country,
@@ -4893,7 +4919,7 @@
             var shown = (_conflictConfirmed ? layer.Confirmed : Array.Empty<GwsBusinessSuite.Application.Hazards.HazardFeature>())
                 .Concat(_conflictReported ? layer.Reported : Array.Empty<GwsBusinessSuite.Application.Hazards.HazardFeature>())
                 .ToList();
-            await JS.InvokeVoidAsync("tacticalGlobe.setConflict", HazardPayload(shown));
+            await JS.InvokeVoidAsync("tacticalGlobe.setConflict", HazardPayload(shown, callouts: true));
             var hours = (int)Math.Round(layer.ReportedSpan.TotalHours);
             var release = layer.ConfirmedRelease?.Replace("GEDEvent_", string.Empty, StringComparison.Ordinal).Replace('_', '.');
             _conflictSummary = $"CONFIRMED (UCDP{(release is null ? string.Empty : " " + release)}): {layer.Confirmed.Count:N0} areas, its last 90 days · " +
@@ -4969,9 +4995,27 @@
 
     private static int SeverityRank(string severity) => severity switch { "major" => 0, "moderate" => 1, _ => 2 };
 
-    private static IEnumerable<object> HazardPayload(IEnumerable<GwsBusinessSuite.Application.Hazards.HazardFeature> features) =>
-        features.Select(h => new
+    private static string NewsCallout(GwsBusinessSuite.Infrastructure.Services.WorldNewsMapSignal s) =>
+        $"{s.Location.Label.ToUpperInvariant()} · {(s.IndependentCount > 0 ? s.IndependentCount : s.OutletCount)} {(s.IndependentCount > 0 ? "SOURCES" : "OUTLETS")}";
+
+    // A callout's text: the title, upper case, kept to one short line.
+    private static string HazardCallout(GwsBusinessSuite.Application.Hazards.HazardFeature h)
+    {
+        var text = h.Title.ToUpperInvariant();
+        return text.Length <= 34 ? text : text[..33].TrimEnd() + "…";
+    }
+
+    // callouts: mark the three most serious, then most recent (OverwatchCallouts), for the conflict layer.
+    private static IEnumerable<object> HazardPayload(IEnumerable<GwsBusinessSuite.Application.Hazards.HazardFeature> features, bool callouts = false)
+    {
+        var list = features.ToList();
+        var picked = callouts
+            ? GwsBusinessSuite.Application.Overwatch.OverwatchCallouts.Pick(list, h => GwsBusinessSuite.Application.Overwatch.OverwatchCallouts.SeverityRank(h.Severity),
+                h => h.ObservedAt?.ToUnixTimeSeconds() ?? 0)
+            : new HashSet<GwsBusinessSuite.Application.Hazards.HazardFeature>();
+        return list.Select(h => new
         {
+            callout = picked.Contains(h) ? HazardCallout(h) : null,
             id = h.Id,
             kind = h.Kind,
             title = h.Title,
@@ -4983,6 +5027,7 @@
             lat = h.Latitude,
             lon = h.Longitude
         });
+    }
 
     // ---- Sea layer: AIS ships from aisstream.io (the server holds one shared stream). ----
     private bool _shipsOn;
