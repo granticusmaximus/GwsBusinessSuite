@@ -16,7 +16,44 @@ public sealed class NewsRefreshBackgroundService(
     // SemaphoreSlim(1,1) acts as a non-reentrant async lock.
     public static readonly SemaphoreSlim RefreshLock = new(1, 1);
 
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    // Takes the model was too busy to write at refresh time are filled every few minutes (20-11-26).
+    private static readonly TimeSpan FillTakesInterval = TimeSpan.FromMinutes(5);
+
+    protected override Task ExecuteAsync(CancellationToken stoppingToken) =>
+        Task.WhenAll(RefreshLoopAsync(stoppingToken), FillTakesLoopAsync(stoppingToken));
+
+    private async Task FillTakesLoopAsync(CancellationToken stoppingToken)
+    {
+        try
+        {
+            using var timer = new PeriodicTimer(FillTakesInterval);
+            while (await timer.WaitForNextTickAsync(stoppingToken))
+            {
+                if (!await RefreshLock.WaitAsync(0, stoppingToken)) continue;
+                try
+                {
+                    using var workloadPriority = ollamaWorkloads.UseBackgroundPriority();
+                    await using var scope = scopeFactory.CreateAsyncScope();
+                    var written = await scope.ServiceProvider.GetRequiredService<INewsIntelligenceService>().FillMissingTakesAsync(stoppingToken);
+                    if (written > 0) logger.LogInformation("Media Watch: {Count} AI takes written in the background", written);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    logger.LogWarning(ex, "Media Watch: background AI takes failed");
+                }
+                finally
+                {
+                    RefreshLock.Release();
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Shutting down
+        }
+    }
+
+    private async Task RefreshLoopAsync(CancellationToken stoppingToken)
     {
         // Run an initial refresh shortly after startup so the feed isn't empty
         await Task.Delay(TimeSpan.FromSeconds(30), stoppingToken);

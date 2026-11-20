@@ -146,3 +146,7 @@
         min-height: 44px;
     }
 }
+
+.media-watch-term-close {
+    font-size: var(--gws-type-xs);
+}

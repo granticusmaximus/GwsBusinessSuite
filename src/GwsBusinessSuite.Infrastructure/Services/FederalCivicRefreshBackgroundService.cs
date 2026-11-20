@@ -23,6 +23,7 @@ public sealed class FederalCivicRefreshBackgroundService(
     private TimeSpan Interval => congressApi?.UsesDemoKey == true ? TimeSpan.FromHours(6) : TimeSpan.FromHours(1);
 
     public static readonly SemaphoreSlim RefreshLock = new(1, 1);
+    public const int RefreshCalls = 10;
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -43,6 +44,13 @@ public sealed class FederalCivicRefreshBackgroundService(
         }
         try
         {
+            // About ten calls a refresh on the shared key; skipped while that would eat the
+            // reserve kept for adding bills (20-11-26).
+            if (congressApi?.Budget.TryTake(RefreshCalls, background: true, DateTimeOffset.UtcNow) == false)
+            {
+                logger.LogInformation("Federal Civic Feed: refresh skipped to keep congress.gov calls for adding bills");
+                return;
+            }
             logger.LogInformation("Federal Civic Feed: starting hourly refresh");
             await using var scope = scopeFactory.CreateAsyncScope();
             var svc = scope.ServiceProvider.GetRequiredService<IFederalCivicFeedService>();

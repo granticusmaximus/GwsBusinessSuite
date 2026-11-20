@@ -1,0 +1,93 @@
+@page "/admin/world-news/about"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = "AdminOnly")]
+@using Microsoft.AspNetCore.Authorization
+@using GwsBusinessSuite.Infrastructure.Services
+@using GwsBusinessSuite.WorldNewsKit
+@inject WorldNewsService News
+
+@* People and organisation pages (20-11-26): who or what a name is (Wikidata, no key) and every
+   World News story naming it in the last month. *@
+
+<PageTitle>@(string.IsNullOrWhiteSpace(Name) ? "About" : Name)</PageTitle>
+
+<PageHeader Title="@(_facts?.Label ?? (string.IsNullOrWhiteSpace(Name) ? "A person or organisation" : Name))" Icon="bi-person-vcard"
+            Description="@(_facts?.Description ?? "Who or what this is, and the stories that name it.")">
+    <Actions>
+        <a class="btn btn-outline-secondary" href="admin/world-news"><i class="bi bi-arrow-left me-1" aria-hidden="true"></i>World News</a>
+    </Actions>
+</PageHeader>
+
+<form class="d-flex gap-2 mb-3 about-search" @onsubmit="LookUp" @onsubmit:preventDefault="true">
+    <input class="form-control" placeholder="A person, company or organisation" aria-label="Name to look up" @bind="_query" @bind:event="oninput" maxlength="120" />
+    <button type="submit" class="btn btn-primary" disabled="@(_query.Trim().Length < 2)">Look up</button>
+</form>
+
+@if (_loading)
+{
+    <LoadingIndicator Message="Looking it up…" />
+}
+else if (!string.IsNullOrWhiteSpace(Name))
+{
+    @if (_facts is { } facts)
+    {
+        <p class="small">
+            <a href="@facts.WikidataUrl" target="_blank" rel="noopener noreferrer">Wikidata</a> ·
+            <a href="@facts.WikipediaUrl" target="_blank" rel="noopener noreferrer">Wikipedia</a>
+            <span class="text-secondary"> · the best match for “@Name”; check it's the one you mean.</span>
+        </p>
+    }
+    else
+    {
+        <p class="small text-secondary">Wikidata has no match for “@Name”.</p>
+    }
+    <h2 class="h6 mt-3">Stories naming “@Name” in the last 30 days (@_stories.Count)</h2>
+    @if (_stories.Count == 0)
+    {
+        <EmptyState Icon="bi-search" Message="No World News story in the last 30 days names it." />
+    }
+    else
+    {
+        <ul class="list-group list-group-flush card border-0 shadow-sm">
+            @foreach (var story in _stories)
+            {
+                <li class="list-group-item">
+                    <a href="@WorldNewsService.StoryLink(story.Id)" class="fw-semibold">@(story.Headline ?? story.Title)</a>
+                    <span class="small text-secondary d-block">@story.LastSeen.ToLocalGwsDate() · @story.OutletCount outlets in @story.Languages.Count languages</span>
+                </li>
+            }
+        </ul>
+    }
+}
+
+@code {
+    [SupplyParameterFromQuery(Name = "name")] public string? Name { get; set; }
+    [Inject] private NavigationManager Navigation { get; set; } = default!;
+
+    private string _query = string.Empty;
+    private bool _loading;
+    private WorldNewsService.EntityFacts? _facts;
+    private IReadOnlyList<EventOverview> _stories = [];
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _query = Name ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(Name)) return;
+        _loading = true;
+        try
+        {
+            var name = Name.Trim();
+            var facts = News.LookUpEntityAsync(name);
+            var stories = Task.Run(() => News.StoriesAbout(name));
+            await Task.WhenAll(facts, stories);
+            _facts = await facts;
+            _stories = await stories;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private void LookUp() => Navigation.NavigateTo($"admin/world-news/about?name={Uri.EscapeDataString(_query.Trim())}");
+}

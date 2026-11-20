@@ -69,3 +69,10 @@ public sealed class NewsTrendDay : AuditableEntity
     public int ArticleCount { get; set; }
     public string TermCountsJson { get; set; } = "{}";
 }
+
+// A writer someone follows in Media Watch (20-11-26): their new articles gather in one view.
+public sealed class FollowedNewsAuthor : AuditableEntity
+{
+    public required string Username { get; set; }
+    public required string Name { get; set; }
+}

@@ -64,15 +64,25 @@ else
         }
     </div>
 
-    @* Buttons, not "#…" links: those resolve against <base href="/"> and leave the page (app.js scrolls). *@
-    <nav class="story-jump" aria-label="Parts of this story">
-        <button type="button" data-story-jump="story-part-story">@EventDocument.StoryHeading</button>
-        <button type="button" data-story-jump="story-part-agreement">@EventDocument.AgreementHeading</button>
-        <button type="button" data-story-jump="story-part-coverage">@EventDocument.CoverageHeading <span class="story-jump-count">@_story.Outlets.Count</span></button>
-        <button type="button" data-story-jump="story-part-timeline">Timeline <span class="story-jump-count">@_timeline.Count</span></button>
-        @if (_username is not null)
+    @* The story in tabs (20-11-26): Summary, Coverage, Trust and Desk, one at a time, instead of
+       one long page. *@
+    <nav class="story-jump story-tabs" role="tablist" aria-label="Parts of this story">
+        @foreach (var (key, label, count) in new (string, string, int?)[]
+                  {
+                      (TabSummary, "Summary", null),
+                      (TabCoverage, "Coverage", _story.Outlets.Count),
+                      (TabTrust, "Trust", null),
+                      (TabDesk, "Desk", null),
+                  })
         {
-            <button type="button" data-story-jump="story-part-grouping">Grouping</button>
+            var on = _tab == key;
+            <button type="button" role="tab" class="@(on ? "is-active" : null)" aria-selected="@(on ? "true" : "false")" @onclick="() => _tab = key">
+                @label
+                @if (count is { } n)
+                {
+                    <span class="story-jump-count">@n</span>
+                }
+            </button>
         }
         <a class="story-jump-link" href="@($"admin/world-news/search?similar={Uri.EscapeDataString(_story.Event.Id)}")" title="Stories in the last week whose reports read like this one">
             <i class="bi bi-intersect me-1" aria-hidden="true"></i>Find similar
@@ -88,7 +98,11 @@ else
             </details>
         }
         <p class="story-numbers">@EventDocument.KeyNumbers(e, at => at.ToLocalGwsDateTime())</p>
-        @if (_story.Trust is { } trust)
+        @if (_tab == TabTrust && _story.Trust is null)
+        {
+            <p class="story-quiet">The trust check for this story hasn't been written yet. It's done on the next read.</p>
+        }
+        @if (_tab == TabTrust && _story.Trust is { } trust)
         {
             @* How far to trust it (World News trust plan 1.2/1.3/1.8, 13-11-26). *@
             <section class="story-trust story-trust-@trust.Confidence.Level.ToString().ToLowerInvariant()" aria-label="How far to trust this story">
@@ -234,7 +248,7 @@ else
                 }
             </section>
         }
-        @if (_mostRead.Count > 0)
+        @if (_tab == TabSummary && _mostRead.Count > 0)
         {
             @* What people looked up yesterday that the headlines name (07-11-26). *@
             <p class="story-most-read">
@@ -249,7 +263,7 @@ else
             </p>
         }
 
-        @if (_story.Changes is { Any: true } changes)
+        @if (_tab == TabSummary && _story.Changes is { Any: true } changes)
         {
             <section class="story-changes" aria-labelledby="story-changes-heading">
                 <h2 id="story-changes-heading">@EventDocument.ChangesHeading (@changes.Since.ToLocalGwsDateTime())</h2>
@@ -259,10 +273,24 @@ else
                         <li>@line</li>
                     }
                 </ul>
+                @* Catch me up (20-11-26): the new reports since then, in a few sentences. *@
+                @if (_catchUp is { } catchUp)
+                {
+                    <p class="story-catch-up" role="status"><i class="bi bi-stars me-1" aria-hidden="true"></i>@catchUp</p>
+                }
+                else
+                {
+                    <button type="button" class="btn btn-sm btn-outline-primary" disabled="@_catchingUp" @onclick="() => CatchUpAsync(changes.Since)">
+                        <i class="bi bi-fast-forward me-1" aria-hidden="true"></i>@(_catchingUp ? "Reading the new reports…" : "Catch me up")
+                    </button>
+                    @if (_catchUpProblem is not null) { <span class="small text-secondary ms-2">@_catchUpProblem</span> }
+                }
             </section>
         }
 
         @* The desk (World News trust plan B1/B2/N1-N3, 13-11-26): evidence, checklist, budget, draft. *@
+        @if (_tab == TabDesk)
+        {
         <section class="story-desk" aria-label="The desk">
             <div class="story-desk-actions">
                 <a class="btn btn-sm btn-outline-secondary" href="@($"admin/world-news/source-book?event={Uri.EscapeDataString(e.Id)}")">My source book</a>
@@ -356,7 +384,14 @@ else
             <WorldNewsCorrectionsEditor @key="(e.Id, typeof(WorldNewsCorrectionsEditor))" EventId="@e.Id" Title="@(e.Headline ?? e.Title)" />
             <WorldNewsDossier @key="(e.Id, typeof(WorldNewsDossier))" EventId="@e.Id" />
         </section>
+        @if (_username is { } groupingUser)
+        {
+            <WorldNewsGrouping EventId="@e.Id" Username="@groupingUser" OnChanged="ReloadAfterGroupingAsync" />
+        }
+        }
 
+        @if (_tab == TabSummary)
+        {
         @* 1. What happened. *@
         <section id="story-part-story" class="story-part" aria-labelledby="story-h-story">
             <h2 id="story-h-story">@EventDocument.StoryHeading</h2>
@@ -469,6 +504,25 @@ else
                 <p class="story-quiet">@(analysis is null ? WaitingText : "SentinelGPT found no outlet whose coverage stands out from the rest.")</p>
             }
 
+            @if (analysis?.Disputes is { Count: > 0 } disputes)
+            {
+                <h3 class="story-subhead">@EventDocument.DisputesHeading</h3>
+                <ul class="story-disputes">
+                    @foreach (var dispute in disputes)
+                    {
+                        <li>
+                            <strong>@dispute.Point</strong>
+                            <ul>
+                                @foreach (var account in dispute.Accounts)
+                                {
+                                    <li><span class="story-dispute-outlet">@account.Outlet:</span> @account.Text</li>
+                                }
+                            </ul>
+                        </li>
+                    }
+                </ul>
+            }
+
             @if (analysis is not null)
             {
                 <p class="story-quiet story-credit">
@@ -485,6 +539,39 @@ else
                 </p>
             }
         </section>
+
+        }
+
+        @if (_tab == TabCoverage)
+        {
+        @* How it spread (20-11-26): hour by hour, the outlets and countries that joined, with a replay. *@
+        var spread = StorySpread.Hourly(_story.Sources.Select(source => source.Report));
+        @if (spread.Count > 1)
+        {
+            var at = Math.Clamp(_spreadAt ?? spread.Count - 1, 0, spread.Count - 1);
+            var maxOutlets = Math.Max(1, spread[^1].Outlets);
+            <section class="story-part story-spread" aria-labelledby="story-h-spread">
+                <h2 id="story-h-spread">How it spread</h2>
+                <label class="story-spread-replay">
+                    <span>Replay: by @spread[at].Hour.ToLocalGwsDateTime(), @spread[at].Outlets outlets in @spread[at].Countries countries</span>
+                    <input type="range" class="form-range" min="0" max="@(spread.Count - 1)" value="@at" aria-label="Replay how the story spread"
+                           @oninput="e => _spreadAt = int.TryParse(e.Value?.ToString(), out var v) ? v : null" />
+                </label>
+                <ol class="story-spread-hours">
+                    @for (var i = 0; i < spread.Count; i++)
+                    {
+                        var hour = spread[i];
+                        <li class="@(i > at ? "is-later" : null)">
+                            <span class="story-spread-time">@hour.Hour.ToLocalGwsDateTime()</span>
+                            <span class="story-spread-bar" style="width:@((100.0 * hour.Outlets / maxOutlets).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture))%"></span>
+                            <span class="story-spread-new">
+                                +@hour.NewOutlets.Count @(hour.NewOutlets.Count == 1 ? "outlet" : "outlets")@(hour.NewCountries.Count > 0 ? $", first from {string.Join(", ", hour.NewCountries)}" : "")
+                            </span>
+                        </li>
+                    }
+                </ol>
+            </section>
+        }
 
         @* 3. Who's saying what: each outlet once, with what it leaves out or adds and its reports. *@
         @* #7 (13-11-26): the story's chronology, from the first report to the latest change. *@
@@ -716,15 +803,30 @@ else
                 </ul>
             }
         </section>
-
-        @if (_username is { } groupingUser)
-        {
-            <WorldNewsGrouping EventId="@e.Id" Username="@groupingUser" OnChanged="ReloadAfterGroupingAsync" />
         }
     </article>
 }
 
 @code {
+    public const string TabSummary = "summary";
+    public const string TabCoverage = "coverage";
+    public const string TabTrust = "trust";
+    public const string TabDesk = "desk";
+    private string _tab = TabSummary;
+    private int? _spreadAt;
+    private string? _catchUp;
+    private string? _catchUpProblem;
+    private bool _catchingUp;
+
+    private async Task CatchUpAsync(DateTimeOffset since)
+    {
+        if (_story is null) return;
+        _catchingUp = true;
+        _catchUpProblem = null;
+        try { (_catchUp, _catchUpProblem) = await News.CatchUpAsync(_story.Event.Id, since); }
+        finally { _catchingUp = false; }
+    }
+
     private IReadOnlyList<LabelChallenge> _challenges = [];
     private string _challengeNote = string.Empty;
     private string _challengeUrl = string.Empty;
@@ -904,6 +1006,7 @@ else
         _gone = story is null;
         _challenges = story is null ? [] : await Task.Run(() => News.Store.Challenges(story.Event.Id));
         _board = null; _boardLoaded = false; _draftId = null; _evidence.Clear(); _photos = ([], 0, 0); _sites = ([], []); _timeline = [];
+        _spreadAt = null; _catchUp = null; _catchUpProblem = null;
         // A primary source can confirm it (World News trust plan 1.13); checked after it shows.
         if (story is not null)
         {

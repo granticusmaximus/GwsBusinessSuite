@@ -29,8 +29,21 @@ else
         <p>@original</p>
     }
 </details>
+@if (Href is not null && !IsEnglish)
+{
+    @* Read a report translated (20-11-26): the article from the outlet's page, in English, in the reader. *@
+    <button type="button" class="btn btn-sm btn-link news-report-translate" @onclick="() => _reading = Href">
+        <i class="bi bi-translate me-1" aria-hidden="true"></i>Read it in English
+    </button>
+    <ArticleReaderModal Url="@_reading" Title="@Report.DisplayTitle" Summary="@(Report.English?.Summary ?? Report.Snippet)" StartTranslated="true"
+                        ReadingTools="false" OnClose="() => _reading = null" />
+}
 
 @code {
     [Parameter, EditorRequired] public WorldArticle Report { get; set; } = default!;
     [Parameter] public string? Href { get; set; }
+
+    private string? _reading;
+
+    private bool IsEnglish => HeadlineTranslator.IsEnglish(Report.Language);
 }

@@ -92,6 +92,13 @@ public sealed class WebCrawler(
 
     private readonly Lazy<WebCrawlStore> _store = new(() => new WebCrawlStore(options.Value.DatabasePath));
     private WebCrawlStore Store => _store.Value;
+
+    public async Task<KeptPage?> GetKeptPageAsync(string url, CancellationToken ct = default)
+    {
+        if (!File.Exists(options.Value.DatabasePath)) return null;
+        var page = await Store.GetPageAsync(url);
+        return page is { } p && !string.IsNullOrWhiteSpace(p.Body) ? new KeptPage(url, p.Title, p.Body, p.Published) : null;
+    }
     private long NowMs => time.GetUtcNow().ToUnixTimeMilliseconds();
     private DateOnly Today => DateOnly.FromDateTime(time.GetUtcNow().UtcDateTime);
     private int MinDelayMs => Math.Max(1, options.Value.MinDelaySeconds) * 1000;

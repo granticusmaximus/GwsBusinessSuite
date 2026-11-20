@@ -1,0 +1,73 @@
+@page "/admin/world-news/front-pages"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = "AdminOnly")]
+@using Microsoft.AspNetCore.Authorization
+@using GwsBusinessSuite.Infrastructure.Services
+@using GwsBusinessSuite.WorldNewsKit
+@inject WorldNewsService News
+
+@* Front pages compared (20-11-26): what each country's own outlets lead with, side by side. *@
+
+<PageTitle>Front pages compared</PageTitle>
+
+<PageHeader Title="Front pages compared" Icon="bi-newspaper" Description="The stories each country's own outlets carried most, side by side. Framing shows in what leads where.">
+    <Actions>
+        <a class="btn btn-outline-secondary" href="admin/world-news"><i class="bi bi-arrow-left me-1" aria-hidden="true"></i>World News</a>
+    </Actions>
+</PageHeader>
+
+<div class="d-flex align-items-center gap-2 mb-3">
+    <span class="small text-secondary">In the last</span>
+    <div class="btn-group btn-group-sm" role="group" aria-label="Time range">
+        @foreach (var hours in new[] { 6, 12, 24 })
+        {
+            <button type="button" class="btn @(_hours == hours ? "btn-primary" : "btn-outline-secondary")" aria-pressed="@(_hours == hours ? "true" : "false")"
+                    @onclick="() => LoadAsync(hours)">@hours hours</button>
+        }
+    </div>
+</div>
+
+@if (_pages is null)
+{
+    <LoadingIndicator Message="Reading each country's coverage…" />
+}
+else if (_pages.Count == 0)
+{
+    <EmptyState Icon="bi-newspaper" Message="No country's outlets have reported in this time range." />
+}
+else
+{
+    <div class="front-pages-grid">
+        @foreach (var front in _pages)
+        {
+            <article class="front-page card border-0 shadow-sm">
+                <div class="card-body">
+                    <h2 class="h6">@front.Country</h2>
+                    <ol class="mb-0">
+                        @foreach (var (story, outlets) in front.Leads)
+                        {
+                            <li>
+                                <a href="@WorldNewsService.StoryLink(story.Id)">@(story.Headline ?? story.Title)</a>
+                                <span class="small text-secondary d-block">@outlets of its outlets · @story.OutletCount in all</span>
+                            </li>
+                        }
+                    </ol>
+                </div>
+            </article>
+        }
+    </div>
+}
+
+@code {
+    private int _hours = 12;
+    private IReadOnlyList<FrontPage>? _pages;
+
+    protected override Task OnInitializedAsync() => LoadAsync(_hours);
+
+    private async Task LoadAsync(int hours)
+    {
+        _hours = hours;
+        _pages = null;
+        _pages = await Task.Run(() => News.FrontPagesNow(hours));
+    }
+}

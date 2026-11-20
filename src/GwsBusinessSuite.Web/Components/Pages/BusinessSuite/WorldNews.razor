@@ -10,6 +10,7 @@
 @inject WorldNewsMapService WorldNewsMap
 @inject ICurrentUserAccessor CurrentUserAccessor
 @inject IJSRuntime JS
+@inject ILogger<WorldNews> Logger
 @inject GwsBusinessSuite.Application.Hazards.ConflictEventService Gdelt
 
 <PageTitle>World News</PageTitle>
@@ -54,6 +55,12 @@
                 <li><a class="dropdown-item" href="admin/world-news/desk" title="The story budget and the tips readers have sent"><i class="bi bi-journal-text me-2" aria-hidden="true"></i>Desk</a></li>
                 <li><a class="dropdown-item" href="admin/world-news/sources" title="Every feed's health, the crawl's numbers and where coverage is thin"><i class="bi bi-broadcast me-2" aria-hidden="true"></i>Sources</a></li>
                 <li><a class="dropdown-item" href="admin/world-news/methodology" title="How stories are labelled, and how well the labels hold up"><i class="bi bi-clipboard-check me-2" aria-hidden="true"></i>Methodology</a></li>
+                <li><a class="dropdown-item" href="admin/world-news/front-pages" title="What each country's own outlets lead with, side by side"><i class="bi bi-newspaper me-2" aria-hidden="true"></i>Front pages</a></li>
+                <li>
+                    <button type="button" class="dropdown-item" @onclick="ToggleBriefingAsync" title="A Morning world briefing page in your Sentinel at 07:00 each day">
+                        <i class="bi @(_briefing ? "bi-sunrise-fill" : "bi-sunrise") me-2" aria-hidden="true"></i>Morning briefing in Sentinel: @(_briefing ? "on" : "off")
+                    </button>
+                </li>
                 <li><hr class="dropdown-divider" /></li>
                 <li>
                     <button type="button" class="dropdown-item" @onclick="RegroupNow" disabled="@(News.IsRegrouping || News.IsPulling)"
@@ -268,6 +275,31 @@ else if (_view == WorldNewsTab.Today)
     }
     else
     {
+        @* Your Today (20-11-26): pinned countries and kinds of story lead. *@
+        <details class="world-news-pins" open="@(_pins.Count > 0)">
+            <summary>
+                <i class="bi bi-pin-angle" aria-hidden="true"></i> Your Today
+                @if (_pins.Count > 0)
+                {
+                    <span class="world-news-pins-count">@_pins.Count pinned</span>
+                }
+            </summary>
+            <p class="small text-secondary mb-2">Stories in the countries and kinds you pin come first. Pin a country with the pin on its card below.</p>
+            <div class="world-news-chips" role="group" aria-label="Pin kinds of story">
+                @foreach (var kind in ChipKinds)
+                {
+                    var pinned = IsPinned(TodayPins.Kind, kind);
+                    <button type="button" class="world-news-chip @(pinned ? "is-active" : "")" aria-pressed="@(pinned ? "true" : "false")"
+                            @onclick="() => TogglePinAsync(TodayPins.Kind, kind)"><i class="bi @(pinned ? "bi-pin-fill" : "bi-pin") me-1" aria-hidden="true"></i>@WorldNewsBrowse.ChipLabel(kind)</button>
+                }
+                @foreach (var country in _pins.Where(p => p.Kind == TodayPins.Country))
+                {
+                    <button type="button" class="world-news-chip is-active" aria-label="Unpin @country.Value" @onclick="() => TogglePinAsync(TodayPins.Country, country.Value)">
+                        <i class="bi bi-pin-fill me-1" aria-hidden="true"></i>@country.Value <i class="bi bi-x ms-1" aria-hidden="true"></i>
+                    </button>
+                }
+            </div>
+        </details>
         var lead = TodayStories[0];
         var leadFacts = FactsFor(lead.Event);
         <section class="world-news-lead" aria-labelledby="world-news-lead-title">
@@ -337,7 +369,14 @@ else if (_view == WorldNewsTab.Today)
             @foreach (var country in VisibleCountries)
             {
                 <article class="world-news-country-card">
-                    <h2>@country.Name</h2>
+                    @{ var countryPinned = IsPinned(TodayPins.Country, country.Name); }
+                    <h2>
+                        @country.Name
+                        <button type="button" class="btn btn-sm btn-link world-news-pin" aria-pressed="@(countryPinned ? "true" : "false")"
+                                title="@(countryPinned ? "Unpin" : "Pin") @country.Name on your Today" @onclick="() => TogglePinAsync(TodayPins.Country, country.Name)">
+                            <i class="bi @(countryPinned ? "bi-pin-fill" : "bi-pin")" aria-hidden="true"></i><span class="visually-hidden">@(countryPinned ? "Unpin" : "Pin") @country.Name</span>
+                        </button>
+                    </h2>
                     <p>@WorldNewsBrowse.Count(country.OutletCount, "outlet") · @WorldNewsBrowse.Count(country.ReportCount, "report")</p>
                     <ol>
                         @foreach (var story in country.TopStories)
@@ -394,7 +433,8 @@ else if (_view == WorldNewsTab.Developing)
                         </form>
                         <p class="world-news-watchlist-help">
                             You get a notification when a story matches and at least two independent sources have it.
-                            Use "quotes" for a phrase, OR, NOT, and * for word endings.
+                            Use "quotes" for a phrase, OR, NOT, and * for word endings. Each watch also keeps a
+                            <strong>Watchlist</strong> dossier page in your Sentinel with every matching story of the last 30 days, updated hourly.
                         </p>
                         @if (_watchError is not null) { <p class="text-danger small mb-1" role="alert">@_watchError</p> }
                         <ul class="world-news-watchlist-items">
@@ -402,6 +442,7 @@ else if (_view == WorldNewsTab.Developing)
                             {
                                 <li>
                                     <span>@watch.Query</span>
+                                    <a class="btn btn-sm btn-link p-0" href="@($"admin/world-news/about?name={Uri.EscapeDataString(watch.Query.Trim('"'))}")" title="Who or what this is, and its stories">About</a>
                                     <button type="button" class="btn btn-sm btn-link p-0" aria-label="@($"Stop watching {watch.Query}")" @onclick="() => RemoveWatchAsync(watch.Id)">Remove</button>
                                 </li>
                             }
@@ -843,14 +884,36 @@ else
     private IReadOnlyList<SituationOverview> VisibleSituations => (_situations ?? [])
         .Where(s => WorldNewsBrowse.Matches(s.Title, s.Latest, FactsFor(s), s.Countries, s.Languages, State)).ToList();
 
-    private IReadOnlyList<WorldStory> TodayStories => (_world?.BiggestStories ?? [])
-        .Where(story => WorldNewsBrowse.Matches(story.Event.Title, story.Event.Headline, FactsFor(story.Event), story.Event.Countries, story.Event.Languages, State))
-        .ToList();
+    private IReadOnlyList<WorldStory> TodayStories => TodayPins.Lead((_world?.BiggestStories ?? [])
+        .Where(story => WorldNewsBrowse.Matches(story.Event.Title, story.Event.Headline, FactsFor(story.Event), story.Event.Countries, story.Event.Languages, State)),
+        story => IsPinnedStory(story.Event));
 
-    private IReadOnlyList<WorldCountry> VisibleCountries => (_world?.Countries ?? []).Where(country =>
+    private IReadOnlyList<WorldCountry> VisibleCountries => TodayPins.Lead((_world?.Countries ?? []).Where(country =>
         (string.IsNullOrWhiteSpace(_filter) || country.Name.Contains(_filter.Trim(), StringComparison.CurrentCultureIgnoreCase)
             || country.TopStories.Any(story => WorldNewsBrowse.Contains(story.Event.Headline ?? story.Event.Title, _filter)))
-        && (_where.Length == 0 || string.Equals(country.Name, _where, StringComparison.OrdinalIgnoreCase))).ToList();
+        && (_where.Length == 0 || string.Equals(country.Name, _where, StringComparison.OrdinalIgnoreCase))),
+        country => IsPinned(TodayPins.Country, country.Name));
+
+    private IReadOnlyList<TodayPin> _pins = [];
+
+    private bool IsPinned(string kind, string value) =>
+        _pins.Any(p => p.Kind == kind && string.Equals(p.Value, value, StringComparison.OrdinalIgnoreCase));
+
+    private bool IsPinnedStory(EventOverview e)
+    {
+        if (_pins.Count == 0) return false;
+        var facts = FactsFor(e);
+        return IsPinned(TodayPins.Kind, facts.Kind) || (facts.PlaceCountry is { } country && IsPinned(TodayPins.Country, country));
+    }
+
+    private async Task TogglePinAsync(string kind, string value)
+    {
+        if (string.IsNullOrWhiteSpace(_username)) return;
+        var on = !IsPinned(kind, value);
+        var user = _username;
+        await Task.Run(() => News.Store.SetTodayPin(user, kind, value, on, DateTimeOffset.UtcNow));
+        _pins = await Task.Run(() => News.Store.TodayPinsFor(user));
+    }
 
     // Where options: the countries the headlines in view are placed in.
     private IReadOnlyList<string> WhereOptions => (_view switch
@@ -939,6 +1002,8 @@ else
         News.Changed += OnNewsChanged;
         _username = await CurrentUserAccessor.GetCurrentUsernameAsync();
         _surgeAlerts = !string.IsNullOrWhiteSpace(_username) && await Task.Run(() => News.Store.IsWatchingSurges(_username));
+        if (!string.IsNullOrWhiteSpace(_username)) _pins = await Task.Run(() => News.Store.TodayPinsFor(_username));
+        if (!string.IsNullOrWhiteSpace(_username)) _briefing = await Task.Run(() => News.Store.WantsBriefing(_username));
         _silences = await Task.Run(() => News.Store.Silences(DateTimeOffset.UtcNow));
         _ = LoadSurgesAsync();
         ApplyQuery();
@@ -1207,6 +1272,23 @@ else
         if (string.IsNullOrWhiteSpace(_username)) return;
         await Task.Run(() => News.Store.RemoveKeywordWatch(_username, id));
         _watchlist = await Task.Run(() => News.Store.KeywordWatches(_username));
+    }
+
+    private bool _briefing;
+
+    private async Task ToggleBriefingAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_username)) return;
+        _briefing = !_briefing;
+        var on = _briefing;
+        var user = _username;
+        await Task.Run(() => News.Store.SetBriefing(user, on, DateTimeOffset.UtcNow));
+        // The first one straight away, so there's something to open.
+        if (on) _ = Task.Run(async () =>
+        {
+            try { await News.BuildMorningBriefingAsync(user); }
+            catch (Exception ex) { Logger.LogWarning(ex, "World News: first morning briefing failed"); }
+        });
     }
 
     private async Task ToggleSurgeAlertsAsync()

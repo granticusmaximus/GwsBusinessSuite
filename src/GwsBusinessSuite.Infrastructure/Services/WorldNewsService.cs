@@ -133,8 +133,10 @@ public sealed partial class WorldNewsService : IDisposable
             }, model, TimeProvider.System, at => at.ToLocalGwsDateTime(),
             new SummaryOptions
             {
-                PerRun = configuration.GetValue("WorldNews:SummariesPerRead", 1),
-                MinOutlets = 1,
+                // Every story two or more outlets carry gets a summary (20-11-26): with the model on
+                // the server, four a read (every 15 minutes) keeps up; a one-outlet story waits.
+                PerRun = configuration.GetValue("WorldNews:SummariesPerRead", 4),
+                MinOutlets = configuration.GetValue("WorldNews:SummaryMinOutlets", 2),
                 Window = TimeSpan.FromDays(30)
             });
         LastRefreshed = Store.LastFetched(LastReadKey);
@@ -286,6 +288,11 @@ public sealed partial class WorldNewsService : IDisposable
             // Stories merged wrongly before the place guard caught them are split, hourly (RecentMergeCheck).
             try { RecheckRecentMerges(DateTimeOffset.UtcNow); }
             catch (Exception ex) when (ex is Microsoft.Data.Sqlite.SqliteException or InvalidOperationException) { _logger.LogWarning(ex, "World News: merge re-check failed"); }
+            // And the reverse: one event split into two stories is joined, hourly, in the background.
+            StartHourlyMergeCheck(DateTimeOffset.UtcNow);
+            // Morning briefings and watchlist dossiers in each person's Sentinel, hourly (20-11-26).
+            try { await WritePersonalPagesIfDueAsync(DateTimeOffset.UtcNow, ct); }
+            catch (Exception ex) when (ex is not OperationCanceledException) { _logger.LogWarning(ex, "World News: personal pages failed"); }
             LastRefreshed = DateTimeOffset.UtcNow;
             LastReadFailed = false;
             Store.SetLastFetched(LastReadKey, LastRefreshed.Value);
@@ -1233,7 +1240,7 @@ public sealed partial class WorldNewsService : IDisposable
                 ?? throw new InvalidOperationException("SentinelGPT's answer didn't have the analysis in it. Try again.");
             var writtenBy = _serverHasNoModel ? "SentinelGPT on the Mac" : _model;
             var saved = Store.SaveAnalysis(new EventAnalysis(eventId, parsed.Claim, parsed.Summary, parsed.Agreed, parsed.Differences, writtenBy,
-                e.ArticleCount, excerpts.Count, DateTimeOffset.UtcNow));
+                e.ArticleCount, excerpts.Count, DateTimeOffset.UtcNow, EventAnalyzer.ParseDisputes(raw, outlets)));
             return saved;
         }
         catch (ServerAiUnavailableException ex)

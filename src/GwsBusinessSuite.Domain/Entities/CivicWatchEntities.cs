@@ -27,6 +27,47 @@ public sealed class CivicWatchSettings : AuditableEntity
 
     public bool AlertsEnabled { get; set; }
     public string? AlertRecipient { get; set; }
+
+    // Null for the shared default; a username for that person's own settings (20-11-26).
+    public string? Username { get; set; }
+
+    // Streets, neighbourhoods and places to look for in the county's meeting papers, one per line.
+    public string MentionTerms { get; set; } = string.Empty;
+}
+
+// What Civic Watch remembers per person (20-11-26): when they last looked, for "what changed
+// since your last visit".
+public sealed class CivicWatchUserState : AuditableEntity
+{
+    public required string Username { get; set; }
+    public DateTimeOffset? LastVisitedAt { get; set; }
+    // The visit before the current one: what "since your last visit" counts from.
+    public DateTimeOffset? PreviousVisitAt { get; set; }
+    // The secret in their calendar subscription link (.ics), made on first use.
+    public string? CalendarToken { get; set; }
+    // Agenda items followed across meetings, one phrase per line.
+    public string FollowedItems { get; set; } = string.Empty;
+    // When their weekly civic page in Sentinel was last built.
+    public DateTimeOffset? WeeklyPageBuiltAt { get; set; }
+}
+
+// One member's vote on one roll call, kept so scorecards span more than the latest votes (20-11-26).
+// Georgia's U.S. delegation and the Georgia General Assembly only.
+public sealed class CivicMemberVote : AuditableEntity
+{
+    // "federal" or "state".
+    public required string Level { get; set; }
+    public required string Chamber { get; set; }
+    public required string MemberId { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string? Party { get; set; }
+    // Chamber, roll call number and date: one roll call.
+    public required string RollCallKey { get; set; }
+    public string Measure { get; set; } = string.Empty;
+    public string Vote { get; set; } = string.Empty;
+    // The side most of the member's party took ("yea"/"nay"), when it could be told.
+    public string? PartyMajority { get; set; }
+    public DateTimeOffset? VotedAt { get; set; }
 }
 
 public static class CivicWatchDefaults
@@ -88,6 +129,8 @@ public sealed class CivicMeetingDocument : AuditableEntity
     public required string Kind { get; set; }
     public string Title { get; set; } = string.Empty;
     public string? AiSummary { get; set; }
+    // The PDF's text, kept for search and place mentions (20-11-26).
+    public string? Text { get; set; }
     public DateTimeOffset? SummarizedAt { get; set; }
     public string? LastError { get; set; }
     public int SummaryAttempts { get; set; }

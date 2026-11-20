@@ -32,21 +32,32 @@ public static partial class NewsStoryClusterer
         "amid", "says", "could", "would", "should", "may", "can", "just", "now", "via", "per", "up", "off"
     };
 
-    public static IReadOnlyList<NewsStory> Cluster(IReadOnlyList<NewsItemDto> items, DateTimeOffset now)
+    // By meaning (20-11-26): headlines this close are one story when they also share a word;
+    // closer still, they are one story on meaning alone.
+    public const double MeaningWithWordThreshold = 0.70;
+    public const double MeaningAloneThreshold = 0.82;
+
+    public static IReadOnlyList<NewsStory> Cluster(IReadOnlyList<NewsItemDto> items, DateTimeOffset now, IReadOnlyDictionary<Guid, float[]>? meanings = null)
     {
-        var groups = new List<(HashSet<string> Words, List<NewsItemDto> Items)>();
+        var groups = new List<(HashSet<string> Words, List<NewsItemDto> Items, List<float[]> Vectors)>();
         foreach (var item in items.OrderBy(i => i.PublishedAt ?? i.FetchedAt))
         {
             var words = SignificantWords(item.Title);
-            var match = words.Count < 3 ? default : groups.FirstOrDefault(g => Similarity(g.Words, words) >= SimilarityThreshold);
+            var vector = meanings is not null && meanings.TryGetValue(item.Id, out var v) ? v : null;
+            var match = words.Count >= 3 ? groups.FirstOrDefault(g => Similarity(g.Words, words) >= SimilarityThreshold) : default;
+            if (match.Items is null && vector is not null)
+            {
+                match = groups.FirstOrDefault(g => g.Vectors.Count > 0 && SameByMeaning(g.Vectors.Max(gv => Cosine(gv, vector)), g.Words.Overlaps(words)));
+            }
             if (match.Items is not null)
             {
                 match.Items.Add(item);
                 match.Words.UnionWith(words);
+                if (vector is not null) match.Vectors.Add(vector);
             }
             else
             {
-                groups.Add((words, [item]));
+                groups.Add((words, [item], vector is null ? [] : [vector]));
             }
         }
 
@@ -61,6 +72,22 @@ public static partial class NewsStoryClusterer
             .OrderByDescending(s => s.IsBreaking)
             .ThenByDescending(s => Latest(s))
             .ToList();
+    }
+
+    public static bool SameByMeaning(double cosine, bool shareAWord) =>
+        cosine >= MeaningAloneThreshold || (shareAWord && cosine >= MeaningWithWordThreshold);
+
+    public static double Cosine(float[] a, float[] b)
+    {
+        if (a.Length != b.Length || a.Length == 0) return 0;
+        double dot = 0, na = 0, nb = 0;
+        for (var i = 0; i < a.Length; i++)
+        {
+            dot += a[i] * b[i];
+            na += a[i] * a[i];
+            nb += b[i] * b[i];
+        }
+        return na == 0 || nb == 0 ? 0 : dot / (Math.Sqrt(na) * Math.Sqrt(nb));
     }
 
     public static bool IsBreaking(NewsStory story, DateTimeOffset now)

@@ -30,10 +30,14 @@
                 <div class="modal-body">
                     @if (_loading)
                     {
-                        <LoadingIndicator Message="Reading the article…" />
+                        <LoadingIndicator Message="@(_translated ? "Translating the article into English…" : "Reading the article…")" />
                     }
                     else if (_article is { Readable: true } article)
                     {
+                        @if (_translated)
+                        {
+                            <p class="gws-reader-translated small text-secondary"><i class="bi bi-translate" aria-hidden="true"></i> Translated into English by the AI model. Check the original before relying on a detail.</p>
+                        }
                         @if (_takeaways is not null || _thinking)
                         {
                             <section class="gws-reader-takeaways" aria-label="Why it matters">
@@ -56,6 +60,34 @@
                             </section>
                         }
                         <article class="gws-reader-body">@((MarkupString)article.Html)</article>
+                        @* Ask the article (20-11-26): answered from its text only, with the passage. *@
+                        <section class="gws-reader-ask" aria-label="Ask the article">
+                            <h3 class="h6">Ask the article</h3>
+                            <form class="d-flex gap-2" @onsubmit="AskAsync" @onsubmit:preventDefault="true">
+                                <input class="form-control form-control-sm" placeholder="What does it say about…?" aria-label="Your question"
+                                       maxlength="300" @bind="_question" @bind:event="oninput" />
+                                <button type="submit" class="btn btn-sm btn-outline-primary" disabled="@(_asking || _question.Trim().Length < 3)">@(_asking ? "Asking…" : "Ask")</button>
+                            </form>
+                            @if (_answer is { } answer)
+                            {
+                                <div class="gws-reader-answer mt-2" role="status">
+                                    @if (answer.Problem is { } askProblem)
+                                    {
+                                        <p class="mb-0 text-warning-emphasis">@askProblem</p>
+                                    }
+                                    else
+                                    {
+                                        <p class="mb-1">@answer.Answer</p>
+                                        @if (!string.IsNullOrWhiteSpace(answer.Quote))
+                                        {
+                                            <blockquote class="mb-0">“@answer.Quote”</blockquote>
+                                        }
+                                    }
+                                </div>
+                            }
+                        </section>
+                        @if (ReadingTools)
+                        {
                         <section class="gws-reader-notes" aria-label="Notes">
                             <h3 class="h6">Notes and highlights</h3>
                             @if (_highlights.Count > 0)
@@ -78,6 +110,7 @@
                                 @if (!string.IsNullOrWhiteSpace(_highlightHint)) { <span class="small text-secondary">@_highlightHint</span> }
                             </div>
                         </section>
+                        }
                     }
                     else
                     {
@@ -89,6 +122,20 @@
                     }
                 </div>
                 <div class="modal-footer gws-reader-actions">
+                    @if (_article is { Readable: true } && _canSpeak)
+                    {
+                        <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="ToggleListenAsync" aria-pressed="@(_listening ? "true" : "false")">
+                            <i class="bi @(_listening ? "bi-stop-circle" : "bi-volume-up")" aria-hidden="true"></i> @(_listening ? "Stop" : "Listen")
+                        </button>
+                    }
+                    @if (!_loading && (_translated || _article is { Readable: true }))
+                    {
+                        <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="ToggleTranslationAsync">
+                            <i class="bi bi-translate" aria-hidden="true"></i> @(_translated ? "Show the original" : "Translate to English")
+                        </button>
+                    }
+                    @if (ReadingTools)
+                    {
                     @if (_article is { Readable: true })
                     {
                         <button type="button" class="btn btn-outline-primary btn-sm" disabled="@_thinking" @onclick="TakeawaysAsync">
@@ -113,6 +160,14 @@
                     @if (ClippedPageId is { } pageId)
                     {
                         <a class="btn btn-link btn-sm" href="/admin/sentinel?page=@pageId">Open the clip</a>
+                    }
+                    @if (OnFollowAuthor.HasDelegate && WriterName is { } writer)
+                    {
+                        var following = FollowedAuthors.Any(a => string.Equals(a, writer, StringComparison.OrdinalIgnoreCase));
+                        <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="() => OnFollowAuthor.InvokeAsync((writer, !following))">
+                            <i class="bi @(following ? "bi-person-check-fill" : "bi-person-plus")" aria-hidden="true"></i> @(following ? $"Following {writer}" : $"Follow {writer}")
+                        </button>
+                    }
                     }
                     <a class="btn btn-outline-secondary btn-sm ms-auto" href="@Url" target="_blank" rel="noopener noreferrer">
                         Open the original <i class="bi bi-box-arrow-up-right" aria-hidden="true"></i>
@@ -139,6 +194,16 @@
     [Parameter] public Func<ClipExtras, Task<bool>>? Clip { get; set; }
     // The article once read (the page keeps its reading time for the queue).
     [Parameter] public EventCallback<ReaderArticle> OnRead { get; set; }
+    // Opens translated into English (World News reports in other languages, 20-11-26).
+    [Parameter] public bool StartTranslated { get; set; }
+    // Read later, notes, takeaways and clips: Media Watch's reading desk. Off for a plain reader.
+    [Parameter] public bool ReadingTools { get; set; } = true;
+    // Follow an author (20-11-26): the feed's author, else the page's byline.
+    [Parameter] public string? Author { get; set; }
+    [Parameter] public IReadOnlyList<string> FollowedAuthors { get; set; } = [];
+    [Parameter] public EventCallback<(string Name, bool Follow)> OnFollowAuthor { get; set; }
+
+    private string? WriterName => NewsAuthors.Clean(Author) ?? NewsAuthors.Clean(_article?.Byline);
 
     private ReaderArticle? _article;
     private bool _loading;
@@ -149,6 +214,41 @@
     private readonly List<string> _highlights = [];
     private string? _highlightHint;
     private bool _clipping;
+    private bool _translated;
+    private bool _canSpeak;
+    private bool _listening;
+    private string _question = string.Empty;
+    private bool _asking;
+    private ReaderAnswer? _answer;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        try { _canSpeak = await JS.InvokeAsync<bool>("gwsReader.canSpeak"); }
+        catch (JSException) { _canSpeak = false; }
+        if (_canSpeak) StateHasChanged();
+    }
+
+    // Listen mode (20-11-26): the device's own voice reads the article.
+    private async Task ToggleListenAsync()
+    {
+        if (_listening)
+        {
+            await JS.InvokeVoidAsync("gwsReader.stop");
+            _listening = false;
+            return;
+        }
+        if (_article is not { Readable: true } article) return;
+        _listening = await JS.InvokeAsync<bool>("gwsReader.speak", new object[] { new[] { new { title = article.Title, text = article.Text } }, 1.0 });
+    }
+
+    private async Task AskAsync()
+    {
+        if (Url is null || _question.Trim().Length < 3) return;
+        _asking = true;
+        try { _answer = await Reader.AskAsync(Url, _question.Trim()); }
+        finally { _asking = false; }
+    }
 
     private bool HasNotes => !string.IsNullOrWhiteSpace(_notes) || _highlights.Count > 0;
 
@@ -161,14 +261,34 @@
         _notes = string.Empty;
         _highlights.Clear();
         _highlightHint = null;
+        _answer = null;
+        _question = string.Empty;
         _loading = true;
+        _translated = StartTranslated;
         var url = Url;
         try
         {
-            var article = await Reader.ReadAsync(url, Title);
+            var article = _translated ? await Reader.TranslateAsync(url, Title) : await Reader.ReadAsync(url, Title);
             if (url != _loadedUrl) return;
             _article = article;
             if (article.Readable) await OnRead.InvokeAsync(article);
+        }
+        finally
+        {
+            if (url == _loadedUrl) _loading = false;
+        }
+    }
+
+    private async Task ToggleTranslationAsync()
+    {
+        if (Url is null) return;
+        var url = Url;
+        _translated = !_translated;
+        _loading = true;
+        try
+        {
+            var article = _translated ? await Reader.TranslateAsync(url, Title) : await Reader.ReadAsync(url, Title);
+            if (url == _loadedUrl) _article = article;
         }
         finally
         {
@@ -212,6 +332,12 @@
 
     private async Task CloseAsync()
     {
+        if (_listening)
+        {
+            try { await JS.InvokeVoidAsync("gwsReader.stop"); }
+            catch (JSException) { }
+            _listening = false;
+        }
         _loadedUrl = null;
         _article = null;
         await OnClose.InvokeAsync();

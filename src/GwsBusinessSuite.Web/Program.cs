@@ -3060,6 +3060,7 @@ ArticleAlertEndpoints.Map(app);
 SentinelShareEndpoints.Map(app);
 RoadmapEndpoints.Map(app);
 BookingCalendarEndpoints.Map(app);
+CivicCalendarEndpoints.Map(app);
 
 // Handles "form" widget submissions (see CmsBlockHtmlRenderer's "form" case). Fixed URL
 // per site rather than per page — the submitted page's (possibly nested) full path travels

@@ -23,6 +23,50 @@ public sealed record CongressApiSettings(string ApiKey)
     // The shared key allows about 50 requests a day per server. At the hourly pace (about 20 calls
     // a refresh) nearly every call failed with 429 (05-11-26), so the feed slows down on it.
     public bool UsesDemoKey => string.Equals(ApiKey, "DEMO_KEY", StringComparison.Ordinal);
+
+    // One count of calls for the whole server (20-11-26), so background work leaves room for
+    // someone adding a federal bill.
+    public CongressApiBudget Budget { get; } = new(string.Equals(ApiKey, "DEMO_KEY", StringComparison.Ordinal) ? CongressApiBudget.DemoKeyPerDay : null);
+}
+
+// congress.gov calls in the last 24 hours. Background work stops while fewer than Reserve calls
+// are left; someone adding a bill may use those. Unlimited with a key of its own.
+public sealed class CongressApiBudget(int? perDay)
+{
+    public const int DemoKeyPerDay = 45;
+    public const int Reserve = 10;
+    private readonly Queue<DateTimeOffset> _calls = new();
+    private readonly Lock _gate = new();
+
+    public bool Limited => perDay is not null;
+
+    public int Remaining(DateTimeOffset now)
+    {
+        if (perDay is not { } limit) return int.MaxValue;
+        lock (_gate)
+        {
+            Expire(now);
+            return Math.Max(0, limit - _calls.Count);
+        }
+    }
+
+    public bool TryTake(int calls, bool background, DateTimeOffset now)
+    {
+        if (perDay is not { } limit) return true;
+        lock (_gate)
+        {
+            Expire(now);
+            var left = limit - _calls.Count - (background ? Reserve : 0);
+            if (left < calls) return false;
+            for (var i = 0; i < calls; i++) _calls.Enqueue(now);
+            return true;
+        }
+    }
+
+    private void Expire(DateTimeOffset now)
+    {
+        while (_calls.Count > 0 && now - _calls.Peek() >= TimeSpan.FromDays(1)) _calls.Dequeue();
+    }
 }
 
 public sealed class FederalCivicFeedService(

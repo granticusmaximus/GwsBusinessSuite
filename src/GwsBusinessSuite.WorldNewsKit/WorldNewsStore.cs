@@ -153,6 +153,12 @@ public sealed partial class WorldNewsStore
         // "written before comparisons", so a current event is asked once more; '' means none was given.
         columns.CommandText = "SELECT COUNT(*) FROM pragma_table_info('summaries') WHERE name = 'comparison'";
         if ((long)columns.ExecuteScalar()! == 0) Execute(connection, "ALTER TABLE summaries ADD COLUMN comparison TEXT");
+        // Disagreements claim by claim (20-11-26), on both the analysis and its kept versions.
+        foreach (var table in new[] { "analyses", "analysis_history" })
+        {
+            columns.CommandText = $"SELECT COUNT(*) FROM pragma_table_info('{table}') WHERE name = 'disputes'";
+            if ((long)columns.ExecuteScalar()! == 0) Execute(connection, $"ALTER TABLE {table} ADD COLUMN disputes TEXT");
+        }
         EnsureEnglishSchema(connection);
         // A new or small database gets the covering index straight away; building it over a big one
         // takes minutes, so that's EnsureCoveringIndex's job, off the startup path.
@@ -1819,14 +1825,14 @@ public sealed partial class WorldNewsStore
 
     // SentinelGPT's analysis of an event (EventAnalyzer): only the latest is kept.
     public EventAnalysis? LatestAnalysis(string eventId) =>
-        ReadAnalysis(eventId, "SELECT claim, summary, agreed, differences, model, article_count, articles_read, created_at FROM analyses WHERE event_id = $event");
+        ReadAnalysis(eventId, "SELECT claim, summary, agreed, differences, model, article_count, articles_read, created_at, disputes FROM analyses WHERE event_id = $event");
 
     // The analysis a reader saw at analysisAt: the latest if that's it, else the kept version.
     public EventAnalysis? AnalysisAt(string eventId, DateTimeOffset analysisAt) =>
         LatestAnalysis(eventId) is { } latest && latest.CreatedAt.ToUnixTimeSeconds() == analysisAt.ToUnixTimeSeconds()
             ? latest
             : ReadAnalysis(eventId, """
-                SELECT claim, summary, agreed, differences, model, article_count, articles_read, created_at FROM analysis_history
+                SELECT claim, summary, agreed, differences, model, article_count, articles_read, created_at, disputes FROM analysis_history
                 WHERE event_id = $event AND created_at <= $at ORDER BY created_at DESC LIMIT 1
                 """, ("$at", analysisAt.ToUnixTimeSeconds()));
 
@@ -1850,8 +1856,10 @@ public sealed partial class WorldNewsStore
             .Select(line => line.Split('\t', 2))
             .Select(parts => new AgreedFact(parts[0], parts.Length == 2 ? parts[1].Split('|', StringSplitOptions.RemoveEmptyEntries) : []))
             .ToList();
+        // None kept reads as null, as an analysis written before disputes (20-11-26).
+        var disputes = reader.FieldCount > 8 && !reader.IsDBNull(8) && ClaimDispute.Decode(reader.GetString(8)) is { Count: > 0 } kept ? kept : null;
         return new EventAnalysis(eventId, reader.GetString(0), reader.GetString(1), agreed,
-            differences, reader.GetString(4), reader.GetInt32(5), reader.GetInt32(6), DateTimeOffset.FromUnixTimeSeconds(reader.GetInt64(7)));
+            differences, reader.GetString(4), reader.GetInt32(5), reader.GetInt32(6), DateTimeOffset.FromUnixTimeSeconds(reader.GetInt64(7)), disputes);
     }
 
     public EventAnalysis SaveAnalysis(EventAnalysis analysis)
@@ -1861,13 +1869,15 @@ public sealed partial class WorldNewsStore
         using var command = connection.CreateCommand();
         // The one it replaces is kept, for "what changed since you last read".
         command.CommandText = $"""
-            INSERT OR IGNORE INTO analysis_history SELECT event_id, claim, summary, agreed, differences, model, article_count, articles_read, created_at
+            INSERT OR IGNORE INTO analysis_history (event_id, claim, summary, agreed, differences, model, article_count, articles_read, created_at, disputes)
+                SELECT event_id, claim, summary, agreed, differences, model, article_count, articles_read, created_at, disputes
                 FROM analyses WHERE event_id = $event;
             DELETE FROM analysis_history WHERE event_id = $event AND created_at NOT IN
                 (SELECT created_at FROM analysis_history WHERE event_id = $event ORDER BY created_at DESC LIMIT {KeptAnalysisVersions});
-            INSERT OR REPLACE INTO analyses (event_id, claim, summary, agreed, differences, model, article_count, articles_read, created_at)
-            VALUES ($event, $claim, $summary, $agreed, $differences, $model, $count, $read, $created)
+            INSERT OR REPLACE INTO analyses (event_id, claim, summary, agreed, differences, model, article_count, articles_read, created_at, disputes)
+            VALUES ($event, $claim, $summary, $agreed, $differences, $model, $count, $read, $created, $disputes)
             """;
+        command.Parameters.AddWithValue("$disputes", ClaimDispute.Encode(analysis.Disputes ?? []));
         command.Parameters.AddWithValue("$event", analysis.EventId);
         command.Parameters.AddWithValue("$claim", Line(analysis.Claim));
         command.Parameters.AddWithValue("$summary", Line(analysis.Summary));

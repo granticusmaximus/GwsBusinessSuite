@@ -288,7 +288,14 @@ public sealed partial class NewsWatchService(
             .Select(n => new ReadingDigest.Candidate(n.Title, n.Url, n.Source, names.GetValueOrDefault(n.TopicId!.Value, ""), n.PublishedAt,
                 n.CommunityScore, n.ReadingMinutes, string.IsNullOrWhiteSpace(n.OllamaSummary) ? n.Description : n.OllamaSummary));
         var picks = ReadingDigest.Pick(candidates, read, NewsStoryClusterer.UrlHash, now);
-        var blocks = WikiBlockJson.Serialize(WikiBlockJson.FromMarkdown(ReadingDigest.Markdown(picks, timeProvider.GetLocalNow())));
+        var markdown = ReadingDigest.Markdown(picks, timeProvider.GetLocalNow());
+        // 6. Old highlights brought back (20-11-26): three from clips at least a week old.
+        var resurfaced = ReadingLibrary.Resurface(await ClipTextsAsync(db, username, ct), now);
+        if (resurfaced.Count > 0)
+        {
+            markdown += "\n## From your highlights\n\n" + string.Join("\n\n", resurfaced.Select(r => $"> {r.Quote}\n\n*{r.Title}*")) + "\n";
+        }
+        var blocks = WikiBlockJson.Serialize(WikiBlockJson.FromMarkdown(markdown));
 
         var page = await SentinelPersonalPages.FindAsync(db, ReadingDigest.PageSystemKey, username, ct);
         if (page is null)
@@ -319,6 +326,81 @@ public sealed partial class NewsWatchService(
             BlocksJson = blocks
         }, username, cancellationToken: ct);
         return page.Id;
+    }
+
+    // Someone's clip pages as text, quote blocks marked "> ", for highlights and library search.
+    private static async Task<List<(string Title, string Markdown, DateTimeOffset ClippedAt, Guid PageId)>> ClipPagesAsync(IAppDbContext db, string username, CancellationToken ct)
+    {
+        var folder = await SentinelPersonalPages.FindAsync(db, ClipsFolderSystemKey, username, ct);
+        if (folder is null) return [];
+        var pages = await db.WikiPages.AsNoTracking().Where(p => p.ParentWikiPageId == folder.Id)
+            .Select(p => new { p.Id, p.Title, p.BlocksJson, p.CreatedAt }).ToListAsync(ct);
+        return pages.Select(p => (p.Title, string.Join('\n', WikiBlockJson.ParseBlocks(p.BlocksJson)
+                .Select(b => b.Type == WikiBlockTypes.Quote ? "> " + b.PlainText : b.PlainText)), p.CreatedAt, p.Id))
+            .ToList();
+    }
+
+    private static async Task<IEnumerable<(string Title, string Markdown, DateTimeOffset ClippedAt)>> ClipTextsAsync(IAppDbContext db, string username, CancellationToken ct) =>
+        (await ClipPagesAsync(db, username, ct)).Select(c => (c.Title, c.Markdown, c.ClippedAt));
+
+    public async Task<IReadOnlyList<LibraryHit>> SearchLibraryAsync(string username, string query, CancellationToken ct = default)
+    {
+        if (ReadingLibrary.Words(query).Count == 0) return [];
+        await using var db = await dbContextFactory.CreateDbContextAsync(ct);
+        var hits = new List<LibraryHit>();
+        var saved = await db.SavedNewsArticles.AsNoTracking().Where(s => s.Username == username).ToListAsync(ct);
+        var clips = await ClipPagesAsync(db, username, ct);
+        var clipText = clips.ToDictionary(c => c.PageId, c => c.Markdown);
+        foreach (var s in saved)
+        {
+            var text = s.ClippedWikiPageId is { } pageId ? clipText.GetValueOrDefault(pageId) : null;
+            if (!ReadingLibrary.Matches(query, s.Title, s.Summary, s.Source, s.TopicName, text)) continue;
+            hits.Add(new LibraryHit(s.Title, s.Url, s.Source, s.ClippedWikiPageId is null ? LibraryWhere.Queued : LibraryWhere.Clipped,
+                ReadingLibrary.Snippet(text, query) ?? ReadingLibrary.Snippet(s.Summary, query), s.ClippedWikiPageId, s.CreatedAt));
+        }
+        // Clips whose queued copy was removed still count.
+        var clippedIds = saved.Where(s => s.ClippedWikiPageId is not null).Select(s => s.ClippedWikiPageId!.Value).ToHashSet();
+        foreach (var clip in clips.Where(c => !clippedIds.Contains(c.PageId) && ReadingLibrary.Matches(query, c.Title, c.Markdown)))
+            hits.Add(new LibraryHit(clip.Title, $"/admin/sentinel?page={clip.PageId}", "Sentinel", LibraryWhere.Clipped,
+                ReadingLibrary.Snippet(clip.Markdown, query), clip.PageId, clip.ClippedAt));
+        // Articles you've read that are still in a feed.
+        var savedHashes = saved.Select(s => s.UrlHash).ToHashSet();
+        var readHashes = (await db.NewsReadMarks.AsNoTracking().Where(m => m.Username == username).Select(m => new { m.UrlHash, m.ReadAt }).ToListAsync(ct))
+            .Where(m => !savedHashes.Contains(m.UrlHash)).ToDictionary(m => m.UrlHash, m => m.ReadAt);
+        if (readHashes.Count > 0)
+        {
+            foreach (var item in (await db.NewsItems.AsNoTracking().ToListAsync(ct))
+                         .Where(n => readHashes.ContainsKey(NewsStoryClusterer.UrlHash(n.Url)) && ReadingLibrary.Matches(query, n.Title, n.Description, n.OllamaSummary, n.Source))
+                         .DistinctBy(n => NewsStoryClusterer.UrlHash(n.Url)))
+                hits.Add(new LibraryHit(item.Title, item.Url, item.Source, LibraryWhere.Read, ReadingLibrary.Snippet(item.Description, query),
+                    null, readHashes[NewsStoryClusterer.UrlHash(item.Url)]));
+        }
+        return hits.OrderByDescending(h => h.At ?? DateTimeOffset.MinValue).Take(ReadingLibrary.MaxHits).ToList();
+    }
+
+    public async Task<IReadOnlyList<string>> ListFollowedAuthorsAsync(string username, CancellationToken ct = default)
+    {
+        await using var db = await dbContextFactory.CreateDbContextAsync(ct);
+        return (await db.FollowedNewsAuthors.AsNoTracking().Where(a => a.Username == username).Select(a => a.Name).ToListAsync(ct))
+            .Order(StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    public const int MaxFollowedAuthors = 100;
+
+    public async Task FollowAuthorAsync(string username, string name, bool follow, CancellationToken ct = default)
+    {
+        var clean = NewsAuthors.Clean(name) ?? throw new ArgumentException("That byline isn't a writer's name that can be followed.");
+        await using var db = await dbContextFactory.CreateDbContextAsync(ct);
+        var existing = (await db.FollowedNewsAuthors.Where(a => a.Username == username).ToListAsync(ct))
+            .Where(a => string.Equals(a.Name, clean, StringComparison.OrdinalIgnoreCase)).ToList();
+        if (follow && existing.Count == 0)
+        {
+            if (await db.FollowedNewsAuthors.CountAsync(a => a.Username == username, ct) >= MaxFollowedAuthors)
+                throw new ArgumentException($"You can follow up to {MaxFollowedAuthors} writers.");
+            db.FollowedNewsAuthors.Add(new FollowedNewsAuthor { Username = username, Name = clean, CreatedBy = username, CreatedAt = timeProvider.GetUtcNow() });
+        }
+        if (!follow) db.FollowedNewsAuthors.RemoveRange(existing);
+        await db.SaveChangesAsync(ct);
     }
 
     // Due on Mondays from 07:00 local, once a week.
@@ -606,16 +688,25 @@ public sealed partial class NewsWatchService(
         var window = settings.DigestFrequency == NewsDigestFrequencies.Weekly ? TimeSpan.FromDays(7) : TimeSpan.FromDays(1);
         var since = (settings.LastDigestSentAt is { } last && now - last < window ? last : now - window).ToUnixTimeSeconds();
         var topics = await db.WatchedTopics.AsNoTracking().Where(t => t.IsActive).ToListAsync(ct);
-        var items = await db.NewsItems.AsNoTracking().Where(n => n.FetchedAtUnixSeconds >= since).ToListAsync(ct);
+        // Muted keywords and sites stay out of the digest too (20-11-26).
+        var mutedKeywords = ReadingFilters.Lines(settings.MutedKeywords);
+        var mutedSources = ReadingFilters.Lines(settings.MutedSources);
+        var items = (await db.NewsItems.AsNoTracking().Where(n => n.FetchedAtUnixSeconds >= since).ToListAsync(ct))
+            .Where(n => !ReadingFilters.IsMuted(n.Title, n.Description, n.Source, n.Url, mutedKeywords, mutedSources))
+            .ToList();
 
         var sections = new List<(string Name, IReadOnlyList<NewsStory> Stories)>();
         foreach (var topic in topics.OrderBy(t => t.Name))
         {
-            var stories = Stories(items.Where(i => i.TopicId == topic.Id), topic.Name, now);
+            var stories = Stories(items.Where(i => i.TopicId == topic.Id), topic.Name, now, topic.TopicType == WatchedTopicTypes.Technical);
             if (stories.Count > 0) sections.Add((topic.Name, stories));
         }
         var top = Stories(items.Where(i => i.TopicId == null), "Top News", now);
         if (top.Count > 0) sections.Add(("Top News", top));
+
+        // Short reads waiting in the queue of whoever set the digest up.
+        var owner = settings.UpdatedBy ?? settings.CreatedBy;
+        var quickReads = string.IsNullOrWhiteSpace(owner) || owner == "system" ? [] : QuickReads(await ListSavedAsync(owner, ct));
 
         if (sections.Count == 0)
         {
@@ -628,24 +719,44 @@ public sealed partial class NewsWatchService(
         message.From.Add(from);
         message.To.Add(to);
         message.Subject = $"[Media Watch] {(settings.DigestFrequency == NewsDigestFrequencies.Weekly ? "Weekly" : "Daily")} digest - {sections.Sum(s => s.Stories.Count)} stories";
-        message.Body = new BodyBuilder { TextBody = DigestText(sections), HtmlBody = DigestHtml(sections) }.ToMessageBody();
+        message.Body = new BodyBuilder { TextBody = DigestText(sections, quickReads), HtmlBody = DigestHtml(sections, quickReads) }.ToMessageBody();
         await mailTransport.SendAsync(message, smtp, "media-watch-digest", ct);
         settings.LastDigestSentAt = now;
         await db.SaveChangesAsync(ct);
         return new(true, $"Digest sent to {to.Address}.");
     }
 
-    private static IReadOnlyList<NewsStory> Stories(IEnumerable<NewsItem> items, string topicName, DateTimeOffset now) =>
-        NewsStoryClusterer.Cluster(items.Select(n => new NewsItemDto(n.Id, n.TopicId, topicName, "", n.Title, n.Url, n.Source,
-                n.PublishedAt, n.Description, n.OllamaSummary, n.FetchedAt, n.ImageUrl)).ToList(), now)
-            .OrderByDescending(s => s.OutletCount)
-            .ThenByDescending(s => s.Lead.PublishedAt ?? s.Lead.FetchedAt)
-            .Take(DigestStoriesPerTopic)
-            .ToList();
+    // Technical topics lead with the best reads (discussion and depth); others with the stories
+    // most outlets carried, best reads breaking ties (20-11-26).
+    public static IReadOnlyList<NewsStory> Stories(IEnumerable<NewsItem> items, string topicName, DateTimeOffset now, bool technical = false)
+    {
+        var stories = NewsStoryClusterer.Cluster(items.Select(n => new NewsItemDto(n.Id, n.TopicId, topicName, "", n.Title, n.Url, n.Source,
+            n.PublishedAt, n.Description, n.OllamaSummary, n.FetchedAt, n.ImageUrl, n.CommunityScore, n.ReadingMinutes)).ToList(), now);
+        double Best(NewsStory s) => s.OtherReports.Prepend(s.Lead).Max(r => TechReadingRank.Score(r.CommunityScore, r.ReadingMinutes, r.PublishedAt ?? r.FetchedAt, now));
+        var ordered = technical
+            ? stories.OrderByDescending(Best).ThenByDescending(s => s.OutletCount)
+            : stories.OrderByDescending(s => s.OutletCount).ThenByDescending(Best);
+        return ordered.Take(DigestStoriesPerTopic).ToList();
+    }
 
-    public static string DigestText(IReadOnlyList<(string Name, IReadOnlyList<NewsStory> Stories)> sections)
+    public const int DigestQuickReads = 3;
+    public const int QuickReadMinutes = 10;
+
+    // Unfinished queued articles that take ten minutes or less, shortest first.
+    public static IReadOnlyList<SavedArticleView> QuickReads(IEnumerable<SavedArticleView> saved) =>
+        saved.Where(s => s.FinishedAt is null && s.ReadingMinutes is > 0 and <= QuickReadMinutes)
+            .OrderBy(s => s.ReadingMinutes).ThenByDescending(s => s.SavedAt)
+            .Take(DigestQuickReads).ToList();
+
+    public static string DigestText(IReadOnlyList<(string Name, IReadOnlyList<NewsStory> Stories)> sections, IReadOnlyList<SavedArticleView>? quickReads = null)
     {
         var text = new StringBuilder();
+        if (quickReads is { Count: > 0 })
+        {
+            text.AppendLine($"{quickReads.Count} QUEUED READS UNDER {QuickReadMinutes} MINUTES");
+            foreach (var read in quickReads) text.AppendLine($"- {read.Title} ({read.ReadingMinutes} min, {read.Source})\n  {read.Url}");
+            text.AppendLine();
+        }
         foreach (var (name, stories) in sections)
         {
             text.AppendLine(name.ToUpperInvariant());
@@ -662,10 +773,16 @@ public sealed partial class NewsWatchService(
         return text.ToString();
     }
 
-    public static string DigestHtml(IReadOnlyList<(string Name, IReadOnlyList<NewsStory> Stories)> sections)
+    public static string DigestHtml(IReadOnlyList<(string Name, IReadOnlyList<NewsStory> Stories)> sections, IReadOnlyList<SavedArticleView>? quickReads = null)
     {
         static string E(string? v) => WebUtility.HtmlEncode(v ?? string.Empty);
         var html = new StringBuilder("<div style=\"font-family:system-ui,sans-serif;font-size:14px;color:#1f2937\">");
+        if (quickReads is { Count: > 0 })
+        {
+            html.Append($"<h3 style=\"margin:18px 0 6px\">{quickReads.Count} queued reads under {QuickReadMinutes} minutes</h3>");
+            foreach (var read in quickReads)
+                html.Append($"<p style=\"margin:0 0 10px\"><a href=\"{E(read.Url)}\" style=\"font-weight:600\">{E(read.Title)}</a><br><span style=\"color:#64748b\">{read.ReadingMinutes} min · {E(read.Source)}</span></p>");
+        }
         foreach (var (name, stories) in sections)
         {
             html.Append($"<h3 style=\"margin:18px 0 6px\">{E(name)}</h3>");

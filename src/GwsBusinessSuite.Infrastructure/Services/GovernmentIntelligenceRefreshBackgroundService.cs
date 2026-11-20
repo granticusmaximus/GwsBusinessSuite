@@ -54,6 +54,19 @@ public sealed class GovernmentIntelligenceRefreshBackgroundService(
                 logger.LogWarning(ex, "Civic Watch: recording sightings failed");
             }
 
+            // Members' votes for scorecards, and each reader's weekly page on Mondays (20-11-26).
+            try
+            {
+                var civic = scope.ServiceProvider.GetRequiredService<ICivicWatchService>();
+                await civic.RecordMemberVotesAsync(snapshot, ct);
+                var pages = await civic.RunWeeklyPagesIfDueAsync(snapshot, ct);
+                if (pages > 0) logger.LogInformation("Civic Watch: weekly page built for {Count} readers", pages);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                logger.LogWarning(ex, "Civic Watch: member votes or weekly pages failed");
+            }
+
             // Off the request path by construction (this only ever runs from this timer),
             // so it's safe for PopulateAiOverviewsAsync to serialize through the shared
             // Ollama scheduler at its own pace - see that method's comment for why it must

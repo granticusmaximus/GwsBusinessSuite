@@ -14,6 +14,13 @@ public interface INewsIntelligenceService
     Task RefreshTopicAsync(Guid topicId, CancellationToken ct = default);
     Task RefreshTopNewsAsync(CancellationToken ct = default);
     Task RefreshAllAsync(CancellationToken ct = default);
+
+    // The release radar: GitHub release feeds of the libraries GWS uses, as a feeds-only topic (20-11-26).
+    Task<WatchedTopicSummary> AddReleaseRadarAsync(CancellationToken ct = default) =>
+        throw new NotSupportedException("The release radar isn't available here.");
+
+    // Writes AI takes the model was too busy for at refresh time; returns how many (20-11-26).
+    Task<int> FillMissingTakesAsync(CancellationToken ct = default) => Task.FromResult(0);
     NewsRefreshStatus GetRefreshStatus();
 }
 
@@ -43,11 +50,15 @@ public sealed record NewsItemDto(
     DateTimeOffset FetchedAt,
     string? ImageUrl = null,
     int? CommunityScore = null,
-    int? ReadingMinutes = null);
+    int? ReadingMinutes = null,
+    string? Author = null);
 
+// Meanings: each headline's embedding by item id, when the server's model could give them, so
+// differently worded reports of one event group together (20-11-26).
 public sealed record NewsFeedResult(
     IReadOnlyList<NewsItemDto> Items,
-    DateTimeOffset? LastRefreshedAt);
+    DateTimeOffset? LastRefreshedAt,
+    IReadOnlyDictionary<Guid, float[]>? Meanings = null);
 
 public sealed record NewsRefreshTiming(
     string WorkItem,

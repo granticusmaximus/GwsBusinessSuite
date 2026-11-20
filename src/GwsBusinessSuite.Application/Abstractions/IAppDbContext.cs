@@ -48,11 +48,14 @@ public interface IAppDbContext : IAsyncDisposable
     DbSet<NewsWatchSettings> NewsWatchSettings { get; }
     DbSet<NewsReadMark> NewsReadMarks { get; }
     DbSet<SavedNewsArticle> SavedNewsArticles { get; }
+    DbSet<FollowedNewsAuthor> FollowedNewsAuthors { get; }
     DbSet<NewsTrendDay> NewsTrendDays { get; }
     DbSet<CivicWatchSettings> CivicWatchSettings { get; }
     DbSet<WatchedBill> WatchedBills { get; }
     DbSet<CivicItemSighting> CivicItemSightings { get; }
     DbSet<CivicMeetingDocument> CivicMeetingDocuments { get; }
+    DbSet<CivicWatchUserState> CivicWatchUserStates { get; }
+    DbSet<CivicMemberVote> CivicMemberVotes { get; }
     DbSet<OverwatchWatchArea> OverwatchWatchAreas { get; }
     DbSet<OverwatchAreaAlert> OverwatchAreaAlerts { get; }
     DbSet<OverwatchTrip> OverwatchTrips { get; }

@@ -20,7 +20,30 @@ public sealed record EventAnalysis(
     // How many reports the event had, and how many articles were read in full, when it was written.
     int ArticleCount,
     int ArticlesRead,
-    DateTimeOffset CreatedAt);
+    DateTimeOffset CreatedAt,
+    // Where outlets give conflicting accounts, point by point (20-11-26). Empty for older analyses.
+    IReadOnlyList<ClaimDispute>? Disputes = null);
+
+// One point the outlets disagree on, and each outlet's account of it (at least two outlets).
+public sealed record ClaimDispute(string Point, IReadOnlyList<OutletDifference> Accounts)
+{
+    // Stored one dispute a line: the point, then tab-separated "outlet<US>account" pairs.
+    public static string Encode(IEnumerable<ClaimDispute> disputes) => string.Join('\n', disputes.Select(d =>
+        string.Join('\t', d.Accounts.Select(a => $"{Clean(a.Outlet)}\u001f{Clean(a.Text)}").Prepend(Clean(d.Point)))));
+
+    public static IReadOnlyList<ClaimDispute> Decode(string? stored) =>
+        (stored ?? string.Empty).Split('\n', StringSplitOptions.RemoveEmptyEntries)
+            .Select(line => line.Split('\t'))
+            .Where(parts => parts.Length >= 3)
+            .Select(parts => new ClaimDispute(parts[0], parts.Skip(1)
+                .Select(pair => pair.Split('\u001f', 2))
+                .Where(pair => pair.Length == 2)
+                .Select(pair => new OutletDifference(pair[0], pair[1])).ToList()))
+            .Where(d => d.Accounts.Count >= 2)
+            .ToList();
+
+    private static string Clean(string text) => text.Replace('\n', ' ').Replace('\t', ' ').Replace('\u001f', ' ').Trim();
+}
 
 // What one outlet adds or disputes. Outlet is empty for a point that names none.
 public sealed record OutletDifference(string Outlet, string Text);
@@ -58,7 +81,44 @@ public static partial class EventAnalyzer
         AGREED: 3 to 6 lines, one key fact each in a few words, which the most outlets report alike. Each line in this form, listing in the brackets every outlet whose report states that fact:
         - <the fact> [Outlet A, Outlet B, Outlet C]
         DIFFERENCES: one line for each outlet whose coverage stands out, in the form "- Outlet name: <what only it reports, or where it disagrees with the others>". Skip outlets that only repeat the others.
+        DISPUTES: one line for each specific point where two or more outlets give accounts that can't both be true (a number, a cause, who is responsible, what happened), in the form "- <the point> :: Outlet A: <its account> | Outlet B: <its account>". Write "- none" when the reports don't conflict.
         """;
+
+    public const int MaxDisputes = 6;
+
+    // The DISPUTES section: a point with each outlet's account, kept only when two or more of
+    // the event's own outlets are named (20-11-26).
+    public static IReadOnlyList<ClaimDispute> ParseDisputes(string raw, IReadOnlyCollection<string> outlets)
+    {
+        var text = Think().Replace(raw ?? string.Empty, string.Empty).Replace("**", string.Empty);
+        var start = DisputesLabel().Match(text);
+        if (!start.Success) return [];
+        var section = text[(start.Index + start.Length)..];
+        var next = Label().Match(section);
+        if (next.Success) section = section[..next.Index];
+        var disputes = new List<ClaimDispute>();
+        foreach (var line in section.Split('\n').Select(l => Flat(Bullet().Replace(l.Trim(), string.Empty))).Where(l => l.Length > 0))
+        {
+            var split = line.IndexOf("::", StringComparison.Ordinal);
+            if (split <= 0) continue;
+            var point = line[..split].Trim().TrimEnd(':', '.').Trim();
+            var accounts = line[(split + 2)..].Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Select(part =>
+                {
+                    var colon = part.IndexOf(':');
+                    if (colon <= 0) return null;
+                    var outlet = Known(part[..colon], outlets);
+                    var account = part[(colon + 1)..].Trim();
+                    return outlet is null || account.Length < 3 ? null : new OutletDifference(outlet, account);
+                })
+                .OfType<OutletDifference>()
+                .DistinctBy(a => a.Outlet, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            if (point.Length >= 3 && accounts.Count >= 2) disputes.Add(new ClaimDispute(point, accounts));
+            if (disputes.Count == MaxDisputes) break;
+        }
+        return disputes;
+    }
 
     // True when there's no analysis yet, or coverage has grown enough since to write it again.
     public static bool IsDue(EventAnalysis? analysis, EventOverview e) =>
@@ -222,8 +282,11 @@ public static partial class EventAnalyzer
     [GeneratedRegex(@"<think>.*?</think>", RegexOptions.Singleline | RegexOptions.IgnoreCase)]
     private static partial Regex Think();
 
-    [GeneratedRegex(@"^\s*#*\s*(CLAIM|SUMMARY|AGREED|DIFFERENCES)\s*:", RegexOptions.Multiline | RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"^\s*#*\s*(CLAIM|SUMMARY|AGREED|DIFFERENCES|DISPUTES)\s*:", RegexOptions.Multiline | RegexOptions.IgnoreCase)]
     private static partial Regex Label();
+
+    [GeneratedRegex(@"^\s*#*\s*DISPUTES\s*:", RegexOptions.Multiline | RegexOptions.IgnoreCase)]
+    private static partial Regex DisputesLabel();
 
     [GeneratedRegex(@"^([-*•–]|\d+[.)])\s*")]
     private static partial Regex Bullet();

@@ -482,3 +482,59 @@
 
 /* B7: a summary sentence naming something not found in the reports. */
 .story-unsupported { text-decoration: underline dotted; text-decoration-color: var(--bs-warning, #d97706); text-underline-offset: 3px; cursor: help; }
+
+.story-disputes > li {
+    margin-bottom: 0.4rem;
+}
+
+.story-dispute-outlet {
+    font-weight: 600;
+}
+
+.story-jump button.is-active {
+    background: var(--bs-primary-bg-subtle);
+    border-color: var(--bs-primary);
+    color: var(--bs-primary-text-emphasis);
+}
+
+.story-catch-up {
+    margin: .5rem 0 0;
+    font-style: italic;
+}
+
+.story-spread-replay {
+    display: block;
+    margin-bottom: .5rem;
+    font-size: var(--gws-type-sm);
+}
+
+.story-spread-hours {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.story-spread-hours li {
+    display: grid;
+    grid-template-columns: 8rem 1fr;
+    gap: .15rem .75rem;
+    align-items: center;
+    padding: .2rem 0;
+    font-size: var(--gws-type-sm);
+}
+
+.story-spread-hours li.is-later {
+    opacity: .35;
+}
+
+.story-spread-bar {
+    display: block;
+    height: .5rem;
+    border-radius: var(--gws-radius-pill);
+    background: var(--bs-primary);
+}
+
+.story-spread-new {
+    grid-column: 2;
+    color: var(--bs-secondary-color);
+}

@@ -351,6 +351,21 @@ public sealed class WebCrawlStore
         return pages;
     }
 
+    // A kept page's text by its address (the reader's fallback, 20-11-26).
+    public async Task<(string Title, string Body, DateTimeOffset? Published)?> GetPageAsync(string url)
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT p.title, f.body, p.published FROM pages p JOIN pages_fts f ON f.rowid = p.id
+            WHERE p.url = $url ORDER BY p.id DESC LIMIT 1
+            """;
+        command.Parameters.AddWithValue("$url", url);
+        using var reader = await command.ExecuteReaderAsync();
+        if (!await reader.ReadAsync()) return null;
+        return (reader.GetString(0), reader.GetString(1), reader.IsDBNull(2) ? null : DateTimeOffset.FromUnixTimeSeconds(reader.GetInt64(2)));
+    }
+
     public async Task<long> MaxPageIdAsync()
     {
         using var connection = Open();

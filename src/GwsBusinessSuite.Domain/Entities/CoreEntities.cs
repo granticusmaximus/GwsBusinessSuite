@@ -2553,8 +2553,10 @@ public static class WatchedTopicTypes
     // topics get sources that actually carry developer discussion instead.
     public const string General = "General";
     public const string Technical = "Technical";
+    // Feeds: only the topic's own trusted feeds, no search (the release radar, 20-11-26).
+    public const string Feeds = "Feeds";
 
-    public static readonly string[] All = [General, Technical];
+    public static readonly string[] All = [General, Technical, Feeds];
 }
 
 public sealed class WatchedTopic : AuditableEntity
@@ -2600,6 +2602,8 @@ public sealed class NewsItem : AuditableEntity
     public int? CommunityScore { get; set; }
     // About how long the article takes to read, from its own text (230 words a minute).
     public int? ReadingMinutes { get; set; }
+    // The writer the feed names, for "authors you follow" (20-11-26).
+    public string? Author { get; set; }
 }
 
 public sealed class PodcastShow : AuditableEntity

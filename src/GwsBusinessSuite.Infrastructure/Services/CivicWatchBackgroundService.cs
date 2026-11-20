@@ -42,7 +42,8 @@ public sealed class CivicWatchBackgroundService(
 
         try
         {
-            await civic.RefreshMeetingDocumentsAsync(maxSummaries: 2, ct);
+            // Six an hour since the model runs on the server (20-11-26; two while it waited for a Mac).
+            await civic.RefreshMeetingDocumentsAsync(maxSummaries: 6, ct);
         }
         catch (OperationCanceledException) { }
         catch (Exception ex)

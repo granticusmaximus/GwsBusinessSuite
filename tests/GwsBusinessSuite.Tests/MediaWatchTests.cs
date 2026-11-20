@@ -199,6 +199,35 @@ public sealed class MediaWatchTests
         fixture.Db.WikiPages.Count(p => p.SystemKey == "media-watch-clips:grant").Should().Be(1, "the clips folder is this person's own");
     }
 
+    // 20-11-26: your library finds what you clipped and queued; authors are followed per person.
+    [Fact]
+    public async Task Library_ShouldFindClipsAndQueuedArticles_ByEveryWord()
+    {
+        await using var fixture = await Fixture.CreateAsync(reader: new FakeReader());
+        var clipped = Item("Designing for failure", "InfoQ", 2);
+        await fixture.Service.ClipToSentinelAsync("grant", clipped, new ClipExtras(null, ["Retries need jitter and a budget."]));
+        await fixture.Service.SaveArticleAsync("grant", Item("Rust in the kernel", "LWN", 3, summary: "Drivers move to Rust"));
+
+        var hits = await fixture.Service.SearchLibraryAsync("grant", "jitter budget");
+        hits.Should().ContainSingle().Which.Should().BeEquivalentTo(new { Title = clipped.Title, Where = LibraryWhere.Clipped });
+        (await fixture.Service.SearchLibraryAsync("grant", "rust drivers")).Should().ContainSingle().Which.Where.Should().Be(LibraryWhere.Queued);
+        (await fixture.Service.SearchLibraryAsync("someone-else", "rust")).Should().BeEmpty("a library is its owner's");
+    }
+
+    [Fact]
+    public async Task FollowAuthor_ShouldCleanTheName_AndBeKeptPerPerson()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        await fixture.Service.FollowAuthorAsync("grant", "By Julia Evans", follow: true);
+        await fixture.Service.FollowAuthorAsync("grant", "julia evans", follow: true);
+        (await fixture.Service.ListFollowedAuthorsAsync("grant")).Should().Equal("Julia Evans");
+        (await fixture.Service.ListFollowedAuthorsAsync("ann")).Should().BeEmpty();
+        await fixture.Service.FollowAuthorAsync("grant", "Julia Evans", follow: false);
+        (await fixture.Service.ListFollowedAuthorsAsync("grant")).Should().BeEmpty();
+        var act = () => fixture.Service.FollowAuthorAsync("grant", "staff", follow: true);
+        await act.Should().ThrowAsync<ArgumentException>();
+    }
+
     [Fact]
     public async Task ReadingQueue_ShouldKeepMinutesAndFinished()
     {

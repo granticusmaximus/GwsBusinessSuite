@@ -129,6 +129,23 @@ public sealed class NewsIntelligenceService(
             existing.ColorHex, true, WatchedTopicTypes.Technical, TechReadingPack.MergeFeeds(existing.TrustedFeedUrls), ct);
     }
 
+    // The release radar (20-11-26): a feeds-only topic of the GitHub release feeds of what GWS is
+    // built on. Again tops up an existing one.
+    public async Task<WatchedTopicSummary> AddReleaseRadarAsync(CancellationToken ct = default)
+    {
+        WatchedTopic? existing;
+        await using (var db = await dbContextFactory.CreateDbContextAsync(ct))
+        {
+            existing = (await db.WatchedTopics.AsNoTracking().ToListAsync(ct))
+                .FirstOrDefault(t => string.Equals(t.Name, ReleaseRadar.TopicName, StringComparison.OrdinalIgnoreCase));
+        }
+        if (existing is null)
+            return await CreateTopicAsync(ReleaseRadar.TopicName, ReleaseRadar.Keywords, ReleaseRadar.ColorHex,
+                WatchedTopicTypes.Feeds, ReleaseRadar.MergeFeeds(null), ct);
+        return await UpdateTopicAsync(existing.Id, existing.Name, string.IsNullOrWhiteSpace(existing.Keywords) ? ReleaseRadar.Keywords : existing.Keywords,
+            existing.ColorHex, true, WatchedTopicTypes.Feeds, ReleaseRadar.MergeFeeds(existing.TrustedFeedUrls), ct);
+    }
+
     public async Task<WatchedTopicSummary> CreateTopicAsync(string name, string keywords, string colorHex, string topicType, string trustedFeedUrls, CancellationToken ct = default)
     {
         await WriteLock.WaitAsync(ct);
@@ -228,11 +245,51 @@ public sealed class NewsIntelligenceService(
             var topicName = topic?.Name ?? "Top News";
             var topicColor = topic?.ColorHex ?? "#64748b";
             return new NewsItemDto(n.Id, n.TopicId, topicName, topicColor, n.Title, n.Url,
-                n.Source, n.PublishedAt, n.Description, n.OllamaSummary, n.FetchedAt, n.ImageUrl, n.CommunityScore, n.ReadingMinutes);
+                n.Source, n.PublishedAt, n.Description, n.OllamaSummary, n.FetchedAt, n.ImageUrl, n.CommunityScore, n.ReadingMinutes, n.Author);
         }).ToList();
 
         var lastRefresh = items.Count > 0 ? (DateTimeOffset?)items.Max(n => n.FetchedAt) : null;
-        return new NewsFeedResult(dtos, lastRefresh);
+        return new NewsFeedResult(dtos, lastRefresh, await MeaningsAsync(dtos, ct));
+    }
+
+    // Headlines by meaning (20-11-26), with the embedding model World News groups with. Each
+    // headline is embedded once and kept two days; a slow or absent model never holds up the page,
+    // since grouping falls back to shared words.
+    private const string MeaningModel = "embeddinggemma";
+    private const int MaxMeaningsPerLoad = 48; // a few dozen per load, so the cache fills within the wait
+    private static readonly TimeSpan MeaningWait = TimeSpan.FromSeconds(4);
+
+    private async Task<IReadOnlyDictionary<Guid, float[]>?> MeaningsAsync(IReadOnlyList<NewsItemDto> items, CancellationToken ct)
+    {
+        var meanings = new Dictionary<Guid, float[]>();
+        var missing = new List<NewsItemDto>();
+        foreach (var item in items)
+        {
+            if (cache.TryGetValue("news-meaning:" + NewsStoryClusterer.UrlHash(item.Url), out float[]? vector) && vector is not null) meanings[item.Id] = vector;
+            else if (missing.Count < MaxMeaningsPerLoad) missing.Add(item);
+        }
+        if (missing.Count > 0 && !cache.TryGetValue("news-meaning:unavailable", out _))
+        {
+            try
+            {
+                using var wait = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                wait.CancelAfter(MeaningWait);
+                var vectors = await ollama.EmbedAsync(MeaningModel, missing.Select(m => m.Title).ToList(), wait.Token);
+                for (var i = 0; i < missing.Count && i < vectors.Count; i++)
+                {
+                    if (vectors[i] is not { Length: > 0 } vector) continue;
+                    cache.Set("news-meaning:" + NewsStoryClusterer.UrlHash(missing[i].Url), vector, TimeSpan.FromDays(2));
+                    meanings[missing[i].Id] = vector;
+                }
+            }
+            catch (Exception ex) when (!ct.IsCancellationRequested)
+            {
+                // Don't ask again for a few minutes; words still group the feed.
+                cache.Set("news-meaning:unavailable", true, TimeSpan.FromMinutes(5));
+                logger.LogDebug(ex, "Media Watch: headlines not embedded this time; grouping by words");
+            }
+        }
+        return meanings.Count == 0 ? null : meanings;
     }
 
     // ── Refresh ───────────────────────────────────────────────
@@ -386,9 +443,14 @@ public sealed class NewsIntelligenceService(
             .Where(u => u.Length > 0)
             .ToArray();
 
-        var articles = workItem.TopicType == WatchedTopicTypes.Technical
-            ? await FetchTechnicalArticlesAsync(keywords!, trustedFeedUrls, workItem.Name, timings, ct)
-            : await FetchArticlesAsync(keywords, trustedFeedUrls, workItem.Name, timings, ct);
+        var articles = workItem.TopicType switch
+        {
+            WatchedTopicTypes.Technical => await FetchTechnicalArticlesAsync(keywords!, trustedFeedUrls, workItem.Name, timings, ct),
+            // Only its own feeds, newest first, with no search to add noise (20-11-26).
+            WatchedTopicTypes.Feeds => (await MeasureStageAsync(workItem.Name, "Trusted feeds", 0, () => FetchTrustedFeedsAsync(trustedFeedUrls, ct), timings))
+                .OrderByDescending(a => a.PublishedAt ?? DateTimeOffset.MinValue).ToList(),
+            _ => await FetchArticlesAsync(keywords, trustedFeedUrls, workItem.Name, timings, ct),
+        };
 
         // Articles already stored for this topic keep their row and AI take - only new ones are
         // read and summarized, so a refresh costs Ollama time only for what's actually new.
@@ -425,17 +487,33 @@ public sealed class NewsIntelligenceService(
         // instead of one built from a 200-character aggregator snippet - see
         // ExtractArticleTextAsync. Per-article failures/timeouts fall back to null, which
         // BatchSummarizeAsync treats the same as "no full text available" today.
-        var fullTexts = await MeasureStageAsync(
+        var pages = await MeasureStageAsync(
             workItem.Name, "Article extraction", toSummarize.Count,
-            () => Task.WhenAll(toSummarize.Select(a => ExtractArticleTextAsync(a.Url, ct))),
+            () => Task.WhenAll(toSummarize.Select(a => ExtractArticlePageAsync(a.Url, ct))),
             timings);
+
+        // One article, one link (20-11-26): the outlet's canonical address replaces a redirect or a
+        // tracking-tagged link, and an article already held under that address is dropped.
+        var seen = new HashSet<string>(known);
+        var keep = new List<int>();
+        for (var i = 0; i < selected.Count; i++)
+        {
+            var url = ArticleLinks.Preferred(selected[i].Url, pages[i].Canonical);
+            if (url != selected[i].Url) selected[i] = selected[i] with { Url = url };
+            if (seen.Add(NewsStoryClusterer.UrlHash(url))) keep.Add(i);
+        }
+        var fullTexts = keep.Select(i => pages[i].Text).Concat(pages.Skip(selected.Count).Select(p => p.Text)).ToArray();
+        selected = keep.Select(i => selected[i]).ToList();
+        toSummarize = selected.Concat(retries.Select(r => r.Article)).ToList();
 
         var summarized = await MeasureStageAsync(
             workItem.Name, "Ollama summary", toSummarize.Count,
             () => BatchSummarizeAsync(toSummarize, fullTexts, ct), timings);
 
-        var issue = summarized.Failure is { } failure
-            ? $"AI takes were skipped for {toSummarize.Count} article{(toSummarize.Count == 1 ? "" : "s")} ({failure}); they show the outlet's own description instead and will be retried on the next refresh."
+        // A busy or absent model isn't a fault: the cards say "AI take pending" and the background
+        // fill writes them (20-11-26). Only a real error (model missing, out of memory) is shown.
+        var issue = summarized.Failure is { } failure && !summarized.Busy
+            ? $"AI takes were skipped for {toSummarize.Count} article{(toSummarize.Count == 1 ? "" : "s")} ({failure}); they show the outlet's own description instead and will be retried on the next refresh, or sooner in the background."
             : null;
         var retriedTakes = retries
             .Select((retry, i) => (retry.Id, Summary: summarized.Summaries.ElementAtOrDefault(selected.Count + i) ?? string.Empty))
@@ -477,6 +555,7 @@ public sealed class NewsIntelligenceService(
                     ImageUrl = string.IsNullOrWhiteSpace(article.ImageUrl) ? null : Truncate(article.ImageUrl, 1000),
                     CommunityScore = article.Score,
                     ReadingMinutes = prepared.Minutes?.ElementAtOrDefault(i),
+                    Author = article.Author is { Length: > 0 } author ? Truncate(author, 200) : null,
                     FetchedAt = fetchedAt,
                     FetchedAtUnixSeconds = fetchedAt.ToUnixTimeSeconds()
                 });
@@ -746,7 +825,8 @@ public sealed class NewsIntelligenceService(
                     item.Link!,
                     ExtractGoogleNewsSource(item) ?? feed.Title ?? ExtractDomain(url),
                     item.PublishingDate,
-                    StripHtml(item.Description ?? string.Empty)))
+                    StripHtml(item.Description ?? string.Empty),
+                    Author: NewsAuthors.Clean(item.Author)))
                 .ToList();
         }
         catch (Exception ex)
@@ -964,7 +1044,8 @@ public sealed class NewsIntelligenceService(
                     item.Link!,
                     name,
                     item.PublishingDate,
-                    StripHtml(item.Description ?? string.Empty)))
+                    StripHtml(item.Description ?? string.Empty),
+                    Author: NewsAuthors.Clean(item.Author)))
                 .ToList();
         }
         catch (Exception ex)
@@ -1059,13 +1140,16 @@ public sealed class NewsIntelligenceService(
     /// BatchSummarizeAsync treats that exactly like "no full text available" and falls back to
     /// the RSS snippet for that one article, so a paywalled or slow site never breaks the batch.
     /// </summary>
-    private async Task<string?> ExtractArticleTextAsync(string url, CancellationToken ct)
+    private sealed record ArticlePage(string? Text, string? Canonical);
+
+    private async Task<ArticlePage> ExtractArticlePageAsync(string url, CancellationToken ct)
     {
         try
         {
             using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             timeoutCts.CancelAfter(ArticleExtractionTimeout);
             var html = await http.GetStringAsync(url, timeoutCts.Token);
+            var canonical = ArticleLinks.Canonical(url, html);
 
             // The static Reader.ParseArticle(url, html) overload does not behave as documented
             // for pre-fetched HTML (verified directly - it returns an empty, unreadable Article
@@ -1074,16 +1158,69 @@ public sealed class NewsIntelligenceService(
             // on it here.
             var article = new Reader(url, html).GetArticle();
             var text = article?.IsReadable == true ? article.TextContent?.Trim() : null;
-            return string.IsNullOrWhiteSpace(text) || text.Length < MinExtractedArticleLength ? null : text;
+            return new(string.IsNullOrWhiteSpace(text) || text.Length < MinExtractedArticleLength ? null : text, canonical);
         }
         catch (Exception ex)
         {
             logger.LogDebug(ex, "Article extraction skipped for {Url}", url);
-            return null;
+            return new(null, null);
         }
     }
 
-    private async Task<SummarizeResult> BatchSummarizeAsync(List<RawArticle> articles, string?[] fullTexts, CancellationToken ct)
+    // ── AI takes in the background (20-11-26) ─────────────────
+    // Articles saved without a take (the model was busy or away) get one here, a few at a time
+    // with a longer wait than a refresh allows, instead of waiting for the next hourly refresh.
+    public const int MaxTakesPerFill = 10;
+    private static readonly TimeSpan FillTakesTimeout = TimeSpan.FromMinutes(3);
+
+    public async Task<int> FillMissingTakesAsync(CancellationToken ct = default)
+    {
+        List<NewsItem> pending;
+        await using (var db = await dbContextFactory.CreateDbContextAsync(ct))
+        {
+            var cutoff = DateTimeOffset.UtcNow.AddHours(-await RetentionHoursAsync(db, ct)).ToUnixTimeSeconds();
+            pending = (await db.NewsItems.AsNoTracking()
+                    .Where(n => n.OllamaSummary == string.Empty && n.FetchedAtUnixSeconds >= cutoff)
+                    .ToListAsync(ct))
+                .OrderByDescending(n => n.FetchedAtUnixSeconds)
+                .Take(MaxTakesPerFill)
+                .ToList();
+        }
+        if (pending.Count == 0) return 0;
+
+        var articles = pending.Select(n => new RawArticle(n.Title, n.Url, n.Source, n.PublishedAt, n.Description)).ToList();
+        var result = await BatchSummarizeAsync(articles, new string?[articles.Count], ct, FillTakesTimeout);
+        var written = 0;
+        await WriteLock.WaitAsync(ct);
+        try
+        {
+            await using var db = await dbContextFactory.CreateDbContextAsync(ct);
+            for (var i = 0; i < pending.Count; i++)
+            {
+                var take = result.Summaries.ElementAtOrDefault(i);
+                if (string.IsNullOrWhiteSpace(take)) continue;
+                var stored = await db.NewsItems.FindAsync([pending[i].Id], ct);
+                if (stored is null || !string.IsNullOrEmpty(stored.OllamaSummary)) continue;
+                stored.OllamaSummary = take;
+                written++;
+            }
+            if (written > 0)
+            {
+                // A topic whose takes are now written loses its warning.
+                var topicIds = pending.Where(p => p.TopicId is not null).Select(p => p.TopicId!.Value).Distinct().ToList();
+                foreach (var topic in await db.WatchedTopics.Where(t => topicIds.Contains(t.Id) && t.LastRefreshIssue != null).ToListAsync(ct))
+                    if (topic.LastRefreshIssue!.StartsWith("AI takes were skipped", StringComparison.Ordinal)) topic.LastRefreshIssue = null;
+            }
+            await db.SaveChangesAsync(ct);
+        }
+        finally
+        {
+            WriteLock.Release();
+        }
+        return written;
+    }
+
+    private async Task<SummarizeResult> BatchSummarizeAsync(List<RawArticle> articles, string?[] fullTexts, CancellationToken ct, TimeSpan? timeout = null)
     {
         if (articles.Count == 0) return new([], null);
         try
@@ -1098,7 +1235,7 @@ public sealed class NewsIntelligenceService(
                 "matching the input order. No intro, no closing remarks.";
 
             using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            timeoutCts.CancelAfter(BatchSummarizeTimeout);
+            timeoutCts.CancelAfter(timeout ?? BatchSummarizeTimeout);
             // Public headlines: with server AI off they may be written on an Admin's Mac.
             using var sharedWork = MacRelayScope.ForSharedWork();
             var raw = await ollama.GenerateAsync(OllamaModel, system, string.Join("\n", input), timeoutCts.Token);
@@ -1109,7 +1246,13 @@ public sealed class NewsIntelligenceService(
         {
             // No model here and no Admin Mac online - expected, so not a warning (~200 a day after 31-10-26).
             logger.LogDebug("Hot takes wait for an Admin's Mac app; {Count} articles saved without them", articles.Count);
-            return new(Enumerable.Repeat(string.Empty, articles.Count).ToList(), ex.Message);
+            return new(Enumerable.Repeat(string.Empty, articles.Count).ToList(), ex.Message, Busy: true);
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            // The model was busy past the wait: the background fill tries again.
+            logger.LogInformation("Hot takes waited past the timeout for {Model}; {Count} left for the background fill", OllamaModel, articles.Count);
+            return new(Enumerable.Repeat(string.Empty, articles.Count).ToList(), $"{OllamaModel} didn't answer in time", Busy: true);
         }
         catch (Exception ex)
         {
@@ -1129,7 +1272,7 @@ public sealed class NewsIntelligenceService(
         _ => Truncate($"{OllamaModel} failed: {ex.Message}", 300)
     };
 
-    private sealed record SummarizeResult(List<string> Summaries, string? Failure);
+    private sealed record SummarizeResult(List<string> Summaries, string? Failure, bool Busy = false);
 
     private static List<string> ParseNumberedList(string raw, int expectedCount)
     {
@@ -1219,7 +1362,8 @@ public sealed class NewsIntelligenceService(
         DateTimeOffset? PublishedAt,
         string Description,
         string? ImageUrl = null,
-        int? Score = null);
+        int? Score = null,
+        string? Author = null);
 
     private sealed record RefreshWorkItem(
         Guid? TopicId,

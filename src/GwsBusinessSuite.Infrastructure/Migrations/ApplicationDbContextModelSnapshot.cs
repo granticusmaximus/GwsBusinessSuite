@@ -2618,6 +2618,9 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
                     b.Property<int>("SummaryAttempts")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("Text")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Title")
                         .IsRequired()
                         .HasColumnType("TEXT");
@@ -2638,6 +2641,70 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
                         .IsUnique();
 
                     b.ToTable("CivicMeetingDocuments");
+                });
+
+            modelBuilder.Entity("GwsBusinessSuite.Domain.Entities.CivicMemberVote", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Chamber")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Level")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Measure")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("MemberId")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Party")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PartyMajority")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("RollCallKey")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Vote")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("VotedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MemberId", "RollCallKey")
+                        .IsUnique();
+
+                    b.ToTable("CivicMemberVotes");
                 });
 
             modelBuilder.Entity("GwsBusinessSuite.Domain.Entities.CivicWatchSettings", b =>
@@ -2689,6 +2756,10 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
                     b.Property<double>("HomeLongitude")
                         .HasColumnType("REAL");
 
+                    b.Property<string>("MentionTerms")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("StateCode")
                         .HasColumnType("TEXT");
 
@@ -2704,9 +2775,64 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
                     b.Property<string>("UpdatedBy")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("Username")
+                        .HasColumnType("TEXT");
+
                     b.HasKey("Id");
 
+                    b.HasIndex("Username");
+
                     b.ToTable("CivicWatchSettings");
+                });
+
+            modelBuilder.Entity("GwsBusinessSuite.Domain.Entities.CivicWatchUserState", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CalendarToken")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("FollowedItems")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("LastVisitedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("PreviousVisitAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Username")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("WeeklyPageBuiltAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CalendarToken")
+                        .IsUnique();
+
+                    b.HasIndex("Username")
+                        .IsUnique();
+
+                    b.ToTable("CivicWatchUserStates");
                 });
 
             modelBuilder.Entity("GwsBusinessSuite.Domain.Entities.CjCommissionRecord", b =>
@@ -4281,6 +4407,41 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
                     b.ToTable("EmailCampaignSubscriptions");
                 });
 
+            modelBuilder.Entity("GwsBusinessSuite.Domain.Entities.FollowedNewsAuthor", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Username")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Username", "Name")
+                        .IsUnique();
+
+                    b.ToTable("FollowedNewsAuthors");
+                });
+
             modelBuilder.Entity("GwsBusinessSuite.Domain.Entities.FormSubmission", b =>
                 {
                     b.Property<Guid>("Id")
@@ -5144,6 +5305,9 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Author")
                         .HasColumnType("TEXT");
 
                     b.Property<int?>("CommunityScore")

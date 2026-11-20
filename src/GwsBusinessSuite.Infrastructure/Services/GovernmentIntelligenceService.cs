@@ -196,7 +196,9 @@ public sealed class GovernmentIntelligenceService(
         var html = await GetStringOrNullAsync(CountyHomeUrl, ct);
         var announcements = html is null
             ? []
-            : ParseCountyAnnouncements(html).Take(MaxCountyAnnouncements).ToList();
+            : ParseCountyAnnouncements(html).Take(MaxCountyAnnouncements)
+                .Select(a => cache.TryGetValue(AiOverviewCacheKey(a.Url), out string? note) && !string.IsNullOrWhiteSpace(note) ? a with { AiOverview = note } : a)
+                .ToList();
         var meetings = html is null
             ? []
             : ParseCountyMeetings(html).Take(MaxCountyMeetings).ToList();
@@ -346,6 +348,47 @@ public sealed class GovernmentIntelligenceService(
             // No model here and no Admin Mac online: the rest wait for the next sweep, unlogged
             // (this was ~1,165 warnings a day after 31-10-26).
             logger.LogDebug("SentinelGPT overviews wait for an Admin's Mac app ({Count} without one)", briefs.Count);
+            return;
+        }
+
+        // County notices get a plain-language note too (20-11-26), from their title and summary.
+        try
+        {
+            foreach (var notice in snapshot.Community.Announcements.Where(a => !string.IsNullOrWhiteSpace(a.Url)
+                         && (!cache.TryGetValue(AiOverviewCacheKey(a.Url), out string? existing) || string.IsNullOrWhiteSpace(existing))))
+            {
+                ct.ThrowIfCancellationRequested();
+                await GenerateNoticeOverviewAsync(notice, ct);
+            }
+        }
+        catch (ServerAiUnavailableException)
+        {
+            logger.LogDebug("SentinelGPT notes on county notices wait for the AI model");
+        }
+    }
+
+    public const string NoticeOverviewPrompt =
+        "You explain a county government notice to residents of Houston County, Georgia. Respond with 1-2 plain-language " +
+        "sentences (under 45 words) on what it means for a resident and anything they need to do or know by when. " +
+        "Use only the notice. No intro, no markdown.";
+
+    private async Task GenerateNoticeOverviewAsync(CivicUpdate notice, CancellationToken ct)
+    {
+        try
+        {
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeoutCts.CancelAfter(AiOverviewCallTimeout);
+            var note = (await ollama.GenerateAsync(OllamaModel, NoticeOverviewPrompt,
+                $"Title: {notice.Title}\nPublished: {notice.PublishedAt?.ToString("dd-MM-yy", CultureInfo.InvariantCulture) ?? "unknown"}\nNotice: {notice.Summary}", timeoutCts.Token)).Trim();
+            if (!string.IsNullOrWhiteSpace(note)) cache.Set(AiOverviewCacheKey(notice.Url), note, AiOverviewCacheDuration);
+        }
+        catch (ServerAiUnavailableException)
+        {
+            throw;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            logger.LogWarning(ex, "SentinelGPT note skipped for county notice {Url}", notice.Url);
         }
     }
 

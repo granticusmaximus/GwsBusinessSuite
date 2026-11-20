@@ -1011,3 +1011,24 @@ a.world-news-search-all { text-decoration: none; color: var(--gws-text-soft); }
 /* Unusual silence (World News trust plan 1.12). */
 .world-news-silence { margin: 0 0 1rem; padding: .6rem .9rem; border-radius: var(--gws-radius-md); background: var(--gws-neu-inset, rgba(127, 127, 127, .08)); color: var(--gws-text-strong); font-size: var(--gws-type-md); }
 .world-news-silence a { margin-left: .35rem; }
+
+.world-news-pins {
+    margin: 0 0 1rem;
+}
+
+.world-news-pins > summary {
+    cursor: pointer;
+    font-weight: 600;
+}
+
+.world-news-pins-count {
+    margin-left: .4rem;
+    color: var(--bs-secondary-color);
+    font-size: var(--gws-type-sm);
+    font-weight: 400;
+}
+
+.world-news-pin {
+    padding: 0 .25rem;
+    vertical-align: baseline;
+}

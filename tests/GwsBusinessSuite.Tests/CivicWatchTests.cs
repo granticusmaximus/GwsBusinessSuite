@@ -427,6 +427,104 @@ public sealed class CivicWatchTests
         f.Ollama.Prompts.Should().ContainSingle().Which.Should().Contain("Court Software");
     }
 
+    // ---- Settings per person, last visit, meeting-paper search (20-11-26) --------------------
+
+    [Fact]
+    public async Task PersonalSettings_ShouldBeTheirsAlone_AndFallBackToTheShared()
+    {
+        await using var f = await Fixture.CreateAsync();
+        var shared = await f.Service.SaveSettingsAsync((await f.Service.GetSettingsAsync()) with { GrantKeywords = "broadband" }, "admin");
+        shared.Personal.Should().BeFalse();
+
+        var mine = await f.Service.SaveSettingsAsync(shared with { GrantKeywords = "libraries", MentionTerms = "Moody Road\nMoody Road\nok" }, "Grant", forEveryone: false);
+        mine.Personal.Should().BeTrue();
+        mine.MentionTermList.Should().Equal(["Moody Road"], "duplicates and terms under three letters are dropped");
+
+        (await f.Service.GetSettingsAsync("grant")).GrantKeywordList.Should().Equal("libraries");
+        (await f.Service.GetSettingsAsync("someone-else")).GrantKeywordList.Should().Equal("broadband");
+        (await f.Service.GetSettingsAsync()).GrantKeywordList.Should().Equal("broadband");
+
+        // Saving for everyone drops their own, so they follow the shared settings again.
+        await f.Service.SaveSettingsAsync(mine with { GrantKeywords = "parks" }, "grant", forEveryone: true);
+        var back = await f.Service.GetSettingsAsync("grant");
+        (back.Personal, back.GrantKeywords).Should().Be((false, "parks"));
+    }
+
+    [Fact]
+    public async Task MarkVisit_ShouldCountFromTheVisitBefore_AndHoldThroughQuickReloads()
+    {
+        await using var f = await Fixture.CreateAsync();
+        (await f.Service.MarkVisitAsync("grant")).Should().BeNull("a first visit has nothing before it");
+        (await f.Service.MarkVisitAsync("grant")).Should().BeNull("a reload within half an hour keeps the same mark");
+    }
+
+    [Fact]
+    public void Mentions_ShouldMatchWholeWords_AndSnippetsNeedEveryWord()
+    {
+        const string text = "Item 4: resurfacing of Moody Road and Moodyville Lane. Item 5: rezoning on Highway 96.";
+        CivicMentions.Found(text, ["moody road", "Highway 9", "Highway 96"]).Should().Equal("moody road", "Highway 96");
+        CivicMentions.Snippet(text, "rezoning highway").Should().Contain("rezoning on Highway 96");
+        CivicMentions.Snippet(text, "rezoning library").Should().BeNull();
+    }
+
+    [Fact]
+    public void GeorgiaSearch_ShouldLabelBillsAndResolutions_CurrentSessionFirst()
+    {
+        const string json = """
+            {"results":[
+              {"documentType":1,"chamberType":2,"number":12,"legislationId":5,"caption":"Old property tax bill","status":"Died","session":{"isCurrent":false}},
+              {"documentType":2,"chamberType":1,"number":4,"legislationId":9,"caption":"Property  tax relief","status":"House Second Readers","statusDate":"2026-02-03T00:00:00","session":{"isCurrent":true}}
+            ]}
+            """;
+        var hits = CivicWatchService.ParseGeorgiaSearch(json);
+        hits.Select(h => h.Label).Should().Equal("HR 4", "SB 12");
+        hits[0].Should().BeEquivalentTo(new { Caption = "Property tax relief", StatusDate = "2026-02-03", CurrentSession = true });
+        hits[0].Url.Should().EndWith("/9");
+    }
+
+    [Fact]
+    public void CongressBudget_ShouldKeepTheReserveForPeopleAddingBills()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var budget = new CongressApiBudget(CongressApiBudget.DemoKeyPerDay);
+        budget.TryTake(CongressApiBudget.DemoKeyPerDay - CongressApiBudget.Reserve, background: true, now).Should().BeTrue();
+        budget.TryTake(1, background: true, now).Should().BeFalse("the rest is the reserve");
+        budget.TryTake(1, background: false, now).Should().BeTrue("someone adding a bill may use it");
+        budget.Remaining(now.AddDays(1)).Should().Be(CongressApiBudget.DemoKeyPerDay, "calls older than a day no longer count");
+        new CongressApiBudget(null).TryTake(1000, background: true, now).Should().BeTrue("a key of its own isn't limited");
+    }
+
+    [Fact]
+    public async Task CalendarToken_ShouldOpenOnlyItsOwnersFeed_AndRenewalRetiresTheOld()
+    {
+        await using var f = await Fixture.CreateAsync();
+        var token = await f.Service.GetCalendarTokenAsync("Grant");
+        (await f.Service.GetCalendarTokenAsync("grant")).Should().Be(token, "the same link until renewed");
+        (await f.Service.CalendarForTokenAsync(token, null)).Should().StartWith("BEGIN:VCALENDAR");
+        var renewed = await f.Service.GetCalendarTokenAsync("grant", renew: true);
+        renewed.Should().NotBe(token);
+        (await f.Service.CalendarForTokenAsync(token, null)).Should().BeNull("the old link stops working");
+        (await f.Service.CalendarForTokenAsync("not-a-token", null)).Should().BeNull();
+    }
+
+    [Fact]
+    public async Task FollowedItems_ShouldListEveryPaperNamingThePhrase_NewestFirst()
+    {
+        await using var f = await Fixture.CreateAsync();
+        await using (var db = f.NewContext())
+        {
+            db.CivicMeetingDocuments.AddRange(
+                new CivicMeetingDocument { Url = "https://county.example/a.pdf", MeetingDate = "2026-10-06", Kind = "Agenda", Title = "A", Text = "Rezoning on Highway 96 near the school." },
+                new CivicMeetingDocument { Url = "https://county.example/b.pdf", MeetingDate = "2026-11-03", Kind = "Minutes", Title = "B", Text = "The Highway 96 rezoning was approved." },
+                new CivicMeetingDocument { Url = "https://county.example/c.pdf", MeetingDate = "2026-11-10", Kind = "Agenda", Title = "C", Text = "Highway 960 resurfacing." });
+            await db.SaveChangesAsync();
+        }
+        await f.Service.SetFollowedItemsAsync("grant", "Highway 96\nHighway 96\nok");
+        var followed = await f.Service.GetFollowedItemsAsync("grant");
+        followed.Should().ContainSingle().Which.Mentions.Select(m => m.Url).Should().Equal("https://county.example/b.pdf", "https://county.example/a.pdf");
+        (await f.Service.GetFollowedItemsAsync("ann")).Should().BeEmpty();
+    }
+
     private static HttpResponseMessage Json(string json) =>
         new(HttpStatusCode.OK) { Content = new StringContent(json, Encoding.UTF8, "application/json") };
 
@@ -435,7 +533,9 @@ public sealed class CivicWatchTests
     private sealed class Fixture : IAsyncDisposable
     {
         private SqliteConnection _connection = null!;
+        private DbContextOptions<ApplicationDbContext> _options = null!;
         public CivicWatchService Service { get; private set; } = null!;
+        public ApplicationDbContext NewContext() => new(_options);
         public RecordingMail Mail { get; } = new();
         public RecordingOllama Ollama { get; } = new();
         public RecordingTriggers Triggers { get; private set; } = null!;
@@ -445,6 +545,7 @@ public sealed class CivicWatchTests
             var fixture = new Fixture { _connection = new SqliteConnection("Data Source=:memory:") };
             await fixture._connection.OpenAsync();
             var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(fixture._connection).Options;
+            fixture._options = options;
             await using (var db = new ApplicationDbContext(options)) await db.Database.EnsureCreatedAsync();
             fixture.Triggers = RecordingTriggers.Create();
             fixture.Service = new CivicWatchService(

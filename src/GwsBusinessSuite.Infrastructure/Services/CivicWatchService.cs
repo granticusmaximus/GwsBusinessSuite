@@ -34,7 +34,8 @@ public sealed partial class CivicWatchService(
     IOptions<GrowthReportEmailOptions> smtpOptions,
     TimeProvider timeProvider,
     ILogger<CivicWatchService> logger,
-    IAutomationTriggerService? automationTriggers = null) : ICivicWatchService
+    IAutomationTriggerService? automationTriggers = null,
+    GwsBusinessSuite.Application.Wiki.IWikiService? wiki = null) : ICivicWatchService
 {
     private const string CensusCoordinatesUrl = "https://geocoding.geo.census.gov/geocoder/geographies/coordinates";
     private const string CensusAddressUrl = "https://geocoding.geo.census.gov/geocoder/locations/onelineaddress";
@@ -69,14 +70,29 @@ public sealed partial class CivicWatchService(
 
     // ================================================================ Settings / location
 
-    public async Task<CivicWatchSettingsView> GetSettingsAsync(CancellationToken ct = default)
+    public Task<CivicWatchSettingsView> GetSettingsAsync(CancellationToken ct = default) => GetSettingsAsync(null, ct);
+
+    // Settings per person (20-11-26): someone's own row when they saved one, else the shared default.
+    public async Task<CivicWatchSettingsView> GetSettingsAsync(string? username, CancellationToken ct = default)
     {
         await using var db = await dbContextFactory.CreateDbContextAsync(ct);
-        var row = await db.CivicWatchSettings.AsNoTracking().OrderBy(oneRow => oneRow.Id).FirstOrDefaultAsync(ct) ?? new CivicWatchSettings();
-        return ToView(row);
+        var person = PersonKey(username);
+        var own = person is null ? null
+            : await db.CivicWatchSettings.AsNoTracking().Where(r => r.Username == person).OrderBy(r => r.Id).FirstOrDefaultAsync(ct);
+        if (own is not null) return ToView(own);
+        var shared = await db.CivicWatchSettings.AsNoTracking().Where(r => r.Username == null).OrderBy(r => r.Id).FirstOrDefaultAsync(ct) ?? new CivicWatchSettings();
+        return ToView(shared);
     }
 
-    public async Task<CivicWatchSettingsView> SaveSettingsAsync(CivicWatchSettingsView settings, string username, CancellationToken ct = default)
+    private static string? PersonKey(string? username) => string.IsNullOrWhiteSpace(username) ? null : username.Trim().ToLowerInvariant();
+
+    // The shared default (what everyone without their own settings sees).
+    public Task<CivicWatchSettingsView> SaveSettingsAsync(CivicWatchSettingsView settings, string username, CancellationToken ct = default) =>
+        SaveSettingsAsync(settings, username, forEveryone: true, ct);
+
+    // forEveryone false saves the person's own settings; true saves the shared default and drops
+    // their own, so they follow it again.
+    public async Task<CivicWatchSettingsView> SaveSettingsAsync(CivicWatchSettingsView settings, string username, bool forEveryone, CancellationToken ct = default)
     {
         var label = (settings.HomeLabel ?? string.Empty).Trim();
         if (label.Length == 0) throw new ArgumentException("Give your home area a name.");
@@ -86,9 +102,23 @@ public sealed partial class CivicWatchService(
             throw new ArgumentException("Enter a valid email address for bill alerts.");
 
         await using var db = await dbContextFactory.CreateDbContextAsync(ct);
-        var row = await db.CivicWatchSettings.OrderBy(oneRow => oneRow.Id).FirstOrDefaultAsync(ct);
+        var person = PersonKey(username);
+        var shared = await db.CivicWatchSettings.Where(r => r.Username == null).OrderBy(r => r.Id).FirstOrDefaultAsync(ct);
+        var own = person is null ? null : await db.CivicWatchSettings.Where(r => r.Username == person).OrderBy(r => r.Id).FirstOrDefaultAsync(ct);
+        CivicWatchSettings? row;
+        if (forEveryone || person is null)
+        {
+            row = shared;
+            if (own is not null) db.CivicWatchSettings.Remove(own);
+        }
+        else
+        {
+            // A first personal row starts from the shared one, so its districts carry over.
+            row = own ?? (shared is null ? null : CopyOf(shared, person, username));
+            if (own is null && row is not null) db.CivicWatchSettings.Add(row);
+        }
         var isNew = row is null;
-        row ??= new CivicWatchSettings { CreatedBy = username };
+        row ??= new CivicWatchSettings { CreatedBy = username, Username = forEveryone ? null : person };
 
         var address = string.IsNullOrWhiteSpace(settings.HomeAddress) ? null : settings.HomeAddress.Trim();
         double latitude = settings.HomeLatitude, longitude = settings.HomeLongitude;
@@ -110,6 +140,7 @@ public sealed partial class CivicWatchService(
         row.GrantKeywords = string.Join('\n', CivicKeywords.Split(settings.GrantKeywords));
         row.AlertsEnabled = settings.AlertsEnabled;
         row.AlertRecipient = string.IsNullOrWhiteSpace(recipient) ? null : recipient;
+        row.MentionTerms = string.Join('\n', CivicMentions.Split(settings.MentionTerms));
         row.UpdatedAt = timeProvider.GetUtcNow();
         row.UpdatedBy = username;
 
@@ -142,7 +173,17 @@ public sealed partial class CivicWatchService(
     private static CivicWatchSettingsView ToView(CivicWatchSettings row) => new(
         row.HomeLabel, row.HomeLatitude, row.HomeLongitude, row.HomeAddress, row.StateCode, row.CountyName,
         row.CongressionalDistrict, row.StateSenateDistrict, row.StateHouseDistrict, row.DistrictsResolvedAt,
-        row.FederalRegisterKeywords, row.GrantKeywords, row.AlertsEnabled, row.AlertRecipient);
+        row.FederalRegisterKeywords, row.GrantKeywords, row.AlertsEnabled, row.AlertRecipient,
+        Personal: row.Username is not null, MentionTerms: row.MentionTerms ?? string.Empty);
+
+    private CivicWatchSettings CopyOf(CivicWatchSettings shared, string person, string username) => new()
+    {
+        Username = person, CreatedBy = username, CreatedAt = timeProvider.GetUtcNow(),
+        HomeLabel = shared.HomeLabel, HomeLatitude = shared.HomeLatitude, HomeLongitude = shared.HomeLongitude, HomeAddress = shared.HomeAddress,
+        StateCode = shared.StateCode, CountyName = shared.CountyName, CongressionalDistrict = shared.CongressionalDistrict,
+        StateSenateDistrict = shared.StateSenateDistrict, StateHouseDistrict = shared.StateHouseDistrict, DistrictsResolvedAt = shared.DistrictsResolvedAt,
+        FederalRegisterKeywords = shared.FederalRegisterKeywords, GrantKeywords = shared.GrantKeywords, MentionTerms = shared.MentionTerms,
+    };
 
     private async Task<(double Latitude, double Longitude)?> GeocodeAddressAsync(string address, CancellationToken ct)
     {
@@ -220,9 +261,11 @@ public sealed partial class CivicWatchService(
 
     // ================================================================ Representatives
 
-    public async Task<CivicRepresentatives> GetRepresentativesAsync(CancellationToken ct = default)
+    public Task<CivicRepresentatives> GetRepresentativesAsync(CancellationToken ct = default) => GetRepresentativesAsync(null, ct);
+
+    public async Task<CivicRepresentatives> GetRepresentativesAsync(string? username, CancellationToken ct = default)
     {
-        var settings = await GetSettingsAsync(ct);
+        var settings = await GetSettingsAsync(username, ct);
         if (string.IsNullOrWhiteSpace(settings.StateCode))
             return new([], "Set your home location in Civic Watch settings to see your representatives.");
 
@@ -330,9 +373,12 @@ public sealed partial class CivicWatchService(
 
     // ================================================================ Keyword feeds
 
-    public async Task<CivicKeywordFeed<FederalRegisterDocument>> GetFederalRegisterAsync(bool refresh = false, CancellationToken ct = default)
+    public Task<CivicKeywordFeed<FederalRegisterDocument>> GetFederalRegisterAsync(bool refresh = false, CancellationToken ct = default) =>
+        GetFederalRegisterAsync(null, refresh, ct);
+
+    public async Task<CivicKeywordFeed<FederalRegisterDocument>> GetFederalRegisterAsync(string? username, bool refresh = false, CancellationToken ct = default)
     {
-        var keywords = (await GetSettingsAsync(ct)).FederalRegisterKeywordList;
+        var keywords = (await GetSettingsAsync(username, ct)).FederalRegisterKeywordList;
         if (keywords.Count == 0) return new([], keywords, null, null);
         var cacheKey = "civic-watch:federal-register:" + string.Join('|', keywords).ToLowerInvariant();
         if (!refresh && cache.TryGetValue(cacheKey, out CivicKeywordFeed<FederalRegisterDocument>? cached) && cached is not null) return cached;
@@ -383,9 +429,12 @@ public sealed partial class CivicWatchService(
         return list;
     }
 
-    public async Task<CivicKeywordFeed<GrantOpportunity>> GetGrantOpportunitiesAsync(bool refresh = false, CancellationToken ct = default)
+    public Task<CivicKeywordFeed<GrantOpportunity>> GetGrantOpportunitiesAsync(bool refresh = false, CancellationToken ct = default) =>
+        GetGrantOpportunitiesAsync(null, refresh, ct);
+
+    public async Task<CivicKeywordFeed<GrantOpportunity>> GetGrantOpportunitiesAsync(string? username, bool refresh = false, CancellationToken ct = default)
     {
-        var keywords = (await GetSettingsAsync(ct)).GrantKeywordList;
+        var keywords = (await GetSettingsAsync(username, ct)).GrantKeywordList;
         if (keywords.Count == 0) return new([], keywords, null, null);
         var cacheKey = "civic-watch:grants:" + string.Join('|', keywords).ToLowerInvariant();
         if (!refresh && cache.TryGetValue(cacheKey, out CivicKeywordFeed<GrantOpportunity>? cached) && cached is not null) return cached;
@@ -448,7 +497,7 @@ public sealed partial class CivicWatchService(
     }
 
     private static WatchedBillView ToView(WatchedBill b) => new(b.Id, b.Jurisdiction, b.Label, b.Title, b.LatestStatus,
-        b.LatestStatusDate, b.OfficialUrl, b.LastCheckedAt, b.LastChangedAt, b.LastError);
+        b.LatestStatusDate, b.OfficialUrl, b.LastCheckedAt, b.LastChangedAt, b.LastError, b.CreatedBy);
 
     public sealed record ParsedBill(string Jurisdiction, string BillType, int Number, string Label);
 
@@ -509,6 +558,8 @@ public sealed partial class CivicWatchService(
                                                 && b.Number == parsed.Number && b.Congress == congress, ct))
             throw new ArgumentException($"{parsed.Label} is already on your watchlist.");
 
+        if (parsed.Jurisdiction == WatchedBillJurisdictions.Federal && !congressApi.Budget.TryTake(1, background: false, timeProvider.GetUtcNow()))
+            throw new ArgumentException("Congress.gov's shared free allowance for today is used up. Try again tomorrow, or set CongressApi__ApiKey for a key of your own.");
         var lookup = await LookupBillAsync(parsed, congress, ct);
         if (lookup.SourceFailed)
             throw new ArgumentException(lookup.FailureReason ?? $"{(parsed.Jurisdiction == WatchedBillJurisdictions.Georgia ? "The Georgia General Assembly" : "Congress.gov")} didn't answer. Try again in a few minutes.");
@@ -540,6 +591,12 @@ public sealed partial class CivicWatchService(
         {
             ct.ThrowIfCancellationRequested();
             var now = timeProvider.GetUtcNow();
+            // On the shared congress.gov key a federal bill is checked every 6 hours, and only
+            // while calls are left beyond the reserve for adding bills (20-11-26).
+            if (bill.Jurisdiction == WatchedBillJurisdictions.Federal && congressApi.Budget.Limited
+                && ((bill.LastCheckedAt is { } checkedAt && now - checkedAt < FederalRecheckOnDemoKey)
+                    || !congressApi.Budget.TryTake(1, background: true, now)))
+                continue;
             var lookup = await LookupBillAsync(new(bill.Jurisdiction, bill.BillType, bill.Number, bill.Label), bill.Congress, ct);
             bill.LastCheckedAt = now;
             if (lookup.Status is not { } status)
@@ -566,10 +623,21 @@ public sealed partial class CivicWatchService(
         if (changes.Count > 0)
         {
             await SendBillAlertAsync(changes, ct);
+            // Whoever added a bill and keeps their own alert address hears about it there too (20-11-26).
+            var owners = bills.ToDictionary(b => b.Id, b => b.CreatedBy);
+            var shared = await GetSettingsAsync(ct);
+            foreach (var group in changes.GroupBy(c => owners.GetValueOrDefault(c.Id) ?? string.Empty).Where(g => g.Key.Length > 0))
+            {
+                var own = await GetSettingsAsync(group.Key, ct);
+                if (own.Personal && own.AlertsEnabled && !string.Equals(own.AlertRecipient, shared.AlertsEnabled ? shared.AlertRecipient : null, StringComparison.OrdinalIgnoreCase))
+                    await SendBillAlertAsync(group.ToList(), ct, own);
+            }
             await FireBillTriggersAsync(changes, ct);
         }
         return changes;
     }
+
+    private static readonly TimeSpan FederalRecheckOnDemoKey = TimeSpan.FromHours(6);
 
     private static string Normalize(string? value) => Regex.Replace((value ?? string.Empty).Trim(), @"\s+", " ");
 
@@ -590,6 +658,39 @@ public sealed partial class CivicWatchService(
     }
 
     public sealed record GeorgiaBillHit(int LegislationId, string Title, string Status, string? StatusDate);
+
+    public const int MaxGeorgiaSearchHits = 20;
+
+    public async Task<IReadOnlyList<GeorgiaBillSearchHit>> SearchGeorgiaBillsAsync(string query, CancellationToken ct = default)
+    {
+        var words = (query ?? string.Empty).Trim();
+        if (words.Length < 3) throw new ArgumentException("Type a few words about the bills you want, like \"property tax\".");
+        if (words.Length > 100) words = words[..100];
+        var token = await GetGeorgiaTokenAsync(ct) ?? throw new ArgumentException("The Georgia General Assembly didn't answer. Try again in a few minutes.");
+        var json = await GeorgiaPostAsync($"Legislation/searchquery/{MaxGeorgiaSearchHits}/0?query={Uri.EscapeDataString(words)}", token, ct)
+                   ?? throw new ArgumentException("The Georgia General Assembly didn't answer. Try again in a few minutes.");
+        return ParseGeorgiaSearch(json);
+    }
+
+    // Every bill and resolution in a search answer, the current session's first.
+    public static IReadOnlyList<GeorgiaBillSearchHit> ParseGeorgiaSearch(string searchJson)
+    {
+        using var doc = JsonDocument.Parse(searchJson);
+        if (!doc.RootElement.TryGetProperty("results", out var results) || results.ValueKind != JsonValueKind.Array) return [];
+        var hits = new List<GeorgiaBillSearchHit>();
+        foreach (var r in results.EnumerateArray())
+        {
+            if (Int(r, "documentType") is not { } documentType || Int(r, "chamberType") is not { } chamberType || Int(r, "number") is not { } number) continue;
+            var prefix = (chamberType == 1 ? "H" : "S") + (documentType == 1 ? "B" : "R");
+            var date = Str(r, "statusDate");
+            var current = r.TryGetProperty("session", out var s) && s.ValueKind == JsonValueKind.Object
+                          && s.TryGetProperty("isCurrent", out var c) && c.ValueKind == JsonValueKind.True;
+            hits.Add(new GeorgiaBillSearchHit($"{prefix} {number}", Normalize(Str(r, "caption")), Normalize(Str(r, "status")),
+                date is { Length: >= 10 } ? date[..10] : date,
+                GeorgiaLegislationPageUrl + (Int(r, "legislationId") ?? 0).ToString(CultureInfo.InvariantCulture), current));
+        }
+        return hits.OrderByDescending(h => h.CurrentSession).Take(MaxGeorgiaSearchHits).ToList();
+    }
 
     // HB/SB are documentType 1 (bill), HR/SR documentType 2 (resolution); chamberType 1 House,
     // 2 Senate. The search is fuzzy, so the exact type/chamber/number match is picked, current
@@ -647,11 +748,11 @@ public sealed partial class CivicWatchService(
         return new(Normalize(Str(b, "title")), Normalize(status), date, url);
     }
 
-    private async Task SendBillAlertAsync(IReadOnlyList<WatchedBillChange> changes, CancellationToken ct)
+    private async Task SendBillAlertAsync(IReadOnlyList<WatchedBillChange> changes, CancellationToken ct, CivicWatchSettingsView? recipientSettings = null)
     {
         try
         {
-            var settings = await GetSettingsAsync(ct);
+            var settings = recipientSettings ?? await GetSettingsAsync(ct);
             if (!settings.AlertsEnabled || !MailboxAddress.TryParse(settings.AlertRecipient, out var to)) return;
             var smtp = smtpOptions.Value;
             if (!mailTransport.Describe(smtp).CanSend || !MailboxAddress.TryParse(smtp.FromAddress, out var from))
@@ -836,6 +937,26 @@ public sealed partial class CivicWatchService(
             await db.SaveChangesAsync(ct);
         }
 
+        // Keep each paper's text for search and place mentions (20-11-26): new papers, and a few
+        // older ones a run until all have it.
+        var withoutText = (await db.CivicMeetingDocuments.Where(d => d.Text == null && d.SummaryAttempts < MaxSummaryAttempts).ToListAsync(ct))
+            .OrderByDescending(d => d.MeetingDate, StringComparer.Ordinal)
+            .Take(MaxTextBackfill)
+            .ToList();
+        var newlyRead = new List<CivicMeetingDocument>();
+        foreach (var document in withoutText)
+        {
+            var text = await ExtractPdfTextAsync(document.Url, ct);
+            if (string.IsNullOrWhiteSpace(text)) continue;
+            document.Text = Truncate(text, MaxKeptTextChars);
+            newlyRead.Add(document);
+        }
+        if (newlyRead.Count > 0)
+        {
+            await db.SaveChangesAsync(ct);
+            await SendMentionAlertsAsync(db, newlyRead, ct);
+        }
+
         var pending = (await db.CivicMeetingDocuments.Where(d => d.AiSummary == null && d.SummaryAttempts < MaxSummaryAttempts).ToListAsync(ct))
             .OrderByDescending(d => d.MeetingDate, StringComparer.Ordinal)
             .Take(Math.Max(0, maxSummaries))
@@ -849,7 +970,8 @@ public sealed partial class CivicWatchService(
         {
             ct.ThrowIfCancellationRequested();
             document.SummaryAttempts++;
-            var text = await ExtractPdfTextAsync(document.Url, ct);
+            var text = document.Text ?? await ExtractPdfTextAsync(document.Url, ct);
+            if (document.Text is null && !string.IsNullOrWhiteSpace(text)) document.Text = Truncate(text, MaxKeptTextChars);
             if (string.IsNullOrWhiteSpace(text))
             {
                 document.LastError = "The PDF had no readable text.";
@@ -883,6 +1005,93 @@ public sealed partial class CivicWatchService(
             }
             await db.SaveChangesAsync(ct);
         }
+    }
+
+    private const int MaxTextBackfill = 4;
+    private const int MaxKeptTextChars = 200_000;
+    private const int MaxSearchHits = 20;
+    private static readonly TimeSpan VisitMarkHoldsFor = TimeSpan.FromMinutes(30);
+
+    // Someone's places named in a newly read paper: one email per person per paper, to their
+    // alert address (their own settings, else the shared one).
+    private async Task SendMentionAlertsAsync(IAppDbContext db, IReadOnlyList<CivicMeetingDocument> documents, CancellationToken ct)
+    {
+        try
+        {
+            var rows = await db.CivicWatchSettings.AsNoTracking().ToListAsync(ct);
+            var smtp = smtpOptions.Value;
+            if (!mailTransport.Describe(smtp).CanSend || !MailboxAddress.TryParse(smtp.FromAddress, out var from)) return;
+            foreach (var row in rows.Where(r => r.AlertsEnabled && MailboxAddress.TryParse(r.AlertRecipient, out _)))
+            {
+                var terms = CivicMentions.Split(row.MentionTerms);
+                if (terms.Count == 0) continue;
+                var hits = documents.Select(d => (Document: d, Found: CivicMentions.Found(d.Text, terms))).Where(h => h.Found.Count > 0).ToList();
+                if (hits.Count == 0) continue;
+                var message = new MimeMessage();
+                message.From.Add(from);
+                message.To.Add(MailboxAddress.Parse(row.AlertRecipient!));
+                message.Subject = $"[Civic Watch] {string.Join(", ", hits.SelectMany(h => h.Found).Distinct(StringComparer.OrdinalIgnoreCase))} in the county's meeting papers";
+                var body = new StringBuilder("Places you follow are named in new County Commission papers:\n\n");
+                foreach (var (document, found) in hits)
+                {
+                    body.AppendLine($"{document.Title}: {string.Join(", ", found)}");
+                    var snippet = CivicMentions.Snippet(document.Text, found[0]);
+                    if (snippet is not null) body.AppendLine($"  {snippet}");
+                    body.AppendLine($"  {document.Url}").AppendLine();
+                }
+                message.Body = new TextPart("plain") { Text = body.ToString() };
+                await mailTransport.SendAsync(message, smtp, "civic-watch-mentions", ct);
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning(ex, "Civic Watch: place mention email failed");
+        }
+    }
+
+    public async Task<IReadOnlyList<CivicMeetingSearchHit>> SearchMeetingDocumentsAsync(string query, CancellationToken ct = default)
+    {
+        var words = (query ?? string.Empty).Trim();
+        if (words.Length < 2) return [];
+        await using var db = await dbContextFactory.CreateDbContextAsync(ct);
+        var rows = await db.CivicMeetingDocuments.AsNoTracking().Where(d => d.Text != null).ToListAsync(ct);
+        return rows
+            .Select(r => (Row: r, Snippet: CivicMentions.Snippet(r.Text, words) ?? (r.AiSummary is null ? null : CivicMentions.Snippet(r.AiSummary, words))))
+            .Where(x => x.Snippet is not null)
+            .Select(x => (x.Row, x.Snippet, Date: DateOnly.TryParseExact(x.Row.MeetingDate, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var d) ? d : DateOnly.MinValue))
+            .OrderByDescending(x => x.Date)
+            .Take(MaxSearchHits)
+            .Select(x => new CivicMeetingSearchHit(x.Row.Id, x.Date, x.Row.Kind, x.Row.Title, x.Row.Url, x.Snippet!))
+            .ToList();
+    }
+
+    public async Task<DateTimeOffset?> MarkVisitAsync(string username, CancellationToken ct = default)
+    {
+        var person = PersonKey(username);
+        if (person is null) return null;
+        await using var db = await dbContextFactory.CreateDbContextAsync(ct);
+        var now = timeProvider.GetUtcNow();
+        var state = await db.CivicWatchUserStates.Where(s => s.Username == person).OrderBy(s => s.Id).FirstOrDefaultAsync(ct);
+        if (state is null)
+        {
+            db.CivicWatchUserStates.Add(new CivicWatchUserState { Username = person, LastVisitedAt = now, CreatedAt = now, CreatedBy = username });
+            await db.SaveChangesAsync(ct);
+            return null;
+        }
+        // A reload soon after keeps counting from the same visit before.
+        if (state.LastVisitedAt is { } last && now - last < VisitMarkHoldsFor) return state.PreviousVisitAt;
+        state.PreviousVisitAt = state.LastVisitedAt;
+        state.LastVisitedAt = now;
+        state.UpdatedAt = now;
+        await db.SaveChangesAsync(ct);
+        return state.PreviousVisitAt;
+    }
+
+    public async Task<CivicChanges> GetChangesSinceAsync(DateTimeOffset since, CancellationToken ct = default)
+    {
+        var now = timeProvider.GetUtcNow();
+        // At most two weeks back; sightings are kept for 120 days but a list that long isn't news.
+        return await GetChangesAsync(now - since > TimeSpan.FromDays(14) ? TimeSpan.FromDays(14) : now - since, ct);
     }
 
     private async Task<string?> ExtractPdfTextAsync(string url, CancellationToken ct)

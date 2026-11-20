@@ -28,6 +28,13 @@ public interface INewsWatchService
 
     // The weekly reading page in the person's Sentinel: builds it now and returns its id.
     Task<Guid> BuildReadingDigestAsync(string username, CancellationToken ct = default);
+
+    // Your library (20-11-26): what you queued, clipped or read that mentions every word.
+    Task<IReadOnlyList<LibraryHit>> SearchLibraryAsync(string username, string query, CancellationToken ct = default);
+
+    // Authors you follow (20-11-26).
+    Task<IReadOnlyList<string>> ListFollowedAuthorsAsync(string username, CancellationToken ct = default);
+    Task FollowAuthorAsync(string username, string name, bool follow, CancellationToken ct = default);
     // Mondays: rebuilds it for everyone who has used Media Watch lately. Returns how many.
     Task<int> RunReadingDigestsIfDueAsync(CancellationToken ct = default);
 

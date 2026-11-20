@@ -1,0 +1,13 @@
+.front-pages-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr));
+    gap: 1rem;
+}
+
+.front-page ol {
+    padding-left: 1.1rem;
+}
+
+.front-page li {
+    margin-bottom: .5rem;
+}

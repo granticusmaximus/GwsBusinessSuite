@@ -106,7 +106,9 @@ public sealed record CivicUpdate(
     string Url,
     string Summary,
     DateTimeOffset? PublishedAt,
-    string Source);
+    string Source,
+    // SentinelGPT's plain-language note on a county notice (20-11-26), once written.
+    string? AiOverview = null);
 
 public sealed record CivicMeeting(
     string Title,

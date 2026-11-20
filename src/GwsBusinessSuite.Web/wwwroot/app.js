@@ -1383,15 +1383,6 @@ window.gwsClientTime = {
 	utcOffsetMinutesWest: function () { return new Date().getTimezoneOffset(); }
 };
 
-// The World News story's jump links (Story · Agreement · Coverage, WorldNewsStoryView, 07-11-26).
-// Buttons rather than "#…" links: those resolve against <base href="/"> and would leave the page.
-document.addEventListener('click', function (event) {
-	var jump = event.target instanceof Element ? event.target.closest('[data-story-jump]') : null;
-	if (!jump) return;
-	var part = document.getElementById(jump.getAttribute('data-story-jump'));
-	if (part) part.scrollIntoView({ behavior: 'smooth', block: 'start' });
-});
-
 // Copy from any modal (20-11-26, Grant): every modal and Overwatch panel header gets a Copy button.
 // It copies what's selected inside that modal, or else all of its text. The button is added after
 // the header's own children, so Blazor's elements keep their places.
@@ -1493,5 +1484,35 @@ window.gwsReader = {
 		if (!selection || selection.isCollapsed) return '';
 		var body = document.querySelector('.gws-reader-body');
 		return body && body.contains(selection.anchorNode) ? String(selection).trim() : '';
-	}
+	},
+
+	// Listen mode (20-11-26): the browser's own speech (WebKit's on the Mac app and iOS), so
+	// nothing leaves the device. Items are { title, text }, read one after another; long texts go
+	// in sentence-sized pieces, since some engines stop after about 15 seconds of one utterance.
+	canSpeak: function () { return 'speechSynthesis' in window && typeof SpeechSynthesisUtterance === 'function'; },
+	speak: function (items, rate) {
+		if (!this.canSpeak()) return false;
+		var synth = window.speechSynthesis;
+		synth.cancel();
+		var pieces = [];
+		(items || []).forEach(function (item) {
+			if (item.title) pieces.push(item.title + '.');
+			String(item.text || '').split(/(?<=[.!?])\s+/).forEach(function (sentence) {
+				var trimmed = sentence.trim();
+				if (!trimmed) return;
+				while (trimmed.length > 220) { pieces.push(trimmed.slice(0, 220)); trimmed = trimmed.slice(220); }
+				pieces.push(trimmed);
+			});
+		});
+		pieces.forEach(function (piece) {
+			var utterance = new SpeechSynthesisUtterance(piece);
+			utterance.rate = rate || 1;
+			synth.speak(utterance);
+		});
+		return pieces.length > 0;
+	},
+	pause: function () { if (this.canSpeak()) window.speechSynthesis.pause(); },
+	resume: function () { if (this.canSpeak()) window.speechSynthesis.resume(); },
+	stop: function () { if (this.canSpeak()) window.speechSynthesis.cancel(); },
+	speaking: function () { return this.canSpeak() && (window.speechSynthesis.speaking || window.speechSynthesis.pending); }
 };

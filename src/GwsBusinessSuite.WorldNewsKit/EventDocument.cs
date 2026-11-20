@@ -23,6 +23,7 @@ public static class EventDocument
     public const string AgreedHeading = "What they agree on";
     public const string FiguresHeading = "The figures";
     public const string DifferencesHeading = "Where they differ";
+    public const string DisputesHeading = "Where they disagree, claim by claim";
     // Before 06-11-26 (the summary model's own comparison points).
     public const string ComparisonHeading = "How the coverage compares";
 
@@ -124,6 +125,16 @@ public static class EventDocument
         }
         else md.AppendLine(analysis is null && summary?.Comparison is not { Count: > 0 } ? waiting
             : "_SentinelGPT found no outlet whose coverage stands out from the rest._").AppendLine();
+        if (analysis?.Disputes is { Count: > 0 } disputes)
+        {
+            md.AppendLine($"### {DisputesHeading}").AppendLine();
+            foreach (var dispute in disputes)
+            {
+                md.AppendLine($"- **{Inline(dispute.Point)}**");
+                foreach (var account in dispute.Accounts) md.AppendLine($"  - {Inline(account.Outlet)}: {Inline(account.Text)}");
+            }
+            md.AppendLine();
+        }
 
         if (analysis is not null)
         {

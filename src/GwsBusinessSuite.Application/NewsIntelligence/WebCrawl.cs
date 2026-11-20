@@ -25,7 +25,11 @@ public interface IWebCrawlService
     Task<IReadOnlyList<WebCrawlSite>> ListSitesAsync(int limit = 100, CancellationToken ct = default);
     Task<WebCrawlSite> AddSiteAsync(string url, CancellationToken ct = default);
     Task RemoveSiteAsync(string host, CancellationToken ct = default);
+    // The text the crawler kept for one address, or null (the reader's fallback, 20-11-26).
+    Task<KeptPage?> GetKeptPageAsync(string url, CancellationToken ct = default) => Task.FromResult<KeptPage?>(null);
 }
+
+public sealed record KeptPage(string Url, string Title, string Text, DateTimeOffset? PublishedAt);
 
 // Turns what someone types (or a topic's comma-separated keywords) into an FTS5 query, so no
 // input can reach FTS5's own syntax: every word or quoted phrase becomes a quoted string.

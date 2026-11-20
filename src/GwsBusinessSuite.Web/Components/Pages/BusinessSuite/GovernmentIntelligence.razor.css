@@ -291,3 +291,53 @@
 }
 
 .event-clear:hover { color: var(--gws-text-strong); }
+
+.civic-search {
+    display: flex;
+    gap: .5rem;
+    margin: .75rem 0 .5rem;
+}
+
+.civic-bill-hits li {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: .75rem;
+    padding: .5rem 0;
+    border-top: 1px solid var(--gws-panel-border, var(--bs-border-color));
+}
+
+.civic-ai-note {
+    color: var(--bs-secondary-color);
+    font-style: italic;
+}
+
+.rep-scorecard {
+    display: block;
+    margin: .25rem 0;
+    color: var(--bs-secondary-color);
+}
+
+.civic-followed {
+    padding: .5rem 0;
+    border-top: 1px solid var(--gws-panel-border, var(--bs-border-color));
+}
+
+.civic-followed-mentions {
+    margin: .25rem 0 0;
+    padding-left: 1.1rem;
+}
+
+.civic-subscribe {
+    margin: 1rem 0;
+    padding-top: .75rem;
+    border-top: 1px solid var(--gws-panel-border, var(--bs-border-color));
+}
+
+.civic-calendar-url {
+    max-width: 32rem;
+}
+
+.civic-comment-draft {
+    white-space: pre-line;
+}

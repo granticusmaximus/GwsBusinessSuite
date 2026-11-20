@@ -8,6 +8,8 @@
 @inject INewsWatchService WatchService
 @inject ICurrentUserAccessor CurrentUserAccessor
 @inject ILogger<NewsIntelligence> Logger
+@inject IJSRuntime JS
+@inject IArticleReader Reader
 
 <PageTitle>Media Watch</PageTitle>
 
@@ -84,11 +86,15 @@
                     <select class="form-select form-select-sm mb-1" @bind="_formTopicType">
                         <option value="@WatchedTopicTypes.General">General (Google News + dev.to)</option>
                         <option value="@WatchedTopicTypes.Technical">Technical / Programming (Hacker News + dev.to)</option>
+                        <option value="@WatchedTopicTypes.Feeds">Only its own feeds (no search)</option>
                     </select>
                     <div class="small text-secondary mb-2">
-                        @(_formTopicType == WatchedTopicTypes.Technical
-                            ? "Best for languages/frameworks - searches Hacker News and dev.to instead of general news."
-                            : "Best for regions, people, or current events - searches Google News and dev.to.")
+                        @(_formTopicType switch
+                        {
+                            WatchedTopicTypes.Technical => "Best for languages/frameworks - searches Hacker News and dev.to instead of general news.",
+                            WatchedTopicTypes.Feeds => "Reads only the trusted feeds below, newest first - nothing is searched.",
+                            _ => "Best for regions, people, or current events - searches Google News and dev.to.",
+                        })
                     </div>
                     <div class="d-flex align-items-center gap-2 mb-2">
                         <label class="form-label small mb-0">Badge color</label>
@@ -138,6 +144,16 @@
                     }
                 </button>
 
+                @* 5. Authors you follow (20-11-26). *@
+                <button type="button" class="list-group-item list-group-item-action d-flex justify-content-between align-items-center @(_activeFilter == "authors" ? "active" : "")"
+                        @onclick='() => SelectFilter("authors")'>
+                    <span><i class="bi bi-person-check me-2"></i>Authors you follow</span>
+                    @if (_followedAuthors.Count > 0)
+                    {
+                        <span class="badge @(_activeFilter == "authors" ? "text-bg-light" : "text-bg-secondary") rounded-pill">@_followedAuthors.Count</span>
+                    }
+                </button>
+
                 <button type="button" class="list-group-item list-group-item-action @(_activeFilter == "trends" ? "active" : "")"
                         @onclick='() => SelectFilter("trends")'>
                     <i class="bi bi-graph-up me-2"></i>Trends
@@ -156,6 +172,11 @@
                 <button type="button" class="list-group-item list-group-item-action text-success" disabled="@_addingPack" @onclick="AddTechPackAsync"
                         title="A Technical topic with InfoQ, the .NET Blog, GitHub Engineering, Martin Fowler, Simon Willison, Andrew Lock, the Pragmatic Engineer, Cloudflare, Netflix and Lobsters, plus Hacker News and dev.to">
                     <i class="bi bi-plus-circle me-2"></i>@(HasTechPack ? "Top up the software development pack" : "Add the software development pack")
+                </button>
+                @* 2. The release radar (20-11-26): GitHub releases of what GWS is built on. *@
+                <button type="button" class="list-group-item list-group-item-action text-success" disabled="@_addingPack" @onclick="AddReleaseRadarAsync"
+                        title="A feeds-only topic of GitHub releases: ASP.NET Core, EF Core, .NET MAUI, Playwright, MailKit, Markdig, QuestPDF, Stripe.net, SmartReader, Ollama and more">
+                    <i class="bi bi-rocket-takeoff me-2"></i>@(HasReleaseRadar ? "Top up the release radar" : "Add the release radar")
                 </button>
 
                 @foreach (var topic in _topics)
@@ -328,7 +349,8 @@
 
 <ArticleReaderModal Url="@_readerItem?.Url" Title="@_readerItem?.Title" Summary="@ReaderSummary"
                     Saved="@(_readerItem is not null && IsSaved(_readerItem))" Finished="@ReaderFinished" ClippedPageId="@ReaderClipId"
-                    OnClose="CloseReader" OnReadLater="ReaderReadLaterAsync" OnFinished="ReaderFinishedAsync" Clip="ReaderClipAsync" OnRead="ReaderReadAsync" />
+                    OnClose="CloseReader" OnReadLater="ReaderReadLaterAsync" OnFinished="ReaderFinishedAsync" Clip="ReaderClipAsync" OnRead="ReaderReadAsync"
+                    Author="@(_readerItem?.Author)" FollowedAuthors="_followedAuthors" OnFollowAuthor="FollowAuthorAsync" />
 
 @code {
     // ── State ────────────────────────────────────────────────
@@ -393,7 +415,9 @@
             var read = WatchService.GetReadUrlHashesAsync(_username);
             var saved = WatchService.GetSavedUrlHashesAsync(_username);
             var unread = WatchService.GetUnreadCountsAsync(_username);
-            await Task.WhenAll(read, saved, unread);
+            var authors = WatchService.ListFollowedAuthorsAsync(_username);
+            await Task.WhenAll(read, saved, unread, authors);
+            _followedAuthors = await authors;
             _readHashes = (await read).ToHashSet();
             _savedHashes = (await saved).ToHashSet();
             _unreadCounts = await unread;
@@ -426,7 +450,7 @@
                     _saved = await WatchService.ListSavedAsync(_username);
                     return;
                 case "trends":
-                    _trends = await WatchService.GetTrendsAsync();
+                    _trends = await WatchService.GetTrendsAsync(_trendDays);
                     return;
                 case "web":
                     // MediaWatchWebSearch loads its own index and status.
@@ -436,7 +460,7 @@
                     return;
             }
 
-            Guid? queryTopicId = _activeFilter == "all" || _activeFilter == "breaking"
+            Guid? queryTopicId = _activeFilter is "all" or "breaking" or "authors"
                 ? null
                 : Guid.Parse(_activeFilter);
 
@@ -461,6 +485,7 @@
     private async Task SelectFilter(string filter)
     {
         _activeFilter = filter;
+        _termFilter = null;
         _expandedStories.Clear();
         // Sources are scoped to whatever's in the newly selected view - a source picked
         // in one topic may not exist in another, so carrying it over would silently
@@ -691,6 +716,7 @@
         "all" => "All News",
         "breaking" => "Breaking News",
         "saved" => "Reading queue",
+        "authors" => "Authors you follow",
         "trends" => "Trends",
         "web" => "Web Search",
         "settings" => "Digest & settings",
@@ -748,6 +774,9 @@
         {
             // "All News" and "Breaking News" both read the topic-free general pool.
             "all" or "breaking" => _feed.Items.Where(x => x.TopicId == null).ToList(),
+            // Every feed's articles by the writers you follow.
+            "authors" => _feed.Items.Where(x => _followedAuthors.Any(a => NewsAuthors.Matches(x.Author, a)))
+                .DistinctBy(x => NewsStoryClusterer.UrlHash(x.Url)).ToList(),
             // A specific topic id - already scoped server-side by GetFeedAsync(topicId).
             _ => _feed.Items.ToList()
         };
@@ -766,8 +795,9 @@
         var items = CurrentViewItems().Where(SourceMatches)
             .Where(i => !ReadingFilters.IsMuted(i.Title, i.Description, i.Source, i.Url, mutedKeywords, mutedSources))
             .Where(i => ReadingFilters.MatchesAny(_stackTags, i.Title, i.Description))
+            .Where(i => _termFilter is null || NewsStoryClusterer.SignificantWords(i.Title).Contains(_termFilter))
             .ToList();
-        var stories = NewsStoryClusterer.Cluster(items, DateTimeOffset.UtcNow);
+        var stories = NewsStoryClusterer.Cluster(items, DateTimeOffset.UtcNow, _feed?.Meanings);
         IEnumerable<NewsStory> result = stories;
         if (_activeFilter == "breaking") result = result.Where(st => st.IsBreaking);
         if (_unreadOnly) result = result.Where(st => !IsStoryRead(st));
@@ -785,8 +815,89 @@
     private const string SortBest = "best";
     private string _sort = SortNewest;
     private readonly HashSet<string> _stackTags = new(StringComparer.Ordinal);
+
+    // Trends you can act on (20-11-26): a rising word filters its feed; history over 14, 30 or 60 days.
+    private string? _termFilter;
+    private int _trendDays = 14;
+
+    private async Task ShowTermAsync(string topicKey, string term)
+    {
+        await SelectFilter(topicKey == "top" ? "all" : topicKey);
+        _termFilter = term;
+    }
+
+    private async Task SetTrendDaysAsync(int days)
+    {
+        _trendDays = days;
+        _trends = await WatchService.GetTrendsAsync(days);
+    }
     private bool _addingPack;
     private bool HasTechPack => _topics.Any(t => string.Equals(t.Name, TechReadingPack.TopicName, StringComparison.OrdinalIgnoreCase));
+    private bool HasReleaseRadar => _topics.Any(t => string.Equals(t.Name, ReleaseRadar.TopicName, StringComparison.OrdinalIgnoreCase));
+    private IReadOnlyList<string> _followedAuthors = [];
+
+    private async Task AddReleaseRadarAsync()
+    {
+        _addingPack = true;
+        _statusMessage = _errorMessage = string.Empty;
+        try
+        {
+            var topic = await NewsService.AddReleaseRadarAsync();
+            _statusMessage = $"\"{topic.Name}\" follows the releases of what GWS is built on. Refreshing it now…";
+            _topics = (await NewsService.ListTopicsAsync()).ToList();
+            await SelectFilter(topic.Id.ToString());
+            await RefreshTopicAsync(topic.Id);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Adding the release radar failed");
+            _errorMessage = "The release radar couldn't be added.";
+        }
+        finally { _addingPack = false; }
+    }
+
+    private async Task FollowAuthorAsync((string Name, bool Follow) request)
+    {
+        try
+        {
+            await WatchService.FollowAuthorAsync(_username, request.Name, request.Follow);
+            _followedAuthors = await WatchService.ListFollowedAuthorsAsync(_username);
+            _statusMessage = request.Follow ? $"Following {NewsAuthors.Clean(request.Name)}: their articles gather under Authors you follow." : $"Stopped following {request.Name}.";
+        }
+        catch (ArgumentException ex)
+        {
+            _errorMessage = ex.Message;
+        }
+    }
+
+    // Your library and listening to the queue (20-11-26).
+    private string _libraryQuery = string.Empty;
+    private IReadOnlyList<LibraryHit>? _libraryHits;
+    private bool _queueSpeaking;
+
+    private async Task SearchLibraryAsync()
+    {
+        _libraryHits = _libraryQuery.Trim().Length < 2 ? null : await WatchService.SearchLibraryAsync(_username, _libraryQuery.Trim());
+    }
+
+    private async Task ListenToQueueAsync(IReadOnlyList<SavedArticleView> queue)
+    {
+        if (_queueSpeaking)
+        {
+            await JS.InvokeVoidAsync("gwsReader.stop");
+            _queueSpeaking = false;
+            return;
+        }
+        _statusMessage = "Reading the queue's articles to listen to…";
+        var items = new List<object>();
+        foreach (var saved in queue.Where(s => s.FinishedAt is null).Take(5))
+        {
+            var article = await Reader.ReadAsync(saved.Url, saved.Title);
+            if (article.Readable) items.Add(new { title = article.Title, text = article.Text });
+        }
+        _statusMessage = items.Count == 0 ? "None of those articles could be read here to listen to." : $"Listening to {items.Count} {Pluralize(items.Count, "article")} from the queue.";
+        if (items.Count > 0) _queueSpeaking = await JS.InvokeAsync<bool>("gwsReader.speak", new object[] { items, 1.0 });
+    }
 
     private async Task AddTechPackAsync()
     {
@@ -1098,6 +1209,13 @@
             {
                 <button type="button" class="btn btn-sm btn-link" @onclick="() => _stackTags.Clear()">Clear</button>
             }
+            @if (_termFilter is { } term)
+            {
+                <span class="badge rounded-pill text-bg-info d-inline-flex align-items-center gap-1 media-watch-term">
+                    Stories with “@term”
+                    <button type="button" class="btn-close media-watch-term-close" aria-label="Stop filtering by @term" @onclick="() => _termFilter = null"></button>
+                </span>
+            }
         </div>
         @if (CurrentViewItems().Count == 0)
         {
@@ -1176,6 +1294,12 @@
                 {
                     <p class="small text-secondary flex-grow-1">@takeText</p>
                 }
+                @if (string.IsNullOrWhiteSpace(item.OllamaSummary))
+                {
+                    <span class="media-watch-take-pending small text-secondary mb-2" title="The AI take is written in the background when the model is free">
+                        <i class="bi bi-hourglass-split" aria-hidden="true"></i> AI take pending
+                    </span>
+                }
                 @if (story.OtherReports.Count > 0)
                 {
                     <button type="button" class="btn btn-link btn-sm p-0 text-start mb-2 media-watch-outlets"
@@ -1251,6 +1375,9 @@
                         <button type="button" class="btn @(_queueFits == fits ? "btn-primary" : "btn-outline-secondary")" aria-pressed="@(_queueFits == fits ? "true" : "false")" @onclick="() => _queueFits = fits">@label</button>
                     }
                 </div>
+                <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => ListenToQueueAsync(queue)" aria-pressed="@(_queueSpeaking ? "true" : "false")">
+                    <i class="bi @(_queueSpeaking ? "bi-stop-circle" : "bi-headphones")" aria-hidden="true"></i> @(_queueSpeaking ? "Stop listening" : "Listen to the queue")
+                </button>
                 <select class="form-select form-select-sm w-auto" aria-label="Order" value="@_queueSort" @onchange="e => _queueSort = e.Value?.ToString() ?? ReadingQueue.SortSaved">
                     <option value="@ReadingQueue.SortSaved">Newest saved</option>
                     <option value="@ReadingQueue.SortShortest">Shortest first</option>
@@ -1261,6 +1388,41 @@
                     <label class="form-check-label small" for="queue-finished">Show finished (@finishedCount)</label>
                 </div>
             </div>
+            @* 4. Search your library: queued, clipped and read (20-11-26). *@
+            <form class="d-flex gap-2 mb-3 media-watch-library" @onsubmit="SearchLibraryAsync" @onsubmit:preventDefault="true">
+                <input class="form-control form-control-sm" placeholder="Search your library: queued, clipped and read" aria-label="Search your library"
+                       @bind="_libraryQuery" @bind:event="oninput" />
+                <button type="submit" class="btn btn-sm btn-outline-secondary" disabled="@(_libraryQuery.Trim().Length < 2)">Search</button>
+                @if (_libraryHits is not null)
+                {
+                    <button type="button" class="btn btn-sm btn-link" @onclick="() => { _libraryHits = null; _libraryQuery = string.Empty; }">Clear</button>
+                }
+            </form>
+            @if (_libraryHits is { } libraryHits)
+            {
+                @if (libraryHits.Count == 0)
+                {
+                    <p class="small text-secondary">Nothing in your library mentions “@_libraryQuery.Trim()”.</p>
+                }
+                <ul class="list-group list-group-flush card border-0 shadow-sm mb-3">
+                    @foreach (var hit in libraryHits)
+                    {
+                        <li class="list-group-item">
+                            <span class="badge text-bg-light border me-1">@hit.Where</span>
+                            @if (hit.Where == LibraryWhere.Clipped && hit.ClippedPageId is { } clipPage)
+                            {
+                                <a href="/admin/sentinel?page=@clipPage" class="fw-semibold">@hit.Title</a>
+                            }
+                            else
+                            {
+                                <a href="@hit.Url" target="_blank" rel="noopener noreferrer" class="fw-semibold">@hit.Title</a>
+                            }
+                            <span class="small text-secondary"> · @hit.Source@(hit.At is { } at ? $" · {at.ToLocalGwsDate()}" : "")</span>
+                            @if (!string.IsNullOrWhiteSpace(hit.Snippet)) { <div class="small text-secondary">@hit.Snippet</div> }
+                        </li>
+                    }
+                </ul>
+            }
             @if (queue.Count == 0)
             {
                 <EmptyState Icon="bi-hourglass" Message="Nothing in the queue fits that." CssClass="text-center py-4" />
@@ -1310,7 +1472,15 @@
         }
         else
         {
-            <p class="small text-secondary">New articles per day over the last @trends.Days.Count days, and words showing up at least twice as often in the last two days as before.</p>
+            <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+                <p class="small text-secondary mb-0 me-auto">New articles per day over the last @trends.Days.Count days, and words showing up at least twice as often in the last two days as before. Click a word to see its stories.</p>
+                <div class="btn-group btn-group-sm" role="group" aria-label="Trend history">
+                    @foreach (var days in new[] { 14, 30, 60 })
+                    {
+                        <button type="button" class="btn @(_trendDays == days ? "btn-primary" : "btn-outline-secondary")" aria-pressed="@(_trendDays == days ? "true" : "false")" @onclick="() => SetTrendDaysAsync(days)">@days days</button>
+                    }
+                </div>
+            </div>
             <div class="row row-cols-1 row-cols-md-2 g-3">
                 @foreach (var topic in trends.Topics.Where(t => t.DailyCounts.Sum() > 0))
                 {
@@ -1341,9 +1511,10 @@
                                         <span class="small text-secondary me-1">Rising:</span>
                                         @foreach (var term in topic.RisingTerms)
                                         {
-                                            <span class="badge bg-light text-dark border" title="@($"{term.RecentCount} mentions in 2 days vs {term.BaselinePerDay} a day before")">
+                                            <button type="button" class="badge bg-light text-dark border media-watch-rising" title="@($"{term.RecentCount} mentions in 2 days vs {term.BaselinePerDay} a day before. Click to see these stories.")"
+                                                    @onclick="() => ShowTermAsync(topic.TopicKey, term.Term)">
                                                 @term.Term @(term.Ratio is { } r ? $"×{r:0.#}" : "new")
-                                            </span>
+                                            </button>
                                         }
                                     </div>
                                 }

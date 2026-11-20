@@ -282,6 +282,62 @@ public sealed partial class WorldNewsService
         return new RegroupSummary(DateTimeOffset.UtcNow, actor, result.Merges.Count, asked, confirmed.Count, apart, note);
     }
 
+    // Merge suggestions, the reverse of the hourly split (20-11-26): once an hour the closest few
+    // pairs just below the merge threshold go to the AI, and the ones it calls the same event are
+    // merged, as Regroup would, without comparing every story with every other on a keypress.
+    public const string HourlyMergeActor = "automatic (hourly merge check)";
+    public static readonly TimeSpan MergeCheckEvery = TimeSpan.FromHours(1);
+    private DateTimeOffset _lastCloseCallCheck = DateTimeOffset.MinValue;
+
+    public void StartHourlyMergeCheck(DateTimeOffset now)
+    {
+        if (_regroupAiChecks == 0 || now - _lastCloseCallCheck < MergeCheckEvery) return;
+        if (!_regrouping.Wait(0)) return;
+        _lastCloseCallCheck = now;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                var merged = await MergeCloseCallsAsync(Math.Min(3, _regroupAiChecks), _stopping.Token);
+                if (merged > 0) _logger.LogInformation("World News: the hourly merge check joined {Count} stories split in two", merged);
+            }
+            catch (OperationCanceledException) when (_stopping.IsCancellationRequested)
+            {
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "World News: hourly merge check failed");
+            }
+            finally
+            {
+                _regrouping.Release();
+            }
+        });
+    }
+
+    private async Task<int> MergeCloseCallsAsync(int checks, CancellationToken ct)
+    {
+        var calls = await Task.Run(() => _pipeline.CloseCalls(CloseCallBand, checks), ct);
+        var merged = 0;
+        foreach (var call in calls)
+        {
+            var verdict = await JudgeAsync(call, ct);
+            if (verdict.Note is not null) break;
+            if (verdict.Same is not { } same) continue;
+            var reason = string.IsNullOrWhiteSpace(verdict.Reason) ? (same ? "the same event" : "different events") : verdict.Reason;
+            var by = $"AI ({_model})";
+            await Task.Run(() =>
+            {
+                Store.SavePairVerdict(call.A.Id, call.B.Id, same ? GroupingVerdicts.Same : GroupingVerdicts.Apart, GroupingVerdicts.Ai, reason, by, DateTimeOffset.UtcNow);
+                var detail = $"{(same ? "Same story as" : "Not the same story as")} “{{0}}” (similarity {call.Similarity:0.00}, hourly merge check): {reason}";
+                Store.LogGrouping(call.A.Id, call.B.Id, "judged", string.Format(detail, call.B.Title), by, DateTimeOffset.UtcNow);
+                Store.LogGrouping(call.B.Id, call.A.Id, "judged", string.Format(detail, call.A.Title), by, DateTimeOffset.UtcNow);
+            }, ct);
+            if (same && await MergeAsync(call.A.Id, call.B.Id, HourlyMergeActor, ct) is not null) merged++;
+        }
+        return merged;
+    }
+
     private async Task<(bool? Same, string Reason, string? Note)> JudgeAsync(CloseCall call, CancellationToken ct)
     {
         var headlinesA = await Task.Run(() => Headlines(call.A.Id), ct);
