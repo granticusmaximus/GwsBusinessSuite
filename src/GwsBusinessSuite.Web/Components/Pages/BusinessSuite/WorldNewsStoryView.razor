@@ -321,11 +321,31 @@ else
                         </label>
                         <input class="form-control form-control-sm" placeholder="Evidence (a link or what you checked)" aria-label="@($"Evidence for {label}")"
                                value="@(_evidence.GetValueOrDefault(key) ?? check?.Evidence)" @onchange="e => _evidence[key] = e.Value?.ToString() ?? string.Empty" />
+                        @* A suggestion is a button that fills the box (it opens nothing), with a short label;
+                           a web address in it gets its own Open link (the browser, in the Mac app). 19-11-26. *@
                         @if (check?.Done != true && DeskChecklist.Suggest(key, _story.Trust, _board, _story.FirstReport) is { } suggestion)
                         {
-                            <button type="button" class="btn btn-sm btn-link p-0" @onclick="() => _evidence[key] = suggestion">Use: @suggestion</button>
+                            <div class="story-desk-suggestion">
+                                <button type="button" class="btn btn-sm btn-outline-secondary" title="@suggestion" @onclick="() => _evidence[key] = suggestion">
+                                    <i class="bi bi-input-cursor-text me-1" aria-hidden="true"></i>Fill in
+                                </button>
+                                <span class="story-desk-suggestion-text" title="@suggestion">@DeskChecklist.ShortLabel(suggestion)</span>
+                                @if (DeskChecklist.LinkIn(suggestion) is { } link)
+                                {
+                                    <a class="story-desk-open" href="@link" target="_blank" rel="noopener noreferrer">Open <i class="bi bi-box-arrow-up-right" aria-hidden="true"></i></a>
+                                }
+                            </div>
                         }
-                        @if (check is { Done: true }) { <small class="d-block text-secondary">@check.CheckedBy, @check.CheckedAt?.ToLocalGwsDateTime()</small> }
+                        @if (check is { Done: true })
+                        {
+                            <small class="d-block text-secondary">
+                                @check.CheckedBy, @check.CheckedAt?.ToLocalGwsDateTime()
+                                @if (DeskChecklist.LinkIn(check.Evidence) is { } saved)
+                                {
+                                    <span> · </span><a href="@saved" target="_blank" rel="noopener noreferrer">Open the evidence <i class="bi bi-box-arrow-up-right" aria-hidden="true"></i></a>
+                                }
+                            </small>
+                        }
                     </li>
                 }
             </ul>

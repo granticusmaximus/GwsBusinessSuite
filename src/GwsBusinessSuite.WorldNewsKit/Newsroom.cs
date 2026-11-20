@@ -119,6 +119,28 @@ public static class DeskChecklist
         Items.All(item => checks.Any(check => check.Item == item.Key && check.Done && !string.IsNullOrWhiteSpace(check.Evidence)));
 
     // Evidence the system already has for an item, offered to the person ticking it.
+    // The first web address in a suggestion or a saved piece of evidence, for an "Open" link (19-11-26).
+    public static string? LinkIn(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return null;
+        var match = System.Text.RegularExpressions.Regex.Match(text, @"https?://\S+");
+        return match.Success && Uri.TryCreate(match.Value.TrimEnd('.', ',', ')', ';'), UriKind.Absolute, out var uri)
+            && uri.Scheme is "http" or "https" ? uri.AbsoluteUri : null;
+    }
+
+    // A suggestion as a short button label: a web address becomes its site in brackets, and the
+    // whole is cut to max characters. The full text still goes into the evidence box (19-11-26:
+    // a Google News address printed in full took over the checklist).
+    public static string ShortLabel(string suggestion, int max = 90)
+    {
+        var label = System.Text.RegularExpressions.Regex.Replace(suggestion, @"https?://\S+", match =>
+            Uri.TryCreate(match.Value.TrimEnd('.', ',', ')', ';'), UriKind.Absolute, out var uri)
+                ? $"({(uri.Host.StartsWith("www.", StringComparison.OrdinalIgnoreCase) ? uri.Host[4..] : uri.Host)})"
+                : match.Value);
+        label = System.Text.RegularExpressions.Regex.Replace(label, @",\s*\(", " (").Trim();
+        return label.Length <= max ? label : label[..(max - 1)].TrimEnd() + "…";
+    }
+
     public static string? Suggest(string item, StoryTrustSummary? trust, EvidenceBoard? board, WorldArticle? firstReport) => item switch
     {
         "origin" when firstReport is not null => $"First report: {firstReport.Outlet}, {firstReport.Url}",

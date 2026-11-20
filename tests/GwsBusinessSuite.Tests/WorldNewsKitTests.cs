@@ -339,6 +339,19 @@ public sealed class WorldNewsKitTests : IDisposable
             .Should().BeEmpty("half the reports isn't an outlier");
     }
 
+    // 19-11-26: checklist suggestions show a short label and an Open link instead of a printed address.
+    [Fact]
+    public void DeskChecklist_ShouldShortenSuggestions_AndFindTheirLink()
+    {
+        var suggestion = "First report: Anadolu Ajansı, https://news.google.com/rss/articles/CBMi6gNBVV95cUxOZkRib3ZHeHRy" + new string('x', 400) + "?oc=5";
+
+        DeskChecklist.ShortLabel(suggestion).Should().Be("First report: Anadolu Ajansı (news.google.com)");
+        DeskChecklist.LinkIn(suggestion).Should().StartWith("https://news.google.com/rss/articles/").And.EndWith("?oc=5");
+        DeskChecklist.LinkIn("19 independent sources: BERITA Mediacorp, CNN Arabic").Should().BeNull();
+        DeskChecklist.LinkIn("javascript:alert(1)").Should().BeNull();
+        DeskChecklist.ShortLabel(new string('a', 200)).Should().HaveLength(90).And.EndWith("…");
+    }
+
     // 19-11-26: SentinelGPT tags stories the keywords couldn't, from the kind's own list only.
     [Fact]
     public void SubtypeRefinement_ShouldAcceptOnlyTheKindsIds_AndBeSavedPerStory()

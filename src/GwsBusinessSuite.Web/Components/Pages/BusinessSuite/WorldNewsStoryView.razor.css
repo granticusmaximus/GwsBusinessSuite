@@ -163,7 +163,7 @@
 .story-fact-outlets {
     display: block;
     color: var(--gws-text-soft);
-    font-size: var(--gws-type-sm);
+    font-size: var(--gws-type-md);
 }
 
 .story-figures li.is-disputed strong { color: var(--bs-warning-text-emphasis); }
@@ -216,7 +216,7 @@
     border-radius: var(--gws-radius-pill);
     background: transparent;
     color: var(--gws-text-soft);
-    font-size: var(--gws-type-sm);
+    font-size: var(--gws-type-md);
     font-weight: 600;
     cursor: pointer;
 }
@@ -300,14 +300,14 @@
 .story-outlet-meta,
 .story-dots-none {
     color: var(--gws-text-soft);
-    font-size: var(--gws-type-sm);
+    font-size: var(--gws-type-md);
 }
 
 .story-dots {
     display: inline-flex;
     gap: .2rem;
     color: var(--gws-text-soft);
-    font-size: var(--gws-type-sm);
+    font-size: var(--gws-type-md);
     letter-spacing: .05em;
 }
 
@@ -445,7 +445,7 @@
 .story-trust-singlesource { border-left-color: var(--bs-warning); }
 .story-trust-disputed { border-left-color: var(--bs-danger); }
 .story-trust-head { display: flex; flex-wrap: wrap; gap: .5rem; align-items: baseline; }
-.story-trust-label { font-weight: 700; text-transform: uppercase; letter-spacing: .05em; font-size: var(--gws-type-sm); color: var(--gws-text-strong); }
+.story-trust-label { font-weight: 700; text-transform: uppercase; letter-spacing: .05em; font-size: var(--gws-type-md); color: var(--gws-text-strong); }
 .story-trust-reason { color: var(--gws-text-soft); }
 .story-trust-sources { margin: .4rem 0 0; color: var(--gws-text-strong); }
 .story-trust details { margin-top: .4rem; }
@@ -475,6 +475,10 @@
 .story-desk-source { font-weight: 600; margin-right: .4rem; color: var(--gws-text-strong); }
 .story-desk-checklist { list-style: none; margin: 0; padding: 0; display: grid; gap: .6rem; }
 .story-desk-checklist .form-control { margin-top: .25rem; max-width: 40rem; }
+/* A suggestion: a Fill in button, a one-line label (the full text on hover), and Open for an address. */
+.story-desk-suggestion { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; margin-top: .35rem; max-width: 40rem; }
+.story-desk-suggestion-text { flex: 1 1 12rem; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--gws-text-soft); font-size: var(--gws-type-md); }
+.story-desk-open { white-space: nowrap; font-size: var(--gws-type-md); }
 
 /* B7: a summary sentence naming something not found in the reports. */
 .story-unsupported { text-decoration: underline dotted; text-decoration-color: var(--bs-warning, #d97706); text-underline-offset: 3px; cursor: help; }
