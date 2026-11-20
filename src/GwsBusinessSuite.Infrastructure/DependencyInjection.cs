@@ -1063,6 +1063,7 @@ public static class DependencyInjection
             PooledConnectionLifetime = TimeSpan.FromMinutes(5)
         });
         services.AddSingleton<WorldNewsArticleReader>();
+        services.AddSingleton<GwsBusinessSuite.Application.NewsIntelligence.IArticleReader, ArticleReaderService>();
         services.AddSingleton<WorldNewsService>();
         services.AddSingleton<GwsBusinessSuite.Application.NewsIntelligence.IWorldNewsSearch, WorldNewsAssistantSearch>();
         services.AddHostedService<WorldNewsBackgroundService>();

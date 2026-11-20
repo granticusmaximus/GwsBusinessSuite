@@ -1,0 +1,93 @@
+@using GwsBusinessSuite.Application.NewsIntelligence
+@inject IArticleReader Reader
+@* Media Watch's reader (20-11-26): the article from the outlet's own page, formatted here, with
+   the original one click away. Copying works as in every modal (app.js adds the Copy button). *@
+
+@if (Url is not null)
+{
+    <div class="modal-backdrop fade show"></div>
+    <div class="modal d-block gws-reader-modal" tabindex="-1" role="dialog" aria-modal="true" aria-label="@(_article?.Title ?? Title)" @onkeydown="OnKeyDown">
+        <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <div class="gws-reader-heading">
+                        <h2 class="modal-title h5">@(_article?.Title ?? Title ?? "Article")</h2>
+                        @if (_article is { } meta && meta.Readable)
+                        {
+                            <div class="gws-reader-meta">
+                                @meta.Site
+                                @if (!string.IsNullOrWhiteSpace(meta.Byline)) { <span> · @meta.Byline</span> }
+                                @if (meta.PublishedAt is { } published) { <span> · @published.ToLocalGwsDate()</span> }
+                                <span> · @meta.Minutes min read</span>
+                            </div>
+                        }
+                    </div>
+                    <button type="button" class="btn-close" aria-label="Close" @onclick="CloseAsync"></button>
+                </div>
+                <div class="modal-body">
+                    @if (_loading)
+                    {
+                        <LoadingIndicator Message="Reading the article…" />
+                    }
+                    else if (_article is { Readable: true } article)
+                    {
+                        <article class="gws-reader-body">@((MarkupString)article.Html)</article>
+                    }
+                    else
+                    {
+                        <p class="gws-reader-problem">@(_article?.Problem ?? "The article couldn't be read.")</p>
+                        @if (!string.IsNullOrWhiteSpace(Summary))
+                        {
+                            <p class="text-secondary">@Summary</p>
+                        }
+                    }
+                </div>
+                <div class="modal-footer">
+                    <a class="btn btn-outline-secondary btn-sm" href="@Url" target="_blank" rel="noopener noreferrer">
+                        Open the original <i class="bi bi-box-arrow-up-right" aria-hidden="true"></i>
+                    </a>
+                    <button type="button" class="btn btn-primary btn-sm" @onclick="CloseAsync">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public string? Url { get; set; }
+    [Parameter] public string? Title { get; set; }
+    // The feed's own summary, shown when the page can't be read here.
+    [Parameter] public string? Summary { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    private ReaderArticle? _article;
+    private bool _loading;
+    private string? _loadedUrl;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (Url is null || Url == _loadedUrl) return;
+        _loadedUrl = Url;
+        _article = null;
+        _loading = true;
+        var url = Url;
+        try
+        {
+            var article = await Reader.ReadAsync(url, Title);
+            if (url == _loadedUrl) _article = article;
+        }
+        finally
+        {
+            if (url == _loadedUrl) _loading = false;
+        }
+    }
+
+    private async Task CloseAsync()
+    {
+        _loadedUrl = null;
+        _article = null;
+        await OnClose.InvokeAsync();
+    }
+
+    private Task OnKeyDown(KeyboardEventArgs e) => e.Key == "Escape" ? CloseAsync() : Task.CompletedTask;
+}

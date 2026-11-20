@@ -320,6 +320,9 @@
               Message="@($"Delete the '{_pendingDeleteTopic?.Name}' topic? This cannot be undone.")"
               ConfirmText="Delete" OnConfirm="ConfirmDeleteTopicAsync" OnCancel="() => _pendingDeleteTopic = null" />
 
+
+<ArticleReaderModal Url="@_readerUrl" Title="@_readerTitle" Summary="@_readerSummary" OnClose="CloseReader" />
+
 @code {
     // ── State ────────────────────────────────────────────────
     private List<WatchedTopicSummary> _topics = [];
@@ -829,6 +832,21 @@
 
     private readonly Dictionary<string, Guid> _clipped = new();
 
+    // The article reader (20-11-26): the outlet's page, formatted in a modal.
+    private string? _readerUrl;
+    private string? _readerTitle;
+    private string? _readerSummary;
+
+    private async Task OpenReaderAsync(string url, string? title, string? summary)
+    {
+        _readerUrl = url;
+        _readerTitle = title;
+        _readerSummary = summary;
+        await MarkReadAsync(url);
+    }
+
+    private void CloseReader() => _readerUrl = _readerTitle = _readerSummary = null;
+
     private async Task DiscoverFeedsAsync()
     {
         _discovering = true;
@@ -993,8 +1011,9 @@
                         <span class="media-watch-unread-dot" title="Unread" aria-label="Unread"></span>
                     }
                 </div>
+                @* The headline opens the article in the reader (20-11-26); middle-click or "Open" still goes to the original. *@
                 <a href="@item.Url" target="_blank" rel="noopener noreferrer" class="h6 d-block mb-2 text-body text-decoration-none"
-                   @onclick="() => MarkReadAsync(item.Url)">@item.Title</a>
+                   @onclick="() => OpenReaderAsync(item.Url, item.Title, string.IsNullOrWhiteSpace(item.OllamaSummary) ? item.Description : item.OllamaSummary)" @onclick:preventDefault="true">@item.Title</a>
                 @{
                     var takeText = string.IsNullOrWhiteSpace(item.OllamaSummary) ? item.Description : item.OllamaSummary;
                 }
@@ -1017,7 +1036,7 @@
                             {
                                 <li class="mb-1">
                                     <a href="@other.Url" target="_blank" rel="noopener noreferrer" class="@(IsRead(other) ? "text-secondary" : "")"
-                                       @onclick="() => MarkReadAsync(other.Url)">@other.Source</a>
+                                       @onclick="() => OpenReaderAsync(other.Url, other.Title, other.Description)" @onclick:preventDefault="true">@other.Source</a>
                                     <span class="text-secondary">@(other.PublishedAt is { } p ? $" · {TimeAgo(p)}" : "")</span>
                                 </li>
                             }
@@ -1069,7 +1088,8 @@
                 {
                     <li class="list-group-item d-flex justify-content-between align-items-start gap-2">
                         <div class="min-w-0">
-                            <a href="@saved.Url" target="_blank" rel="noopener noreferrer" class="fw-semibold text-body">@saved.Title</a>
+                            <a href="@saved.Url" target="_blank" rel="noopener noreferrer" class="fw-semibold text-body"
+                               @onclick="() => OpenReaderAsync(saved.Url, saved.Title, saved.Summary)" @onclick:preventDefault="true">@saved.Title</a>
                             <div class="small text-secondary">
                                 @saved.Source@(string.IsNullOrWhiteSpace(saved.TopicName) ? "" : $" · {saved.TopicName}") · saved @saved.SavedAt.ToLocalTime().ToString("dd-MM-yy")
                             </div>

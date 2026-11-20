@@ -7351,3 +7351,52 @@ a[download][aria-busy="true"] { opacity: .6; cursor: progress; }
     backdrop-filter: var(--gws-glass-filter);
 }
 
+
+/* ── Copy from any modal (20-11-26, Grant) ───────────────────
+   Modal content is always selectable (a header stays the drag handle), and app.js puts a Copy
+   button in every modal and panel header: it copies the selection inside that modal, or all of
+   its text. */
+.modal-body, .modal-footer, .tg-stream-panel-body, .tg-watch-wall-panel, .gws-reader-body {
+    -webkit-user-select: text;
+    user-select: text;
+}
+.gws-copy-button {
+    order: 1;
+    margin-left: auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2rem;
+    height: 2rem;
+    padding: 0;
+    border: 0;
+    border-radius: var(--gws-radius-xs);
+    background: transparent;
+    color: inherit;
+    opacity: .7;
+    cursor: pointer;
+}
+.gws-copy-button:hover, .gws-copy-button:focus-visible { opacity: 1; background: var(--gws-panel-bg-2); }
+.gws-copy-button.is-copied { opacity: 1; color: var(--bs-success); }
+.modal-header > .btn-close { order: 2; margin-left: .25rem; }
+.tg-stream-panel-header > .gws-copy-button { width: 1.6rem; height: 1.6rem; margin-right: .35rem; color: #7dffb0; }
+.tg-stream-panel-header > .gws-copy-button ~ * { order: 2; }
+
+/* ── Media Watch's article reader (20-11-26) ─────────────── */
+.gws-reader-heading { min-width: 0; }
+.gws-reader-meta { font-size: var(--gws-type-sm); color: var(--gws-text-soft); }
+.gws-reader-body {
+    font-family: var(--gws-font-serif);
+    font-size: var(--gws-type-lg);
+    line-height: 1.7;
+    color: var(--gws-text-strong);
+    max-width: 44rem;
+    margin: 0 auto;
+}
+.gws-reader-body h1, .gws-reader-body h2, .gws-reader-body h3, .gws-reader-body h4 { font-family: var(--gws-font-sans); margin: 1.4em 0 .5em; line-height: 1.3; }
+.gws-reader-body p, .gws-reader-body ul, .gws-reader-body ol, .gws-reader-body blockquote { margin: 0 0 1em; }
+.gws-reader-body img, .gws-reader-body video { max-width: 100%; height: auto; border-radius: var(--gws-radius-xs); }
+.gws-reader-body blockquote { padding: .5em 1em; border-left: 3px solid var(--gws-panel-border); color: var(--gws-text-soft); }
+.gws-reader-body pre { white-space: pre-wrap; font-family: var(--gws-font-mono); font-size: var(--gws-type-md); }
+.gws-reader-body table { width: 100%; display: block; overflow-x: auto; }
+.gws-reader-problem { font-weight: 600; }

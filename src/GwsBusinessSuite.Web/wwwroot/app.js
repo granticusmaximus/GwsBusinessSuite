@@ -1391,3 +1391,97 @@ document.addEventListener('click', function (event) {
 	var part = document.getElementById(jump.getAttribute('data-story-jump'));
 	if (part) part.scrollIntoView({ behavior: 'smooth', block: 'start' });
 });
+
+// Copy from any modal (20-11-26, Grant): every modal and Overwatch panel header gets a Copy button.
+// It copies what's selected inside that modal, or else all of its text. The button is added after
+// the header's own children, so Blazor's elements keep their places.
+(function () {
+	var HEADERS = '.modal-header, .tg-stream-panel-header';
+	var ROOTS = '.modal-content, .tg-stream-panel, .tg-watch-wall-panel';
+	var BODIES = '.modal-body, .tg-stream-panel-body, .tg-watch-wall-grid';
+
+	function textOf(header) {
+		var root = header.closest(ROOTS) || header.parentElement;
+		var selection = window.getSelection ? window.getSelection() : null;
+		if (selection && !selection.isCollapsed && root && root.contains(selection.anchorNode)) return String(selection).trim();
+		var body = root ? root.querySelector(BODIES) : null;
+		return ((body || root || header).innerText || '').trim();
+	}
+
+	function fallbackCopy(text) {
+		var area = document.createElement('textarea');
+		area.value = text;
+		area.setAttribute('readonly', '');
+		area.style.position = 'fixed';
+		area.style.opacity = '0';
+		document.body.appendChild(area);
+		area.select();
+		var ok = false;
+		try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+		document.body.removeChild(area);
+		return ok ? Promise.resolve() : Promise.reject(new Error('copy failed'));
+	}
+
+	function copyText(text) {
+		if (navigator.clipboard && window.isSecureContext) return navigator.clipboard.writeText(text).catch(function () { return fallbackCopy(text); });
+		return fallbackCopy(text);
+	}
+
+	function decorate(header) {
+		if (header.querySelector(':scope > .gws-copy-button') || header.closest('[data-gws-no-copy]')) return;
+		var button = document.createElement('button');
+		button.type = 'button';
+		button.className = 'gws-copy-button';
+		button.title = 'Copy text';
+		button.setAttribute('aria-label', 'Copy text');
+		button.innerHTML = '<i class="bi bi-clipboard" aria-hidden="true"></i>';
+		button.addEventListener('click', function (event) {
+			event.preventDefault();
+			event.stopPropagation();
+			var text = textOf(header);
+			if (!text) return;
+			copyText(text).then(function () {
+				button.classList.add('is-copied');
+				button.innerHTML = '<i class="bi bi-clipboard-check" aria-hidden="true"></i>';
+				button.title = 'Copied';
+				setTimeout(function () {
+					button.classList.remove('is-copied');
+					button.innerHTML = '<i class="bi bi-clipboard" aria-hidden="true"></i>';
+					button.title = 'Copy text';
+				}, 1500);
+			}, function () { button.title = 'Copy failed - select the text and press Cmd/Ctrl+C'; });
+		});
+		header.appendChild(button);
+	}
+
+	function scan(node) {
+		if (!(node instanceof Element)) return;
+		if (node.matches(HEADERS)) decorate(node);
+		node.querySelectorAll(HEADERS).forEach(decorate);
+	}
+
+	// A text selection dragged out of a modal ends on its backdrop, and the click that follows used
+	// to close the modal (and the selection with it). A click whose press began inside the dialog,
+	// or that ends a selection, doesn't reach the backdrop.
+	var pressedInsideDialog = false;
+	window.addEventListener('pointerdown', function (event) {
+		pressedInsideDialog = !!(event.target instanceof Element && event.target.closest('.modal-dialog, .tg-stream-panel'));
+	}, true);
+	window.addEventListener('click', function (event) {
+		var target = event.target;
+		if (!(target instanceof Element) || !target.classList.contains('modal')) return;
+		var selection = window.getSelection ? window.getSelection() : null;
+		if (pressedInsideDialog || (selection && !selection.isCollapsed)) {
+			event.stopImmediatePropagation();
+			event.preventDefault();
+		}
+	}, true);
+
+	function start() {
+		scan(document.body);
+		new MutationObserver(function (mutations) {
+			mutations.forEach(function (mutation) { mutation.addedNodes.forEach(scan); });
+		}).observe(document.body, { childList: true, subtree: true });
+	}
+	if (document.body) start(); else document.addEventListener('DOMContentLoaded', start);
+})();
