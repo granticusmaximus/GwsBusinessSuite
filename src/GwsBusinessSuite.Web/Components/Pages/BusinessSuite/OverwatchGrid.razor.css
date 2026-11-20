@@ -301,7 +301,8 @@
     border-bottom: 1px solid rgba(125, 255, 176, 0.15);
 }
 
-.tg-coverage-item button {
+.tg-coverage-item button,
+.tg-coverage-item .tg-area-kit {
     background: rgba(125, 255, 176, 0.15);
     border: 1px solid rgba(125, 255, 176, 0.5);
     color: #7dffb0;
@@ -309,6 +310,7 @@
     font-size: var(--gws-type-xs);
     padding: 0.15rem 0.4rem;
     cursor: pointer;
+    text-decoration: none;
 }
 
 .tg-coverage-item button:hover {

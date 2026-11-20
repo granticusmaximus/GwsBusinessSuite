@@ -1,0 +1,8 @@
+/* Around this client: four short blocks, each a heading over a flat list. */
+.radar { display: grid; gap: 1rem; }
+.radar-heading { font-size: var(--gws-type-md); font-weight: 600; margin: 0 0 0.35rem; }
+.radar-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.4rem; }
+.radar-list li { display: flex; flex-wrap: wrap; gap: 0.25rem 0.5rem; align-items: baseline; }
+.radar-kind { font-size: var(--gws-type-xs); text-transform: uppercase; letter-spacing: 0.04em; color: var(--gws-text-soft); }
+.radar-brief { white-space: pre-line; }
+.radar-location input { max-width: 22rem; }

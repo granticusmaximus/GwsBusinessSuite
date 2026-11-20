@@ -124,6 +124,10 @@ public sealed class Contact : AuditableEntity
     public required string FullName { get; set; }
     public string? Email { get; set; }
     public string? Company { get; set; }
+    // Where the client is (19-11-26, client impact alerts): what was typed, and where it geocoded to.
+    public string? Location { get; set; }
+    public double? Latitude { get; set; }
+    public double? Longitude { get; set; }
     public string Status { get; set; } = ContactStatuses.Lead;
     public DateTimeOffset? FollowUpDate { get; set; }
     public DateTimeOffset? TrashedAt { get; set; }

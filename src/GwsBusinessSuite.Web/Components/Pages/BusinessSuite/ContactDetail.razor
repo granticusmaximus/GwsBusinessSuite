@@ -188,6 +188,8 @@ else
                 </ChildContent>
             </RecordSection>
 
+            @if (Contact is not null) { <ContactRadar Contact="Contact" /> }
+
             <RecordSection Title="Invoices" Description="Billing documents associated with this account." Icon="bi-receipt" Flush="true">
                 <Actions><a class="btn btn-sm btn-outline-secondary" href="/admin/billing">Open billing</a></Actions>
                 <ChildContent>

@@ -8,6 +8,10 @@ namespace GwsBusinessSuite.Infrastructure.Services;
 // N14 (14-11-26): a story's dossier as a PDF: the story and its label, what the desk pinned
 // (reports, official records, notes, links) with who pinned each and when, the desk's notes, the
 // verification checklist and the sign-offs. Same look as the other World News PDFs.
+// The evidence pack's extra parts (19-11-26): the timeline, the official signals near the story,
+// and the pack's number in the ledger. Null renders the plain dossier.
+public sealed record EvidenceExtras(IReadOnlyList<TimelineEntry> Timeline, EvidenceBoard? Board, long PackNumber);
+
 public static class DossierPdf
 {
     private const string BodyFont = "Liberation Sans";
@@ -22,7 +26,7 @@ public static class DossierPdf
         $"dossier-{story.Event.FirstSeen.ToLocalTime():yyyyMMdd}-{story.Event.Id[..Math.Min(8, story.Event.Id.Length)]}.pdf";
 
     public static byte[] Render(StoryDocument story, IReadOnlyList<DossierItem> items, IReadOnlyList<DeskNote> notes, IReadOnlyList<DeskCheck> checks,
-        IReadOnlyList<SignOff> signOffs, string generatedBy, DateTimeOffset now)
+        IReadOnlyList<SignOff> signOffs, string generatedBy, DateTimeOffset now, EvidenceExtras? extras = null)
     {
         var title = story.Event.Headline ?? story.Event.Title;
         return Document.Create(container => container.Page(page =>
@@ -94,6 +98,41 @@ public static class DossierPdf
                     });
                 }
 
+                if (extras is not null)
+                {
+                    if (story.Trust is { } trust)
+                        body.Item().Column(section =>
+                        {
+                            section.Item().Text("Independent sources").Bold().FontColor(Accent);
+                            section.Item().PaddingTop(2).Text($"{trust.Independence.Outlets} outlets, {trust.Independence.Independent} independent: " +
+                                string.Join(", ", trust.Independence.Origins.Take(12).Select(o => o.Name)) + ". Wire copies and outlets with one owner count once.");
+                        });
+                    if (extras.Board is { Signals.Count: > 0 } board)
+                        body.Item().Column(section =>
+                        {
+                            section.Item().Text("Official signals near the story").Bold().FontColor(Accent);
+                            foreach (var signal in board.Signals.Take(20))
+                                section.Item().PaddingTop(2).Text(t =>
+                                {
+                                    t.Span($"{signal.Source}: {signal.Title} · {signal.Kilometres:0} km");
+                                    if (signal.At is { } at) t.Span($" · {at.ToLocalGwsDateTime()}").FontColor(Muted);
+                                });
+                        });
+                    if (extras.Timeline.Count > 0)
+                        body.Item().Column(section =>
+                        {
+                            section.Item().Text("Timeline").Bold().FontColor(Accent);
+                            foreach (var entry in extras.Timeline.OrderBy(e => e.At).Take(40))
+                                section.Item().PaddingTop(2).Text(t => { t.Span(entry.At.ToLocalGwsDateTime() + "  ").FontColor(Muted); t.Span($"{entry.Kind}: {entry.Text}"); });
+                        });
+                    if (story.Summary is { } summary)
+                        body.Item().Column(section =>
+                        {
+                            section.Item().Text("Summary (written by SentinelGPT, an AI: check it against the sources)").Bold().FontColor(Accent);
+                            section.Item().PaddingTop(2).Text(summary.Text);
+                        });
+                }
+
                 body.Item().Column(section =>
                 {
                     section.Item().Text("Sources").Bold().FontColor(Accent);
@@ -103,6 +142,8 @@ public static class DossierPdf
             });
             page.Footer().AlignRight().Text(t =>
             {
+                if (extras is not null)
+                    t.Span($"Evidence pack {extras.PackNumber} · its SHA-256 is recorded in the World News ledger on the story's desk · ").FontSize(7.5f).FontColor(Muted);
                 t.Span("Page ").FontSize(7.5f).FontColor(Muted);
                 t.CurrentPageNumber().FontSize(7.5f).FontColor(Muted);
             });

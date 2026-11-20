@@ -94,12 +94,27 @@
             </div>
         </form>
     }
+    @* Evidence packs (19-11-26): every PDF downloaded from here is recorded with its SHA-256 in a
+       hash chain, so a copy someone sends back can be checked (shasum -a 256 file.pdf). *@
+    @if (_packs.Count > 0)
+    {
+        <div class="dossier-packs small">
+            <strong>Evidence packs recorded</strong>
+            <ul class="list-unstyled mb-0">
+                @foreach (var pack in _packs.OrderByDescending(p => p.Number).Take(5))
+                {
+                    <li>Pack @pack.Number · @pack.MadeBy · @pack.MadeAt.ToLocalGwsDateTime() · <span class="font-monospace" title="SHA-256 of the PDF">@pack.Sha256[..16]…</span></li>
+                }
+            </ul>
+        </div>
+    }
 </section>
 
 @code {
     [Parameter] public string EventId { get; set; } = string.Empty;
 
     private IReadOnlyList<DossierItem> _items = [];
+    private IReadOnlyList<EvidencePack> _packs = [];
     private string _kind = Dossiers.Report;
     private string _title = string.Empty;
     private string _url = string.Empty;
@@ -124,7 +139,9 @@
         {
             var username = await CurrentUserAccessor.GetCurrentUsernameAsync();
             await using var scope = ScopeFactory.CreateAsyncScope();
-            _items = await scope.ServiceProvider.GetRequiredService<WorldNewsDeskService>().DossierAsync(EventId, username);
+            var desk = scope.ServiceProvider.GetRequiredService<WorldNewsDeskService>();
+            _items = await desk.DossierAsync(EventId, username);
+            _packs = desk.EvidencePacksFor(EventId);
             _loadedFor = EventId;
             _loaded = true;
         }

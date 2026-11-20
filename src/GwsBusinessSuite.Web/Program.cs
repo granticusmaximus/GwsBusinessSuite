@@ -1155,6 +1155,33 @@ app.MapGet("/admin/world-news/events/{eventId}/document.pdf", (string eventId, G
     .RequireAuthorization("AdminOnly")
     .RequireRateLimiting("public-read");
 
+// The offline field kit (19-11-26): a watched area as one self-contained page the phone app keeps
+// for use without signal (FieldKitService, wwwroot/js/field-kit.js, sw.js).
+app.MapGet("/admin/field-kit/{areaId:guid}", async (Guid areaId, HttpContext httpContext,
+    GwsBusinessSuite.Infrastructure.Services.FieldKitService kits, CancellationToken cancellationToken) =>
+{
+    var page = await kits.PageAsync(httpContext.User.Identity?.Name ?? string.Empty, areaId, cancellationToken);
+    if (page is null) return Results.NotFound();
+    httpContext.Response.Headers.CacheControl = "no-store";
+    return Results.Content(page, "text/html; charset=utf-8");
+})
+    .RequireAuthorization("AdminOnly");
+
+// A note written in the field kit, sent once there's signal. The custom header can't be sent by a
+// cross-site form, so this only accepts the kit's own script.
+app.MapPost("/admin/api/field-kit/{areaId:guid}/notes", async (Guid areaId, FieldKitNoteRequest note, HttpContext httpContext,
+    GwsBusinessSuite.Infrastructure.Services.FieldKitService kits, CancellationToken cancellationToken) =>
+{
+    if (httpContext.Request.Headers["X-Field-Kit"] != "1") return Results.BadRequest();
+    if (string.IsNullOrWhiteSpace(note.Title) || note.Title.Length > 120 || (note.Body?.Length ?? 0) > 2000
+        || note.Latitude is < -90 or > 90 || note.Longitude is < -180 or > 180)
+        return Results.BadRequest();
+    await kits.AddNoteAsync(httpContext.User.Identity?.Name ?? string.Empty, note.Title.Trim(), note.Body, note.Latitude, note.Longitude, cancellationToken);
+    return Results.Ok();
+})
+    .RequireAuthorization("AdminOnly")
+    .RequireRateLimiting("admin-mutation");
+
 app.MapGet("/admin/world-news/events/{eventId}/dossier.pdf", async (string eventId, HttpContext httpContext,
     GwsBusinessSuite.Infrastructure.Services.WorldNewsDeskService desk, CancellationToken cancellationToken) =>
 {
@@ -1162,6 +1189,9 @@ app.MapGet("/admin/world-news/events/{eventId}/dossier.pdf", async (string event
     {
         var file = await desk.ExportDossierPdfAsync(eventId, httpContext.User.Identity?.Name ?? string.Empty, cancellationToken);
         httpContext.Response.Headers.CacheControl = "no-store";
+        // The evidence pack's ledger entry (19-11-26): its number and the file's SHA-256.
+        httpContext.Response.Headers["X-Evidence-Pack"] = file.Pack.Number.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        httpContext.Response.Headers["X-Evidence-Sha256"] = file.Pack.Sha256;
         return Results.File(file.Pdf, "application/pdf", file.FileName);
     }
     catch (UnauthorizedAccessException)
@@ -5698,3 +5728,7 @@ sealed record PublicNavMenus(
     DesignTokenSet Tokens,
     string? HeaderHtml = null,
     string? FooterHtml = null);
+
+// A field-kit note (19-11-26): title, text, and where (the area's middle unless the phone said).
+internal sealed record FieldKitNoteRequest(string Title, string? Body, double Latitude, double Longitude);
+

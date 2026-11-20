@@ -33,7 +33,9 @@ self.addEventListener('fetch', (event) => {
     if (request.method !== 'GET') return;
     // The offline page's own files: from the network when there is one, else from the cache.
     const url = new URL(request.url);
-    if (request.mode !== 'navigate' && url.origin === self.location.origin && OFFLINE_FILES.includes(url.pathname)) {
+    // The field kit's script too (19-11-26), so a kit kept for offline use still takes notes.
+    if (request.mode !== 'navigate' && url.origin === self.location.origin
+        && (OFFLINE_FILES.includes(url.pathname) || url.pathname === '/js/field-kit.js')) {
         event.respondWith(fetch(request).catch(async () => (await caches.match(url.pathname)) || Response.error()));
         return;
     }
@@ -46,6 +48,11 @@ self.addEventListener('fetch', (event) => {
             if (preloaded) return preloaded;
             return await fetch(request);
         } catch {
+            // A field kit kept for offline use (field-kit.js) is shown as it was saved.
+            if (url.pathname.startsWith('/admin/field-kit/')) {
+                const kept = await caches.match(url.pathname);
+                if (kept) return kept;
+            }
             const offline = await caches.match(OFFLINE_URL);
             return offline || Response.error();
         }

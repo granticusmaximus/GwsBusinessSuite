@@ -50,5 +50,17 @@ streams and embeddings included. `/admin/ai-health` shows machine state (`Ollama
 24-hour summary per machine, recent jobs, and `AiHealthWarnings` (Mac down 15 min; 5+
 failed/handed-over jobs in 10 min). Linked from Home > More. Tests in `OllamaFailoverTests`.
 - [x] Built and verified.
-- [ ] Not built from that list: client impact alerts, one page per person or company, offline field
-  kit, evidence pack.
+- [x] 19-11-26 night: the other four from that list, in one phase:
+  - Client impact: `Contact.Location/Latitude/Longitude` + migration `AddContactLocation`,
+    `ClientRadarService` (50-mile hazards, NWS alerts, city news; company-name headlines),
+    `/admin/client-impact` (Home > More). Tests `ClientRadarTests`.
+  - People and companies: `ContactRadar` on the contact page (location, may affect them, mentions in
+    Sentinel filtered by ISentinelAccessService and World News, SentinelGPT brief, Mac first).
+  - Evidence pack: `DossierPdf` + `EvidenceExtras` (timeline, independence, official signals, labelled
+    AI summary), `evidence_packs` hash chain (`EvidencePacks.Verify`), pack/SHA headers on the PDF,
+    packs listed in the dossier. Tests in `WorldNewsDeskServiceTests`.
+  - Field kit: `FieldKitService` page (`/admin/field-kit/{area}`), `field-kit.js` (cache + note
+    queue), sw.js offline fallback, note sync endpoint (custom header), KIT on each watched area.
+    Tests `FieldKitTests`.
+  - Also: truthful "zoom in" hints (cameras, city traffic, fires) from the Holo plan.
+  - Not covered: mail in a person's page (mail isn't stored).

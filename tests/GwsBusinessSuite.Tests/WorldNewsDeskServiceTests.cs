@@ -140,6 +140,16 @@ public sealed class WorldNewsDeskServiceTests : IAsyncLifetime
         Assert.Contains("context", text);
         Assert.Contains("Verification", text);
         Assert.Contains("Quake", text);
+        // 19-11-26: the export is an evidence pack: numbered in the PDF, its SHA-256 in the ledger.
+        Assert.Contains("Evidence", text);
+        Assert.Equal(GwsBusinessSuite.WorldNewsKit.EvidencePacks.Fingerprint(export.Pdf), export.Pack.Sha256);
+        Assert.Equal(1, export.Pack.Number);
+        var second = await _desk.ExportDossierPdfAsync("e1", "ana");
+        var chain = _desk.EvidencePacksFor("e1");
+        Assert.Equal(new long[] { 1, 2 }, chain.Select(p => p.Number).ToArray());
+        Assert.True(GwsBusinessSuite.WorldNewsKit.EvidencePacks.Verify(chain));
+        Assert.False(GwsBusinessSuite.WorldNewsKit.EvidencePacks.Verify([chain[0] with { Sha256 = "tampered" }, chain[1]]), "a changed entry breaks the chain");
+        Assert.Equal(chain[0].Hash, second.Pack.PreviousHash);
     }
 
     [Fact]

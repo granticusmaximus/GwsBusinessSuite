@@ -1,0 +1,58 @@
+@page "/admin/client-impact"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = "AdminOnly")]
+@implements IDisposable
+@using Microsoft.AspNetCore.Authorization
+@using GwsBusinessSuite.Infrastructure.Services
+@inject ClientRadarService Radar
+
+@* Client impact (19-11-26): every client with something nearby or naming them in the news and on
+   Overwatch, most affected first. Each contact's own page has the same, plus mentions and a brief. *@
+
+<PageTitle>Client impact</PageTitle>
+
+<PageHeader Title="Client impact" Icon="bi-broadcast-pin" Description="Clients with hazards, weather alerts or news near them, or named in the news, over the last two days." />
+
+@if (_rows is null)
+{
+    <LoadingIndicator Message="Checking around your clients…" />
+}
+else if (_rows.Count == 0)
+{
+    <EmptyState Icon="bi-check2-circle" Title="Nothing affecting your clients" Message="Add a location on a contact's page to watch around them. Companies are also matched by name in the news." />
+}
+else
+{
+    @foreach (var (client, impacts) in _rows)
+    {
+        <section class="card border-0 shadow-sm mb-3" aria-label="@client.FullName">
+            <div class="card-header d-flex justify-content-between align-items-baseline gap-2 flex-wrap">
+                <a class="fw-semibold" href="@($"admin/crm/contacts/{client.Id}")">@client.FullName@(string.IsNullOrWhiteSpace(client.Company) ? "" : $" · {client.Company}")</a>
+                <span class="small text-muted">@(client.Location ?? "No location; matched by name")</span>
+            </div>
+            <ul class="list-group list-group-flush">
+                @foreach (var impact in impacts.Take(8))
+                {
+                    <li class="list-group-item d-flex flex-wrap gap-2 align-items-baseline">
+                        <span class="small text-muted text-uppercase">@impact.Kind</span>
+                        @if (impact.Link is { } link) { <a href="@link" target="@(link.StartsWith("http") ? "_blank" : null)" rel="noopener noreferrer">@impact.Title</a> } else { <span>@impact.Title</span> }
+                        <span class="small text-muted">@impact.Detail@(impact.Miles is { } miles ? $" · {miles:0} mi" : "")</span>
+                    </li>
+                }
+            </ul>
+        </section>
+    }
+}
+
+@code {
+    private IReadOnlyList<(GwsBusinessSuite.Domain.Entities.Contact Client, IReadOnlyList<ClientImpact> Impacts)>? _rows;
+    private readonly CancellationTokenSource _cts = new();
+
+    protected override async Task OnInitializedAsync() => _rows = await Radar.AllImpactsAsync(_cts.Token);
+
+    public void Dispose()
+    {
+        _cts.Cancel();
+        _cts.Dispose();
+    }
+}

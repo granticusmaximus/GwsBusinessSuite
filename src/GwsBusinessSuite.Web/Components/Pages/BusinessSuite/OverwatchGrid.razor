@@ -183,7 +183,7 @@
                 <button type="button" data-tg-toggle="city-traffic" class="tg-toggle @(_cityTrafficOn ? "tg-toggle-on" : "")"
                         title="When zoomed in to a city: how many vehicles use each road (every US state) and live speeds where the city publishes them"
                         @onclick="ToggleCityTrafficAsync">
-                    CITY TRAFFIC [@(_cityTrafficOn ? "ON" : "OFF")]
+                    CITY TRAFFIC [@(_cityTrafficOn ? "ON" : "OFF")]@(_cityTrafficOn && _cityTrafficThinned ? " · ZOOM IN" : "")
                 </button>
                 @if (TomTom.IsConfigured)
                 {
@@ -342,7 +342,7 @@
                 </button>
                 <button type="button" data-tg-toggle="fires" class="tg-toggle @(_firesOn ? "tg-toggle-on" : "")"
                         title="Every satellite heat detection worldwide in the last day (NASA FIRMS: VIIRS on NOAA-20 and MODIS), grouped into half-degree cells" @onclick="ToggleFiresAsync">
-                    FIRE HOTSPOTS [@(_firesOn ? "ON" : "OFF")]
+                    FIRE HOTSPOTS [@(_firesOn ? "ON" : "OFF")]@(_firesOn && _firesThinned ? " · ZOOM IN" : "")
                 </button>
                 <button type="button" data-tg-toggle="night-lights" class="tg-toggle @(_nightLightsOn ? "tg-toggle-on" : "")"
                         title="City lights from space, one night at a time (NASA VIIRS on NOAA-20), against a normal night (Black Marble): dark where it's normally lit can be a blackout. Clouds and moonlight dim a night too." @onclick="ToggleNightLightsAsync">
@@ -540,7 +540,8 @@
             }
         </div>
         <div class="tg-layer-group">
-            <div class="tg-layer-group-title">CAMERAS</div>
+            @* "Zoom in" hints (19-11-26, Holo Wireframe): shown only while a layer is actually thinned. *@
+            <div class="tg-layer-group-title">CAMERAS@(_camerasInViewTotal > _visibleCameras.Count ? " · ZOOM IN FOR ALL" : "")</div>
             <div class="tg-layer-buttons">
                 <button type="button" data-tg-toggle="healthy" class="tg-toggle @(_hideUnhealthy ? "tg-toggle-on" : "")"
                         title="Hide cameras found frozen, stale or offline (checked when opened, and every 10 minutes for favorites)" @onclick="ToggleHideUnhealthyAsync">
@@ -1494,6 +1495,9 @@
                                     <span class="tg-area-actions">
                                         <button type="button" @onclick="() => GoToAreaAsync(area)">GO</button>
                                         <button type="button" aria-label="@($"Brief me on {area.Name}")" @onclick="() => BriefAreaAsync(area)">BRIEF</button>
+                                        @* The offline field kit (19-11-26): open it on the phone with signal and it stays readable without. *@
+                                        <a class="tg-area-kit" href="@($"admin/field-kit/{area.Id}")" target="_blank" rel="noopener" data-enhance-nav="false"
+                                           title="A copy of this area for use without signal: cameras, alerts, news and notes">KIT</a>
                                         <button type="button" aria-label="@($"Stop watching {area.Name}")" @onclick="() => RemoveAreaAsync(area)">X</button>
                                     </span>
                                 </li>
@@ -1658,6 +1662,8 @@
     private bool _radarOn;
     private bool _alertsOn;
     private string? _focusKey;
+    private bool _cityTrafficThinned;
+    private bool _firesThinned;
 
     private async Task SetFocusAsync(ChangeEventArgs e)
     {
@@ -4042,6 +4048,7 @@
             _cityTrafficReleases = roads.Releases;
             var drawn = roads.Roads.Count <= MaxDrawnRoads ? roads.Roads
                 : roads.Roads.OrderByDescending(r => r.VehiclesPerDay).Take(MaxDrawnRoads).OrderBy(r => r.VehiclesPerDay).ToList();
+            _cityTrafficThinned = drawn.Count < roads.Roads.Count;
             var drawnNote = drawn.Count < roads.Roads.Count
                 ? $"The busiest {MaxDrawnRoads:N0} of {roads.Roads.Count:N0} sections are drawn; zoom in for the rest."
                 : null;
@@ -4871,6 +4878,7 @@
             var inView = cells.Where(c => _lastBbox.Contains(c.Latitude, c.Longitude)).ToList();
             var drawn = inView.Take(MaxFireCells).ToList();
             await JS.InvokeVoidAsync("tacticalGlobe.setFireHotspots", HazardPayload(drawn));
+            _firesThinned = inView.Count > drawn.Count;
             _fireSummary = cells.Count == 0
                 ? "NASA FIRMS's fire detections couldn't be loaded just now."
                 : $"NASA FIRMS: {inView.Count:N0} HOTSPOT {(inView.Count == 1 ? "CELL" : "CELLS")} IN VIEW (half-degree, last 24 h)" +

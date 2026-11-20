@@ -135,6 +135,8 @@ public sealed partial class WorldNewsStore
         using var columns = connection.CreateCommand();
         columns.CommandText = "SELECT COUNT(*) FROM pragma_table_info('articles') WHERE name = 'snippet'";
         if ((long)columns.ExecuteScalar()! == 0) Execute(connection, "ALTER TABLE articles ADD COLUMN snippet TEXT");
+        // Evidence packs (19-11-26): each dossier PDF's SHA-256, hash-chained like the label ledger.
+        Execute(connection, "CREATE TABLE IF NOT EXISTS evidence_packs (id INTEGER PRIMARY KEY AUTOINCREMENT, event_id TEXT NOT NULL, sha256 TEXT NOT NULL, made_by TEXT NOT NULL, made_at INTEGER NOT NULL, previous_hash TEXT NOT NULL, hash TEXT NOT NULL)");
         // SentinelGPT's subtype for stories the keywords couldn't tag (SubtypeRefinement, 19-11-26).
         Execute(connection, "CREATE TABLE IF NOT EXISTS situation_subtypes (situation_id TEXT PRIMARY KEY, subtype TEXT NOT NULL, checked_at INTEGER NOT NULL)");
         // Nor fetched_at (19-11-26): when a dated report was fetched, for each source's delay.
@@ -2255,6 +2257,54 @@ public sealed partial class WorldNewsStore
         command.CommandTimeout = 0;
         command.CommandText = "VACUUM; PRAGMA wal_checkpoint(TRUNCATE);";
         command.ExecuteNonQuery();
+    }
+
+    // The next pack's number (shown in the PDF before its fingerprint exists).
+    public long NextEvidencePackNumber()
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT COALESCE(MAX(id), 0) + 1 FROM evidence_packs";
+        return (long)command.ExecuteScalar()!;
+    }
+
+    // Records a pack's fingerprint at the end of the chain. Never pruned: a gap would break it.
+    public EvidencePack AppendEvidencePack(string eventId, string sha256, string madeBy, DateTimeOffset at)
+    {
+        using var connection = Open();
+        using var transaction = connection.BeginTransaction();
+        string previous;
+        using (var last = connection.CreateCommand())
+        {
+            last.CommandText = "SELECT hash FROM evidence_packs ORDER BY id DESC LIMIT 1";
+            previous = last.ExecuteScalar() as string ?? LabelLedger.Genesis;
+        }
+        var hash = EvidencePacks.HashOf(previous, eventId, sha256, madeBy, at);
+        using var insert = connection.CreateCommand();
+        insert.CommandText = "INSERT INTO evidence_packs (event_id, sha256, made_by, made_at, previous_hash, hash) VALUES ($e, $s, $b, $a, $p, $h); SELECT last_insert_rowid();";
+        insert.Parameters.AddWithValue("$e", eventId);
+        insert.Parameters.AddWithValue("$s", sha256);
+        insert.Parameters.AddWithValue("$b", madeBy);
+        insert.Parameters.AddWithValue("$a", at.ToUnixTimeSeconds());
+        insert.Parameters.AddWithValue("$p", previous);
+        insert.Parameters.AddWithValue("$h", hash);
+        var id = (long)insert.ExecuteScalar()!;
+        transaction.Commit();
+        return new EvidencePack(id, eventId, sha256, madeBy, DateTimeOffset.FromUnixTimeSeconds(at.ToUnixTimeSeconds()), previous, hash);
+    }
+
+    public IReadOnlyList<EvidencePack> EvidencePacksFor(string? eventId = null)
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT id, event_id, sha256, made_by, made_at, previous_hash, hash FROM evidence_packs" + (eventId is null ? "" : " WHERE event_id = $e") + " ORDER BY id";
+        if (eventId is not null) command.Parameters.AddWithValue("$e", eventId);
+        var packs = new List<EvidencePack>();
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+            packs.Add(new EvidencePack(reader.GetInt64(0), reader.GetString(1), reader.GetString(2), reader.GetString(3),
+                DateTimeOffset.FromUnixTimeSeconds(reader.GetInt64(4)), reader.GetString(5), reader.GetString(6)));
+        return packs;
     }
 
     public string? ModelSubtype(string situationId)

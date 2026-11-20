@@ -197,19 +197,32 @@ public sealed partial class WorldNewsDeskService(IAppDbContext db, WorldNewsServ
             throw new InvalidOperationException("That dossier item is no longer available on this story.");
     }
 
-    public async Task<(string FileName, byte[] Pdf)> ExportDossierPdfAsync(string eventId, string username, CancellationToken cancellationToken = default)
+    // The dossier as an evidence pack (19-11-26): the PDF with the timeline, official signals and the
+    // labelled AI summary, its SHA-256 recorded in the hash-chained evidence ledger.
+    public async Task<(string FileName, byte[] Pdf, EvidencePack Pack)> ExportDossierPdfAsync(string eventId, string username, CancellationToken cancellationToken = default)
     {
         await RequireDeskUserAsync(username, cancellationToken);
+        var story = await Task.Run(() => news.Story(eventId, username), cancellationToken) ?? throw new InvalidOperationException("That story is no longer available.");
+        EvidenceBoard? board = null;
+        try { board = await news.EvidenceBoardAsync(story, cancellationToken); }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException && !cancellationToken.IsCancellationRequested) { board = null; }
         return await Task.Run(() =>
         {
-            var story = news.Story(eventId, username) ?? throw new InvalidOperationException("That story is no longer available.");
             var items = news.Store.Dossier(eventId);
             var notes = news.Store.DeskNotes(eventId, limit: 100);
             var checks = news.Store.DeskChecks(eventId);
             var signOffs = news.Store.SignOffs(eventId);
-            return (DossierPdf.FileName(story), DossierPdf.Render(story, items, notes, checks, signOffs, username, DateTimeOffset.UtcNow));
+            var timeline = StoryTimeline.Build(story.Sources.Select(source => source.Report).ToList(), news.Store.LabelSnapshots(eventId), story.Trust?.Edits, [],
+                board?.Signals.Where(signal => signal.At is not null).Select(signal => (signal.At!.Value, signal.Source, signal.Title, signal.Url)).ToList());
+            var now = DateTimeOffset.UtcNow;
+            var pdf = DossierPdf.Render(story, items, notes, checks, signOffs, username, now,
+                new EvidenceExtras(timeline, board, news.Store.NextEvidencePackNumber()));
+            var pack = news.Store.AppendEvidencePack(eventId, EvidencePacks.Fingerprint(pdf), username, now);
+            return (DossierPdf.FileName(story), pdf, pack);
         }, cancellationToken);
     }
+
+    public IReadOnlyList<EvidencePack> EvidencePacksFor(string eventId) => news.Store.EvidencePacksFor(eventId);
 
     public async Task<IReadOnlyList<DeskNote>> NotesAsync(string eventId, string username, CancellationToken cancellationToken = default)
     {

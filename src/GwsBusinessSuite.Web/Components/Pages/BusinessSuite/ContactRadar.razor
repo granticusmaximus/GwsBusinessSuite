@@ -1,0 +1,155 @@
+@using GwsBusinessSuite.Domain.Entities
+@using GwsBusinessSuite.Infrastructure.Services
+@implements IDisposable
+@inject ClientRadarService Radar
+@inject GwsBusinessSuite.Application.Abstractions.ICurrentUserAccessor CurrentUserAccessor
+@inject ILogger<ContactRadar> Logger
+
+@* Around this client (19-11-26): where they are, what in the news or on Overwatch may affect them,
+   where they turn up in Sentinel and World News, and a SentinelGPT brief before a call. *@
+
+<RecordSection Title="Around this client" Description="Where they are, what may affect them, and where they turn up in Sentinel and the news." Icon="bi-broadcast-pin">
+    <ChildContent>
+        <div class="radar">
+            <div class="radar-location">
+                <label class="form-label small mb-1" for="radar-location">Location</label>
+                <div class="d-flex gap-2 flex-wrap">
+                    <input id="radar-location" class="form-control form-control-sm" placeholder="City, state or country" @bind="_location" @bind:event="oninput" />
+                    <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@_saving" @onclick="SaveLocationAsync">Save</button>
+                </div>
+                @if (_problem is not null) { <div class="small text-danger mt-1" role="alert">@_problem</div> }
+                else if (Contact.Latitude is not null) { <div class="small text-muted mt-1">Watching within @ClientRadarService.NearbyMiles miles.</div> }
+            </div>
+
+            <div>
+                <h3 class="radar-heading">May affect them</h3>
+                @if (_impacts is null) { <InlineProgress CssClass="me-1" /><span class="small text-muted">Checking the news and Overwatch…</span> }
+                else if (_impacts.Count == 0) { <p class="small text-muted mb-0">Nothing nearby or naming them in the last two days.@(Contact.Latitude is null ? " Add a location to watch around them." : "")</p> }
+                else
+                {
+                    <ul class="radar-list">
+                        @foreach (var impact in _impacts)
+                        {
+                            <li>
+                                <span class="radar-kind">@impact.Kind</span>
+                                @if (impact.Link is { } link) { <a href="@link" target="@(link.StartsWith("http") ? "_blank" : null)" rel="noopener noreferrer">@impact.Title</a> } else { <span>@impact.Title</span> }
+                                <span class="small text-muted">@impact.Detail@(impact.Miles is { } miles ? $" · {miles:0} mi" : "")</span>
+                            </li>
+                        }
+                    </ul>
+                }
+            </div>
+
+            <div>
+                <h3 class="radar-heading">Where they turn up</h3>
+                @if (_mentions is null) { <InlineProgress CssClass="me-1" /><span class="small text-muted">Searching Sentinel and World News…</span> }
+                else if (_mentions.Count == 0) { <p class="small text-muted mb-0">No Sentinel page or recent news story names them.</p> }
+                else
+                {
+                    <ul class="radar-list">
+                        @foreach (var mention in _mentions)
+                        {
+                            <li><span class="radar-kind">@mention.Kind</span> <a href="@mention.Link">@mention.Title</a> <span class="small text-muted">@mention.Detail</span></li>
+                        }
+                    </ul>
+                }
+            </div>
+
+            <div>
+                <h3 class="radar-heading">Brief</h3>
+                @if (_brief is not null)
+                {
+                    <p class="radar-brief mb-1">@_brief</p>
+                    <p class="small text-muted mb-0">Written by SentinelGPT from this contact's records and mentions. Check before relying on it.</p>
+                }
+                else
+                {
+                    <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@(_briefing || _mentions is null || _impacts is null)" @onclick="BriefAsync">
+                        @if (_briefing) { <InlineProgress CssClass="me-1" /> }Brief me on this client
+                    </button>
+                    @if (_briefProblem is not null) { <div class="small text-muted mt-1">@_briefProblem</div> }
+                }
+            </div>
+        </div>
+    </ChildContent>
+</RecordSection>
+
+@code {
+    [Parameter, EditorRequired] public Contact Contact { get; set; } = default!;
+
+    private string _location = "";
+    private string? _problem;
+    private bool _saving;
+    private IReadOnlyList<ClientImpact>? _impacts;
+    private IReadOnlyList<ClientMention>? _mentions;
+    private string? _brief;
+    private string? _briefProblem;
+    private bool _briefing;
+    private Guid _loadedFor;
+    private readonly CancellationTokenSource _cts = new();
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_loadedFor == Contact.Id) return;
+        _loadedFor = Contact.Id;
+        _location = Contact.Location ?? "";
+        (_impacts, _mentions, _brief) = (null, null, null);
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        try
+        {
+            var username = await CurrentUserAccessor.GetCurrentUsernameAsync(_cts.Token);
+            var impacts = Radar.ImpactsAsync(Contact, _cts.Token);
+            var mentions = Radar.MentionsAsync(Contact, username, _cts.Token);
+            _impacts = await impacts;
+            _mentions = await mentions;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Logger.LogWarning(ex, "Around this client: couldn't load for {Contact}", Contact.Id);
+            _impacts ??= [];
+            _mentions ??= [];
+        }
+    }
+
+    private async Task SaveLocationAsync()
+    {
+        _saving = true;
+        _problem = null;
+        try
+        {
+            _problem = await Radar.SetLocationAsync(Contact.Id, _location, _cts.Token);
+            if (_problem is null)
+            {
+                var text = _location.Trim();
+                Contact.Location = text.Length == 0 ? null : text;
+                if (text.Length == 0) (Contact.Latitude, Contact.Longitude) = (null, null);
+                _loadedFor = Guid.Empty;
+                await OnParametersSetAsync();
+            }
+        }
+        finally { _saving = false; }
+    }
+
+    private async Task BriefAsync()
+    {
+        _briefing = true;
+        _briefProblem = null;
+        try { _brief = await Radar.SummaryAsync(Contact.Id, _mentions ?? [], _impacts ?? [], _cts.Token) ?? null; if (_brief is null) _briefProblem = "SentinelGPT didn't write anything. Try again."; }
+        catch (Exception ex) when (ex is not OperationCanceledException || !_cts.IsCancellationRequested)
+        {
+            Logger.LogInformation(ex, "Around this client: no brief for {Contact}", Contact.Id);
+            _briefProblem = "SentinelGPT couldn't answer just now. Try again in a minute.";
+        }
+        finally { _briefing = false; }
+    }
+
+    public void Dispose()
+    {
+        _cts.Cancel();
+        _cts.Dispose();
+    }
+}
