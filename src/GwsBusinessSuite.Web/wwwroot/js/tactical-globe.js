@@ -366,9 +366,22 @@ window.tacticalGlobe = (function () {
         else window.gwsClientLog.report({ origin: 'mac-app', kind: 'native', message: 'Overwatch globe failed in the Mac app; using the Apple map: ' + diagnostic.slice(0, 1800) });
     }
 
+    // What Cesium prints in the Mac app, kept for the globe probe's report.
+    const macConsole = [];
     function installNativeShaderDiagnostics() {
         if (window.__gwsMacCatalystWebView !== true || window.__gwsNativeShaderDiagnosticsInstalled) return;
         window.__gwsNativeShaderDiagnosticsInstalled = true;
+        ['error', 'warn'].forEach(function (level) {
+            const original = console[level];
+            console[level] = function () {
+                try {
+                    if (macConsole.length < 25) macConsole.push(level + ': ' + Array.prototype.map.call(arguments, function (a) {
+                        return a && a.stack ? String(a.stack).slice(0, 300) : String(a).slice(0, 300);
+                    }).join(' '));
+                } catch { /* never let logging break the page */ }
+                return original.apply(console, arguments);
+            };
+        });
 
         [window.WebGLRenderingContext, window.WebGL2RenderingContext].forEach(function (contextType) {
             if (!contextType) return;
@@ -435,20 +448,58 @@ window.tacticalGlobe = (function () {
     // this file); a day later the globe is tried again, so an OS update that fixes WebKit is used.
     const NATIVE_MAP_KEY = 'gws-overwatch-native-map';
     const NATIVE_MAP_RETRY_MS = 24 * 60 * 60 * 1000;
-    // 20-11-26: on Grant's Mac the globe drew a black screen with no error, so the Mac uses the Apple
-    // map again by default. The shared globe is opt-in there (localStorage 'gws-overwatch-try-globe'
-    // = '1') until WebKit's own errors show why it draws nothing; a failure while trying it still
-    // falls back for a day.
-    const TRY_GLOBE_KEY = 'gws-overwatch-try-globe';
+    // Why the Mac app's globe was black (20-11-26, found with a Catalyst WKWebView rig): in a Mac
+    // Catalyst web view, WebKit's GPU process can't compile any Metal shader ("Compiler failed to
+    // build request"), so every WebGL program fails to link. Contexts and clears work, so Cesium
+    // starts, then draws nothing. The same page in an AppKit web view draws the globe. So the Mac
+    // tests the one thing that breaks, linking a trivial shader program, before creating Cesium:
+    // when it links, the Mac runs the same globe as the web; when it doesn't, it takes the Apple map
+    // straight away (no black screen, no reload). Once Apple fixes WebKit the globe returns by itself.
+    let webglLinkResult = null;
+    function webglCanLinkShaders() {
+        if (webglLinkResult !== null) return webglLinkResult;
+        webglLinkResult = false;
+        let gl = null;
+        try {
+            const canvas = document.createElement('canvas');
+            canvas.width = 4;
+            canvas.height = 4;
+            gl = canvas.getContext('webgl2') || canvas.getContext('webgl');
+            if (!gl) return false;
+            const shader = function (type, source) {
+                const s = gl.createShader(type);
+                gl.shaderSource(s, source);
+                gl.compileShader(s);
+                return s;
+            };
+            const program = gl.createProgram();
+            gl.attachShader(program, shader(gl.VERTEX_SHADER, 'attribute vec4 p; void main() { gl_Position = p; }'));
+            gl.attachShader(program, shader(gl.FRAGMENT_SHADER, 'precision mediump float; void main() { gl_FragColor = vec4(0.0, 1.0, 0.0, 1.0); }'));
+            gl.linkProgram(program);
+            webglLinkResult = gl.getProgramParameter(program, gl.LINK_STATUS) === true;
+        } catch {
+            webglLinkResult = false;
+        } finally {
+            try { const lose = gl && gl.getExtension('WEBGL_lose_context'); if (lose) lose.loseContext(); } catch { /* best effort */ }
+        }
+        if (!webglLinkResult && window.__gwsMacCatalystWebView === true && window.gwsClientLog && window.gwsClientLog.report) {
+            window.gwsClientLog.report({ origin: 'mac-app', kind: 'native', message: 'Overwatch uses the Apple map in the Mac app: WebKit here cannot link a WebGL shader program (Metal compiler failure in the Catalyst web view), so the shared globe would draw black.' });
+        }
+        return webglLinkResult;
+    }
+    let globeProbeRunning = false;
     function macUsesNativeMap() {
         if (window.__gwsForceNativeMap === true) return true;
+        if (!webglCanLinkShaders()) return true;
         try {
-            if (window.localStorage.getItem(TRY_GLOBE_KEY) !== '1') return true;
+            // A later failure of the globe (renderError, blank frame) still falls back for a day.
             const at = Number(window.localStorage.getItem(NATIVE_MAP_KEY));
-            return at > 0 && Date.now() - at < NATIVE_MAP_RETRY_MS;
+            if (at > 0 && Date.now() - at < NATIVE_MAP_RETRY_MS) return true;
         } catch {
             return true;
         }
+        globeProbeRunning = true;
+        return false;
     }
     function fallBackToNativeMap() {
         try {
@@ -464,6 +515,28 @@ window.tacticalGlobe = (function () {
     // screen, nothing logged). Once the globe has had time to draw, a grid of its pixels is read in
     // the frame just drawn; if none has any green or brightness (the holo globe always has its
     // coastlines and grid), the failure is reported and the Mac falls back to the Apple map.
+    // If the globe still fails or draws blank on the Mac after the shader check passed, WebKit's WebGL
+    // details and what Cesium printed go to /admin/logs (once per page).
+    function reportGlobeProbe(viewer, lit) {
+        if (!globeProbeRunning || !(window.gwsClientLog && window.gwsClientLog.report)) return;
+        globeProbeRunning = false;
+        if (lit) return;
+        const lines = ['Overwatch globe probe in the Mac app: ' + (lit ? 'DREW (lit pixels found)' : 'BLANK (no lit pixel)')];
+        try {
+            const gl = viewer.scene.context._gl;
+            const info = gl.getExtension('WEBGL_debug_renderer_info');
+            lines.push('WebGL: ' + gl.getParameter(gl.VERSION) + ' | ' + gl.getParameter(gl.SHADING_LANGUAGE_VERSION));
+            lines.push('Renderer: ' + (info ? gl.getParameter(info.UNMASKED_VENDOR_WEBGL) + ' / ' + gl.getParameter(info.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER)));
+            lines.push('Buffer: ' + gl.drawingBufferWidth + 'x' + gl.drawingBufferHeight + ' | canvas ' + viewer.canvas.clientWidth + 'x' + viewer.canvas.clientHeight + ' | lost ' + gl.isContextLost() + ' | gl error ' + gl.getError());
+            lines.push('Attributes: ' + JSON.stringify(gl.getContextAttributes()));
+            lines.push('Tiles loaded: ' + viewer.scene.globe.tilesLoaded + ' | imagery layers ' + viewer.imageryLayers.length + ' | data sources ' + viewer.dataSources.length);
+        } catch (err) {
+            lines.push('WebGL details failed: ' + String(err));
+        }
+        lines.push('Console: ' + (macConsole.length ? macConsole.join(' || ') : 'nothing'));
+        window.gwsClientLog.report({ origin: 'mac-app', kind: 'native', message: lines.join('\n').slice(0, 3800) });
+    }
+
     function watchForBlankGlobe(viewer) {
         const scene = viewer.scene;
         const started = Date.now();
@@ -487,6 +560,7 @@ window.tacticalGlobe = (function () {
             } catch (err) {
                 lit = false;
             }
+            reportGlobeProbe(viewer, lit);
             if (lit) return;
             reportNativeRendererFailure('The globe drew a blank (black) screen in the Mac app: no lit pixel after the tiles loaded.');
             const container = viewer.container;
@@ -499,7 +573,14 @@ window.tacticalGlobe = (function () {
 
     function showGlobeFallback(container, reason) {
         if (!container || container.dataset.globeFallback === 'true') return;
-        if (window.__gwsMacCatalystWebView === true && !macUsesNativeMap() && fallBackToNativeMap()) return;
+        if (window.__gwsMacCatalystWebView === true && globeProbeRunning && window.gwsClientLog && window.gwsClientLog.report) {
+            globeProbeRunning = false;
+            window.gwsClientLog.report({ origin: 'mac-app', kind: 'native', message: ('Overwatch globe probe in the Mac app: FAILED before drawing: ' + String(reason || '') +
+                '\nConsole: ' + (macConsole.length ? macConsole.join(' || ') : 'nothing')).slice(0, 3800) });
+        }
+        // Only the globe path gets here, and the failure is saved before the reload, so the reloaded
+        // page takes the Apple map: no loop.
+        if (window.__gwsMacCatalystWebView === true && window.__gwsForceNativeMap !== true && fallBackToNativeMap()) return;
         container.dataset.globeFallback = 'true';
         container.replaceChildren();
         const fallback = document.createElement('div');
@@ -5308,8 +5389,9 @@ window.tacticalGlobe = (function () {
 
     // The Apple map fallback. Mac Catalyst's WKWebView could lose WebGL program compilation at the
     // OS level (10-11-26), so the Mac app supplies an MKMapView behind this transparent viewport.
-    // Since 20-11-26 it's used only when the Cesium globe failed on this Mac in the last day
-    // (macUsesNativeMap); otherwise the Mac runs the same globe as the web. Browser and PWA
+    // Since 20-11-26 it's used only when WebKit can't link a WebGL shader (true of the Catalyst web
+    // view on macOS 27) or the globe failed on this Mac in the last day (macUsesNativeMap);
+    // otherwise the Mac runs the same globe as the web. Browser and PWA
     // sessions never enter this branch.
     if (window.__gwsMacCatalystWebView === true && macUsesNativeMap()) {
         let nativeDotNetRef = null;

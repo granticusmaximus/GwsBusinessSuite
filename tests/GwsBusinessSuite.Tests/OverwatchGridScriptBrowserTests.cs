@@ -160,7 +160,7 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
     // hence the two-line pattern at each call site instead.
     // macApp: what the Mac app injects. nativeMap: also force the Apple-map fallback (since 20-11-26
     // the Mac runs the Cesium globe unless it failed there; these tests cover the fallback).
-    internal static async Task<(IPage Page, List<string> ConsoleErrors)> OpenHarnessAsync(IBrowser browser, bool macApp = false, bool nativeMap = true)
+    internal static async Task<(IPage Page, List<string> ConsoleErrors)> OpenHarnessAsync(IBrowser browser, bool macApp = false, bool nativeMap = true, string? initScript = null)
     {
         var script = await File.ReadAllTextAsync(ScriptPath);
 
@@ -171,7 +171,7 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
         {
             // What the Mac app injects (MacWebViewCompatibility), plus a stand-in for its native
             // message handler that records each message instead of drawing MapKit.
-            await page.AddInitScriptAsync((nativeMap ? "window.__gwsForceNativeMap = true;" : "window.localStorage.setItem('gws-overwatch-try-globe', '1');") + """
+            await page.AddInitScriptAsync((nativeMap ? "window.__gwsForceNativeMap = true;" : "") + (initScript ?? "") + """
                 window.__gwsMacCatalystWebView = true;
                 window.__nativeMessages = [];
                 window.webkit = { messageHandlers: { gwsNativeOverwatch: {
@@ -236,8 +236,8 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
     private static readonly Lazy<string> HoloLand = new(() => File.ReadAllText(Path.Combine(
         Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../..")), "src/GwsBusinessSuite.Web/wwwroot/data/overwatch-land.json")));
 
-    // 20-11-26 (Grant: Mac Overwatch identical in everything): with the globe switched on for the Mac
-    // (opt-in since it drew black there), the Mac app runs the same Cesium globe, not the Apple map.
+    // 20-11-26 (Grant: Mac Overwatch identical in everything): where WebKit can link WebGL shaders, the
+    // Mac app runs the same Cesium globe, not the Apple map.
     [Fact]
     public async Task MacApp_ShouldRunTheSameGlobe_AndFallBackToTheAppleMapOnlyAfterAFailure()
     {
@@ -246,6 +246,25 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
         (await page.EvaluateAsync<int>("() => window.__nativeMessages.length")).Should().Be(0, "nothing goes to the Apple map");
         (await page.EvaluateAsync<bool>("() => !!document.querySelector('#tg-viewport canvas')")).Should().BeTrue("the Cesium globe is drawn");
         (await page.EvaluateAsync<string?>("() => window.localStorage.getItem('gws-overwatch-native-map')")).Should().BeNull();
+        await page.CloseAsync();
+    }
+
+    // 20-11-26: the Catalyst web view on macOS 27 can't link any WebGL shader (its Metal compiler
+    // fails), so the globe would draw black. The Mac then opens the Apple map straight away, with no
+    // Cesium canvas and no reload.
+    [Fact]
+    public async Task MacApp_ShouldUseTheAppleMap_WhenWebKitCannotLinkShaders()
+    {
+        var (page, _) = await OpenHarnessAsync(fixture.Browser, macApp: true, nativeMap: false, initScript: """
+            [WebGLRenderingContext, WebGL2RenderingContext].forEach(function (C) {
+              const original = C.prototype.getProgramParameter;
+              C.prototype.getProgramParameter = function (program, name) { return name === this.LINK_STATUS ? false : original.call(this, program, name); };
+            });
+            """);
+        await InitAsync(page);
+        (await page.EvaluateAsync<int>("() => window.__nativeMessages.length")).Should().BeGreaterThan(0, "the Apple map is driven");
+        (await page.EvaluateAsync<bool>("() => !!document.querySelector('#tg-viewport canvas')")).Should().BeFalse("no Cesium globe is started");
+        (await page.EvaluateAsync<string?>("() => window.localStorage.getItem('gws-overwatch-native-map')")).Should().BeNull("no failure reload was needed");
         await page.CloseAsync();
     }
 

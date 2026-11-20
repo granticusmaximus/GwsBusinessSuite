@@ -130,3 +130,14 @@ and zoom lag. Causes found and fixed:
   - Focus: `OverwatchFocus` catalog + `focusLayer` (web dims tg-* entities, Mac dims views and overlays).
   - Not done: per-layer "zoom in" hints in the layer list.
   - Grant: check on screen (`open gws` and the web app).
+- [x] 20-11-26 Mac black globe: root cause found. In a Mac Catalyst WKWebView (macOS 27.3) WebKit's GPU
+  process can't compile any Metal shader ("Compiler failed to build request"), so every WebGL program
+  fails to link (context-lost error at link). Contexts and clears work, so Cesium starts and draws black.
+  The same page in an AppKit WKWebView draws the holo globe. Proven with scratch rigs (Catalyst UIKit
+  app + AppKit app loading the real tactical-globe.js); no WebKit feature flag
+  (UseGPUProcessForWebGL off = no WebGL at all, ForceWebGLUsesLowPower) changes it.
+  - `webglCanLinkShaders()` in tactical-globe.js replaces the probe/opt-in: the Mac runs the shared
+    globe whenever a trivial program links, else the Apple map at once (no black screen, no reload),
+    with one /admin/logs line. The globe returns by itself once Apple fixes WebKit.
+  - Truly one globe on the Mac today would need the Overwatch page in an AppKit WKWebView (an AppKit
+    helper/bundle), not the Catalyst one. Not built; Grant's call.
