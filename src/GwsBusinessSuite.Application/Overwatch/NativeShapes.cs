@@ -37,6 +37,7 @@ public static class NativeShapes
     {
         "setThreeD", "setNightLights", "setSatelliteScene", "clearSatelliteScene", "setMeasure", "clearMeasure",
         "setRadarTimeline", "setRadarVisible", "setTimeMachine", "clearTimeMachine", "setAurora", "setTrafficFlow",
+        "splitSatelliteScene",
     };
 
     private static readonly string[] PathKeys = ["path", "points", "positions", "polygon", "ring", "coordinates", "rings", "paths"];
@@ -49,7 +50,74 @@ public static class NativeShapes
         var offset = arguments.FirstOrDefault() is string ? 2 : 1;
         if (operation == "setRoadTraffic" && payload is object?[] roads && arguments.ElementAtOrDefault(offset) is object?[] speeds)
             return roads.Concat(speeds).ToArray();
-        return payload;
+        // 20-11-26: these three arrive in shapes of their own, and drew nothing on the Mac map.
+        return operation switch
+        {
+            "setMapNotes" => MapNotes(payload, arguments.ElementAtOrDefault(offset)),
+            "setRoute" => Route(arguments),
+            "setStreetViewMarker" => AsDouble(arguments.ElementAtOrDefault(offset - 1), out var lat) && AsDouble(arguments.ElementAtOrDefault(offset), out var lon)
+                ? new object?[] { new Dictionary<string, object?>(StringComparer.Ordinal) { ["id"] = "street-view", ["title"] = "STREET VIEW", ["lat"] = lat, ["lon"] = lon } }
+                : null,
+            _ => payload,
+        };
+    }
+
+    // Map notes' points are [lat, lon]: a pin note is its first point; an area note is its ring
+    // (as [lon, lat] for Paths) with its title pinned at the middle; a note being drawn is its
+    // points and the line through them.
+    private static object?[]? MapNotes(object? notes, object? draft)
+    {
+        static (double Lat, double Lon)[] LatLon(object? points) => points is object?[] values
+            ? values.OfType<object?[]>().Where(p => p.Length == 2 && AsDouble(p[0], out _) && AsDouble(p[1], out _))
+                .Select(p => { AsDouble(p[0], out var lat); AsDouble(p[1], out var lon); return (lat, lon); }).ToArray()
+            : [];
+        static object?[] Ring((double Lat, double Lon)[] points) => points.Select(p => (object?)new object?[] { p.Lon, p.Lat }).ToArray();
+        var items = new List<object?>();
+        foreach (var note in Items(notes))
+        {
+            var points = LatLon(note.GetValueOrDefault("points"));
+            if (points.Length == 0) continue;
+            var item = new Dictionary<string, object?>(note, StringComparer.Ordinal);
+            item.Remove("points");
+            if (note.GetValueOrDefault("kind") as string == "area" && points.Length >= 3)
+            {
+                item["ring"] = Ring([.. points, points[0]]);
+                item["lat"] = points.Average(p => p.Lat);
+                item["lon"] = points.Average(p => p.Lon);
+            }
+            else
+            {
+                item["lat"] = points[0].Lat;
+                item["lon"] = points[0].Lon;
+            }
+            items.Add(item);
+        }
+        if (draft is Dictionary<string, object?> drawing && LatLon(drawing.GetValueOrDefault("points")) is { Length: > 0 } drawn)
+        {
+            for (var i = 0; i < drawn.Length; i++)
+                items.Add(new Dictionary<string, object?>(StringComparer.Ordinal) { ["id"] = $"draft:{i}", ["title"] = "", ["lat"] = drawn[i].Lat, ["lon"] = drawn[i].Lon });
+            if (drawn.Length >= 2)
+                items.Add(new Dictionary<string, object?>(StringComparer.Ordinal) { ["id"] = "draft:line", ["path"] = Ring(drawn.Length >= 3 ? [.. drawn, drawn[0]] : drawn) });
+        }
+        return items.ToArray();
+    }
+
+    // setRoute(path, containerId, stops): the path is [lon, lat] pairs; stops are S, 1, 2... F.
+    private static object?[]? Route(object?[] arguments)
+    {
+        if (arguments.FirstOrDefault() is not object?[] { Length: >= 2 } path) return null;
+        var items = new List<object?> { new Dictionary<string, object?>(StringComparer.Ordinal) { ["id"] = "route", ["path"] = path } };
+        var stops = Items(arguments.ElementAtOrDefault(2)).ToList();
+        for (var i = 0; i < stops.Count; i++)
+        {
+            if (!TryPoint(stops[i], out var lat, out var lon)) continue;
+            items.Add(new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["id"] = $"stop:{i}", ["title"] = i == 0 ? "S" : i == stops.Count - 1 ? "F" : i.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                ["lat"] = lat, ["lon"] = lon,
+            });
+        }
+        return items.ToArray();
     }
 
     public static IEnumerable<Dictionary<string, object?>> Items(object? payload)
@@ -312,6 +380,7 @@ public static class NativeShapes
             "setCoverageMarkers" => new("binoculars.fill", MarkerTone.Teal),
             "setMapNotes" => new("mappin.and.ellipse", MarkerTone.Yellow),
             "setStreetViewMarker" => new("location.fill", MarkerTone.Blue, true),
+            "setPhoto" => new("camera.fill", MarkerTone.Green, true),
             "setWeatherAlerts" => new("cloud.bolt.rain.fill", MarkerTone.Red, major),
             "setHazards" => HazardMarker(kind, severityTone, major),
             _ => new("mappin", MarkerTone.Yellow),

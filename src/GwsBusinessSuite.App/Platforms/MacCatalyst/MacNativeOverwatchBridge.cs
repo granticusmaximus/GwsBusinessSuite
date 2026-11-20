@@ -256,6 +256,8 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
             case "startPickPoint": _pickPointMode = true; return;
             case "cancelPickPoint": _pickPointMode = false; return;
             case "mapTap": MapTap(arguments); return;
+            case "locatePoint": Locate(arguments); return;
+            case NativeOverwatchOperations.SplitSatelliteScene: SplitSatelliteScene(arguments); return;
             case "setRadarTimeline": SetRadarTimeline(arguments); return;
             case "setTimeMachine": SetTimeMachine(arguments); return;
             case "setAurora": SetAurora(arguments); return;
@@ -504,12 +506,38 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
             Activate(view.Annotation);
             return;
         }
+        // No pin: the page checks for a city-traffic line under the click, as the globe's click does.
+        if (_overlays.ContainsKey("setRoadTraffic") && double.IsFinite(coordinate.Latitude) && double.IsFinite(coordinate.Longitude))
+        {
+            var miss = JsonSerializer.Serialize(new { lat = coordinate.Latitude, lon = coordinate.Longitude, metresPerPoint = MetresPerPoint() });
+            _ = SendAsync($"window.gwsNativeOverwatch && window.gwsNativeOverwatch.missed && window.gwsNativeOverwatch.missed({miss})");
+        }
         var (why, distance) = NearestSkipped(point);
         var line = $"click at {x:0.000},{y:0.000}: no pin within reach{why}";
         // A click right beside a drawn marker was almost certainly meant for it: worth the
         // server's log. A click on open map isn't.
         if (distance <= MissedPinReach) Report(line); else MapLog(line);
     }
+
+    // Where a point of the map is ([request id, x, y] as fractions of the map), for the page's hover
+    // card and street-view drop (20-11-26), answered through gwsNativeOverwatch.located.
+    private void Locate(object?[] arguments)
+    {
+        if (arguments.Length < 3 || !AsDouble(arguments[0], out var id) || !AsDouble(arguments[1], out var x) || !AsDouble(arguments[2], out var y)) return;
+        var coordinate = _map.ConvertPoint(new CoreGraphics.CGPoint(Math.Clamp(x, 0, 1) * _map.Bounds.Width, Math.Clamp(y, 0, 1) * _map.Bounds.Height), _map);
+        var found = double.IsFinite(coordinate.Latitude) && double.IsFinite(coordinate.Longitude);
+        var json = JsonSerializer.Serialize(new
+        {
+            id = (long)id,
+            lat = found ? coordinate.Latitude : (double?)null,
+            lon = found ? coordinate.Longitude : (double?)null,
+            metresPerPoint = MetresPerPoint()
+        });
+        _ = SendAsync($"window.gwsNativeOverwatch && window.gwsNativeOverwatch.located && window.gwsNativeOverwatch.located({json})");
+    }
+
+    // Roughly how many metres one point of the map covers, north to south.
+    private double MetresPerPoint() => _map.Bounds.Height > 0 ? _map.Region.Span.LatitudeDelta * 111_320 / _map.Bounds.Height : 0;
 
     // The pin the user clicked: the drawn marker under the pointer (its balloon sits above the
     // coordinate, so measuring from the coordinate picked neighbours), else the nearest marker
@@ -839,16 +867,90 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
     // Satellite scenes (13-11-26): the chosen Sentinel-2 scene as tiles; the web globe's
     // before/after wipe isn't drawn here, only the scene chosen.
     private MKTileOverlay? _satelliteScene;
+    // The earlier scene, left of the split the page's slider moves; the later one is right of it,
+    // as Cesium's splitDirection draws them (20-11-26). _splitMapX is the split in map points, or
+    // NaN with no earlier scene; the renderers read it while drawing.
+    private MKTileOverlay? _satelliteSceneBefore;
+    private double _split = 0.5;
+    private double _splitMapX = double.NaN;
+    private readonly List<WeakReference<SplitTileRenderer>> _splitRenderers = [];
 
     private void SetSatelliteScene(object?[] arguments)
     {
         if (_satelliteScene is not null) _map.RemoveOverlay(_satelliteScene);
+        if (_satelliteSceneBefore is not null) _map.RemoveOverlay(_satelliteSceneBefore);
         _satelliteScene = null;
+        _satelliteSceneBefore = null;
+        _splitRenderers.Clear();
         var payload = arguments.FirstOrDefault() is string ? arguments.ElementAtOrDefault(1) : arguments.FirstOrDefault();
-        if (payload is not Dictionary<string, object?> spec || TileTemplate(spec.GetValueOrDefault("after")) is not { } template
-            || !template.StartsWith("https://planetarycomputer.microsoft.com/", StringComparison.Ordinal)) return;
+        if (payload is not Dictionary<string, object?> spec || SceneTemplate(spec.GetValueOrDefault("after")) is not { } template)
+        {
+            UpdateSplit();
+            return;
+        }
         _satelliteScene = new StretchedTileOverlay(template, 18);
         _map.AddOverlay(_satelliteScene, MKOverlayLevel.AboveRoads);
+        if (SceneTemplate(spec.GetValueOrDefault("before")) is { } before)
+        {
+            _satelliteSceneBefore = new StretchedTileOverlay(before, 18);
+            _map.AddOverlay(_satelliteSceneBefore, MKOverlayLevel.AboveRoads);
+            if (AsDouble(spec.GetValueOrDefault("split"), out var split)) _split = Math.Clamp(split, 0, 1);
+        }
+        UpdateSplit();
+    }
+
+    private static string? SceneTemplate(object? value) =>
+        TileTemplate(value) is { } template && template.StartsWith("https://planetarycomputer.microsoft.com/", StringComparison.Ordinal) ? template : null;
+
+    private void SplitSatelliteScene(object?[] arguments)
+    {
+        if (!AsDouble(arguments.LastOrDefault(), out var split)) return;
+        _split = Math.Clamp(split, 0, 1);
+        UpdateSplit();
+    }
+
+    // Recomputed when the split or the view changes (the slider is a fraction of the map's width).
+    private void UpdateSplit()
+    {
+        if (_satelliteScene is null || _satelliteSceneBefore is null || _map.Bounds.Width <= 0) _splitMapX = double.NaN;
+        else
+        {
+            var coordinate = _map.ConvertPoint(new CoreGraphics.CGPoint(_split * _map.Bounds.Width, _map.Bounds.Height / 2), _map);
+            _splitMapX = double.IsFinite(coordinate.Longitude) ? MKMapPoint.FromCoordinate(coordinate).X : double.NaN;
+        }
+        foreach (var weak in _splitRenderers) if (weak.TryGetTarget(out var renderer)) renderer.SetNeedsDisplay();
+    }
+
+    private MKOverlayRenderer? SceneRenderer(IMKOverlay overlay)
+    {
+        var left = ReferenceEquals(overlay, _satelliteSceneBefore);
+        if (!left && !ReferenceEquals(overlay, _satelliteScene)) return null;
+        var renderer = new SplitTileRenderer(this, (MKTileOverlay)overlay, left);
+        _splitRenderers.Add(new WeakReference<SplitTileRenderer>(renderer));
+        return renderer;
+    }
+
+    // Draws its scene only on its side of the split (all of it with no split).
+    private sealed class SplitTileRenderer(MacNativeOverwatchBridge owner, MKTileOverlay overlay, bool left) : MKTileOverlayRenderer(overlay)
+    {
+        public override void DrawMapRect(MKMapRect mapRect, nfloat zoomScale, CoreGraphics.CGContext context)
+        {
+            var split = owner._splitMapX;
+            if (double.IsNaN(split))
+            {
+                base.DrawMapRect(mapRect, zoomScale, context);
+                return;
+            }
+            var min = mapRect.Origin.X;
+            var max = mapRect.Origin.X + mapRect.Size.Width;
+            var from = left ? min : Math.Max(min, split);
+            var to = left ? Math.Min(max, split) : max;
+            if (to <= from) return;
+            context.SaveState();
+            context.ClipToRect(RectForMapRect(new MKMapRect(from, mapRect.Origin.Y, to - from, mapRect.Size.Height)));
+            base.DrawMapRect(mapRect, zoomScale, context);
+            context.RestoreState();
+        }
     }
 
     // Analyst tools (13-11-26): the measured path and range rings, as polylines of [lat, lon].
@@ -953,6 +1055,7 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
 
     private void RegionDidChange(MKCoordinateRegion region)
     {
+        if (_satelliteSceneBefore is not null) UpdateSplit();
         _regionChangeDebounce?.Cancel();
         _regionChangeDebounce?.Dispose();
         var debounce = _regionChangeDebounce = new CancellationTokenSource();
@@ -1211,7 +1314,7 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
             return image;
         }
 
-        public override MKOverlayRenderer OverlayRenderer(MKMapView mapView, IMKOverlay overlay) => owner.HoloRenderer(overlay) ?? overlay switch
+        public override MKOverlayRenderer OverlayRenderer(MKMapView mapView, IMKOverlay overlay) => owner.HoloRenderer(overlay) ?? owner.SceneRenderer(overlay) ?? overlay switch
         {
             MKTileOverlay tiles => new MKTileOverlayRenderer(tiles) { Alpha = 0.75f },
             MKMultiPolygon areas => AreaStyle(new MKMultiPolygonRenderer(areas), areas.Title),

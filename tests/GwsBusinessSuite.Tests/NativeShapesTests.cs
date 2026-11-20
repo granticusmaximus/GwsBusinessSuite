@@ -164,7 +164,7 @@ public sealed class NativeShapesTests
             "setWorldNews", "setNewsShading", "setMapNotes", "setDriveFollow", "setSelectModeEnabled", "setRoadWeather", "setMessageSigns",
             "setRoadTraffic", "setAircraft", "setAirQuality", "setPowerOutages", "setInternetOutages", "setConvergence", "setAirportStatus",
             "setChokepoints", "setWeatherWarnings", "setSatellites", "setTravelAdvice", "setFireHotspots", "setConflict", "setHumanitarian", "setHazards",
-            "setShips", "setCoverageMarkers", "setRoute", "setRouteHighlights", "setRouteConditions", "setStreetViewMarker",
+            "setShips", "setCoverageMarkers", "setRoute", "setRouteHighlights", "setRouteConditions", "setStreetViewMarker", "setPhoto",
         };
         var sets = NativeOverwatchOperations.All.Where(op => op.StartsWith("set", StringComparison.Ordinal)).ToList();
 
@@ -279,5 +279,27 @@ public sealed class NativeShapesTests
         var picked = OverwatchCallouts.Pick(new[] { ("a", "minor", 9), ("b", "major", 1), ("c", "moderate", 5), ("d", "minor", 20) },
             x => OverwatchCallouts.SeverityRank(x.Item2), x => x.Item3);
         Assert.Equal(new[] { "b", "c", "d" }.ToHashSet(), picked.Select(x => x.Item1).ToHashSet());
+    }
+
+    // 20-11-26 (Grant: every layer visible on the Mac app and the web app): each layer's sample, as
+    // the page sends it, gives the Mac map something to draw. The web globe's check uses the same
+    // samples (OverwatchGridScriptBrowserTests.EveryLayer_ShouldDrawOnTheWebGlobe).
+    [Theory]
+    [MemberData(nameof(OverwatchLayerSample.Names), MemberType = typeof(OverwatchLayerSample))]
+    public void EveryLayer_ShouldDrawOnTheMacMap(string layer)
+    {
+        var sample = OverwatchLayerSample.Named(layer);
+        var arguments = sample.MacArguments();
+        if (sample.NeedsCameras)
+        {
+            // The page's Mac adapter adds each highlighted camera's place (tactical-globe.js).
+            var cameras = (object?[])OverwatchLayerSample.Named("Cameras").MacArguments()[0]!;
+            var places = cameras.OfType<Dictionary<string, object?>>().ToDictionary(c => (string)c["id"]!, StringComparer.Ordinal);
+            arguments = [((object?[])arguments[0]!).OfType<Dictionary<string, object?>>()
+                .Select(h => new Dictionary<string, object?>(h, StringComparer.Ordinal) { ["lat"] = places[(string)h["cameraId"]!]["lat"], ["lon"] = places[(string)h["cameraId"]!]["lon"] })
+                .ToArray<object?>()];
+        }
+
+        Assert.True(NativeShapes.Drawn(sample.Op, arguments) > 0, $"{layer} ({sample.Op}) draws nothing on the Mac map");
     }
 }

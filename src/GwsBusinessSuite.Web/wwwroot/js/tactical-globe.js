@@ -1165,7 +1165,9 @@ window.tacticalGlobe = (function () {
         }, 400);
 
         ensureKeyboardShortcutsRegistered();
-        setUpLocationSearch(viewer, dotNetRef);
+        setUpLocationSearch(function (lat, lon) {
+            viewer.camera.flyTo({ destination: Cesium.Cartesian3.fromDegrees(lon, lat, 150000) });
+        }, dotNetRef);
         setUpPhotoPlacement(containerId);
         setUpShareLink(containerId);
         const hoverIdentify = setUpHoverIdentify(viewer, dotNetRef);
@@ -1185,12 +1187,11 @@ window.tacticalGlobe = (function () {
     const MIN_HOVER_HEIGHT_METERS = 5000;
     const HOVER_DEBOUNCE_MS = 400;
 
-    function setUpHoverIdentify(viewer, dotNetRef) {
-        const shell = viewer.container.closest('.tg-shell');
+    // The hover card itself (address, or a named business with its website and photos), shared by
+    // the Cesium globe and the Mac's Apple map (20-11-26); each supplies where the pointer is.
+    function createHoverCard(shell, dotNetRef) {
         let tooltip = null;
-        let debounceHandle = null;
         let requestToken = 0;
-        let isDragging = false;
         let photoIndex = 0;
 
         function hideTooltip() {
@@ -1270,6 +1271,35 @@ window.tacticalGlobe = (function () {
             });
         }
 
+        // x, y: where the pointer is in the shell; lat, lon: the place under it.
+        async function identify(x, y, lat, lon) {
+            const token = ++requestToken;
+            // Try a real named business/POI first - only fall back to the plain
+            // reverse-geocoded address when nothing is nearby, keeping this to exactly one
+            // interop round-trip per hover in both cases.
+            const business = await dotNetRef.invokeMethodAsync('GetBusinessCardAsync', lat, lon);
+            if (token !== requestToken) return; // a newer hover already superseded this one
+            if (business) {
+                showBusinessCard(x, y, business);
+                return;
+            }
+            const place = await dotNetRef.invokeMethodAsync('ReverseGeocodeAsync', lat, lon);
+            if (token !== requestToken) return;
+            if (place) showTooltip(x, y, place);
+        }
+
+        return {
+            hide: function () { requestToken++; hideTooltip(); },
+            identify: identify,
+            dispose: function () { if (tooltip && tooltip.parentNode) tooltip.parentNode.removeChild(tooltip); }
+        };
+    }
+
+    function setUpHoverIdentify(viewer, dotNetRef) {
+        const card = createHoverCard(viewer.container.closest('.tg-shell'), dotNetRef);
+        const hideTooltip = card.hide;
+        let debounceHandle = null;
+        let isDragging = false;
         const handler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
         handler.setInputAction(function () {
             isDragging = true;
@@ -1289,23 +1319,8 @@ window.tacticalGlobe = (function () {
                 const cartesian = viewer.camera.pickEllipsoid(screenPosition, viewer.scene.globe.ellipsoid);
                 if (!cartesian) return;
                 const cartographic = Cesium.Cartographic.fromCartesian(cartesian);
-                const lat = Cesium.Math.toDegrees(cartographic.latitude);
-                const lon = Cesium.Math.toDegrees(cartographic.longitude);
-
-                const token = ++requestToken;
-                // Try a real named business/POI first - only fall back to the plain
-                // reverse-geocoded address when nothing is nearby, keeping this to exactly one
-                // interop round-trip per hover in both cases.
-                const business = await dotNetRef.invokeMethodAsync('GetBusinessCardAsync', lat, lon);
-                if (token !== requestToken) return; // a newer hover already superseded this one
-                if (business) {
-                    showBusinessCard(screenPosition.x, screenPosition.y, business);
-                    return;
-                }
-
-                const place = await dotNetRef.invokeMethodAsync('ReverseGeocodeAsync', lat, lon);
-                if (token !== requestToken) return;
-                if (place) showTooltip(screenPosition.x, screenPosition.y, place);
+                await card.identify(screenPosition.x, screenPosition.y,
+                    Cesium.Math.toDegrees(cartographic.latitude), Cesium.Math.toDegrees(cartographic.longitude));
             }, HOVER_DEBOUNCE_MS);
         }, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
 
@@ -1313,7 +1328,7 @@ window.tacticalGlobe = (function () {
             dispose: function () {
                 if (debounceHandle) clearTimeout(debounceHandle);
                 handler.destroy();
-                if (tooltip && tooltip.parentNode) tooltip.parentNode.removeChild(tooltip);
+                card.dispose();
             }
         };
     }
@@ -1327,7 +1342,8 @@ window.tacticalGlobe = (function () {
     // OSM Foundation policy enforcement that separately blocked this page's old tile-based
     // basemap), and Photon alone still missed real, current US residential addresses often
     // enough to matter.
-    function setUpLocationSearch(viewer, dotNetRef) {
+    // fly(lat, lon) moves whichever map is showing (the Cesium globe, or the Mac's Apple map).
+    function setUpLocationSearch(fly, dotNetRef) {
         const input = document.getElementById('tg-search-input');
         const button = document.getElementById('tg-search-button');
         const status = document.getElementById('tg-search-status');
@@ -1346,9 +1362,7 @@ window.tacticalGlobe = (function () {
                 }
 
                 status.textContent = '';
-                viewer.camera.flyTo({
-                    destination: Cesium.Cartesian3.fromDegrees(Number(hit.longitude), Number(hit.latitude), 150000)
-                });
+                fly(Number(hit.latitude), Number(hit.longitude));
             } catch (e) {
                 status.textContent = 'SEARCH FAILED';
             }
@@ -1370,7 +1384,7 @@ window.tacticalGlobe = (function () {
         const button = document.getElementById('tg-photo-button');
         const input = document.getElementById('tg-photo-input');
         const status = document.getElementById('tg-search-status');
-        const entry = viewers.get(containerId);
+        const entry = entryFor(containerId);
         if (!entry) return;
         async function place(file) {
             if (!file) return;
@@ -1387,7 +1401,8 @@ window.tacticalGlobe = (function () {
             button.addEventListener('click', function () { input.value = ''; input.click(); });
             input.addEventListener('change', function () { place(input.files && input.files[0]); });
         }
-        const container = entry.viewer.container;
+        const container = entry.viewer ? entry.viewer.container : document.getElementById(containerId);
+        if (!container) return;
         container.addEventListener('dragover', function (event) {
             if (event.dataTransfer && Array.from(event.dataTransfer.types || []).indexOf('Files') >= 0) event.preventDefault();
         });
@@ -1401,11 +1416,35 @@ window.tacticalGlobe = (function () {
 
     // info: { latitude, longitude, altitude, heading, takenAt, make, model } or null. Draws a pin
     // (and a line the way the camera faced), flies there, and returns the status line.
+    function photoMessage(info) {
+        return 'PHOTO PLACED' + (info.takenAt ? ' · TAKEN ' + info.takenAt : '') +
+            (typeof info.heading === 'number' ? ' · FACING ' + Math.round(info.heading) + '°' : '');
+    }
+
+    // The point 300 m the way the camera faced, [lat, lon].
+    function photoFacing(info) {
+        const meters = 300, earth = 6371000, bearing = info.heading * Math.PI / 180, lat = info.latitude * Math.PI / 180;
+        return [info.latitude + (meters * Math.cos(bearing) / earth) * 180 / Math.PI,
+            info.longitude + (meters * Math.sin(bearing) / (earth * Math.cos(lat))) * 180 / Math.PI];
+    }
+
     function placePhoto(containerId, info, name) {
-        const entry = viewers.get(containerId || 'tg-viewport');
+        const entry = entryFor(containerId);
         if (!entry) return '';
         if (!info || typeof info.latitude !== 'number' || typeof info.longitude !== 'number') {
             return 'NO LOCATION IN THIS PHOTO (APPS OFTEN REMOVE IT WHEN SHARING)';
+        }
+        // The Mac's Apple map (20-11-26): the same pin (clicks open the same panel) and facing line.
+        if (!entry.viewer && entry.post) {
+            const photo = Object.assign({ name: name || 'Photo' }, info);
+            const items = [Object.assign({ id: 'photo', lat: info.latitude, lon: info.longitude, title: 'PHOTO' }, photo)];
+            if (typeof info.heading === 'number') {
+                const to = photoFacing(info);
+                items.push({ id: 'photo-facing', path: [[info.longitude, info.latitude], [to[1], to[0]]] }); // [lon, lat] pairs (NativeShapes)
+            }
+            entry.post('setPhoto', [entry.containerId, items]);
+            entry.post('flyTo', [entry.containerId, info.latitude, info.longitude, 2500]);
+            return photoMessage(info);
         }
         const entities = entry.viewer.entities;
         (entry.photoEntities || []).forEach(function (e) { entities.remove(e); });
@@ -1423,9 +1462,7 @@ window.tacticalGlobe = (function () {
         entry.photoEntities.push(pin);
         if (typeof info.heading === 'number') {
             // 300 m the way the camera faced.
-            const meters = 300, earth = 6371000, bearing = Cesium.Math.toRadians(info.heading), lat = Cesium.Math.toRadians(info.latitude);
-            const toLat = info.latitude + Cesium.Math.toDegrees(meters * Math.cos(bearing) / earth);
-            const toLon = info.longitude + Cesium.Math.toDegrees(meters * Math.sin(bearing) / (earth * Math.cos(lat)));
+            const to = photoFacing(info), toLat = to[0], toLon = to[1];
             entry.photoEntities.push(entities.add({
                 polyline: {
                     positions: Cesium.Cartesian3.fromDegreesArray([info.longitude, info.latitude, toLon, toLat]),
@@ -1435,8 +1472,7 @@ window.tacticalGlobe = (function () {
         }
         flyTo(containerId, info.latitude, info.longitude, 2500);
         entry.viewer.scene.requestRender();
-        return 'PHOTO PLACED' + (info.takenAt ? ' · TAKEN ' + info.takenAt : '') +
-            (typeof info.heading === 'number' ? ' · FACING ' + Math.round(info.heading) + '°' : '');
+        return photoMessage(info);
     }
 
     function openPhotoPanel(photo) {
@@ -1554,15 +1590,17 @@ window.tacticalGlobe = (function () {
     // DB-backed token. Returns the built URL (or null if there's no active viewer) regardless of
     // whether the clipboard write itself succeeds, so a caller can still show/log the link.
     async function buildShareLink(containerId) {
-        const entry = viewers.get(containerId || 'tg-viewport');
+        const entry = entryFor(containerId);
         if (!entry) return null;
 
-        const carto = entry.viewer.camera.positionCartographic;
-        const view = entry.currentView || {
+        // The Mac's Apple map keeps currentView from its region (20-11-26); the globe has a camera.
+        const carto = entry.viewer ? entry.viewer.camera.positionCartographic : null;
+        const view = entry.currentView || (carto && {
             lat: Cesium.Math.toDegrees(carto.latitude),
             lon: Cesium.Math.toDegrees(carto.longitude),
             height: carto.height
-        };
+        });
+        if (!view) return null;
 
         let openCameras = [];
         if (streamPanel && streamPanel._tgCamera) {
@@ -1616,7 +1654,7 @@ window.tacticalGlobe = (function () {
         keyboardShortcutsRegistered = true;
 
         document.addEventListener('keydown', function (event) {
-            if (viewers.size === 0) return;
+            if (viewers.size === 0 && !nativeEntry) return;
             const tag = (event.target && event.target.tagName || '').toLowerCase();
             if (tag === 'input' || tag === 'textarea') return;
 
@@ -1796,8 +1834,9 @@ window.tacticalGlobe = (function () {
     }
 
     function enableStreetViewDrop(containerId) {
-        const entry = viewers.get(containerId || 'tg-viewport');
+        const entry = entryFor(containerId);
         if (!entry || entry.streetViewDropEnabled) return;
+        if (!entry.viewer) { enableNativeStreetViewDrop(entry); return; }
         entry.streetViewDropEnabled = true;
         document.addEventListener('dragstart', function (event) {
             const button = event.target.closest && event.target.closest('[data-tg-streetview]');
@@ -1965,6 +2004,79 @@ window.tacticalGlobe = (function () {
     // below sets this stand-in so panels and camera selection work the same there.
     // { containerId, viewer: null, dotNetRef, selectMode, selectedCameras, cameraEntities, aircraftPath, post }
     let nativeEntry = null;
+    // The Mac's Apple map: the place under a point of the map container, as { lat, lon,
+    // metresPerPoint }, or null (set by the native branch, 20-11-26).
+    let nativeLocatePoint = null;
+
+    // Street view drop on the Mac's Apple map (20-11-26): the same drag of the person button.
+    function enableNativeStreetViewDrop(entry) {
+        const target = document.getElementById(entry.containerId);
+        if (!target || !nativeLocatePoint) return;
+        entry.streetViewDropEnabled = true;
+        document.addEventListener('dragstart', function (event) {
+            const button = event.target.closest && event.target.closest('[data-tg-streetview]');
+            if (!button) return;
+            event.dataTransfer.setData(STREET_VIEW_DRAG_TYPE, '1');
+            event.dataTransfer.effectAllowed = 'copy';
+        });
+        target.addEventListener('dragover', function (event) {
+            if (!event.dataTransfer || !Array.from(event.dataTransfer.types).includes(STREET_VIEW_DRAG_TYPE)) return;
+            event.preventDefault();
+            event.dataTransfer.dropEffect = 'copy';
+        });
+        target.addEventListener('drop', function (event) {
+            if (!event.dataTransfer || !Array.from(event.dataTransfer.types).includes(STREET_VIEW_DRAG_TYPE)) return;
+            event.preventDefault();
+            const rect = target.getBoundingClientRect();
+            if (rect.width <= 0 || rect.height <= 0) return;
+            nativeLocatePoint((event.clientX - rect.left) / rect.width, (event.clientY - rect.top) / rect.height).then(function (place) {
+                if (place && entry.dotNetRef) entry.dotNetRef.invokeMethodAsync('OnStreetViewDropped', place.lat, place.lon);
+            });
+        });
+    }
+
+    // City traffic on the Mac's Apple map (20-11-26): the road or live-speed line nearest a click
+    // that hit no pin, within about 12 points, as the globe's click on a line. Paths are [lon, lat].
+    function nearestTrafficLine(data, lat, lon, metresPerPoint) {
+        if (!data) return null;
+        const reach = Math.max(15, 12 * (Number(metresPerPoint) || 0));
+        const kx = Math.cos(lat * Math.PI / 180) * 111320, ky = 110540;
+        const pairs = function (path) {
+            if (!Array.isArray(path)) return [];
+            if (typeof path[0] === 'number') {
+                const out = [];
+                for (let i = 0; i + 1 < path.length; i += 2) out.push([path[i], path[i + 1]]);
+                return out;
+            }
+            return path;
+        };
+        const distance = function (path) {
+            const points = pairs(path);
+            let best = Infinity;
+            for (let i = 1; i < points.length; i++) {
+                const ax = (points[i - 1][0] - lon) * kx, ay = (points[i - 1][1] - lat) * ky;
+                const bx = (points[i][0] - lon) * kx, by = (points[i][1] - lat) * ky;
+                const dx = bx - ax, dy = by - ay, length = dx * dx + dy * dy;
+                const t = length > 0 ? Math.max(0, Math.min(1, -(ax * dx + ay * dy) / length)) : 0;
+                best = Math.min(best, Math.hypot(ax + t * dx, ay + t * dy));
+            }
+            return best;
+        };
+        // Live speeds are drawn over the counts, so they win a near-tie, as on the globe.
+        let found = null, foundDistance = reach;
+        (data.speeds || []).forEach(function (link) {
+            const d = distance(link.path);
+            if (d <= foundDistance) { found = { speed: link }; foundDistance = d; }
+        });
+        if (found) return found;
+        (data.roads || []).forEach(function (road) {
+            (road.paths || []).forEach(function (path) {
+                const d = distance(path);
+                if (d < foundDistance) { found = { road: road }; foundDistance = d; }
+            });
+        });
+        return found;
+    }
 
     function entryFor(containerId) {
         const id = containerId || 'tg-viewport';
@@ -5468,12 +5580,22 @@ window.tacticalGlobe = (function () {
             setFireHotspots: function (cell) { openHazardPanel(cell); },
             setConflict: function (event) { openHazardPanel(event); },
             setHumanitarian: function (item) { openHazardPanel(item); },
+            // The page takes the note's id, as the globe sends it (it was the whole note before 20-11-26).
             setMapNotes: function (note) {
-                if (nativeDotNetRef) nativeDotNetRef.invokeMethodAsync('OnMapNoteClicked', note);
-            }
+                if (nativeDotNetRef && note && typeof note.id === 'string' && note.id.indexOf('draft:') !== 0) nativeDotNetRef.invokeMethodAsync('OnMapNoteClicked', note.id);
+            },
+            setPhoto: function (photo) { if (typeof photo.latitude === 'number') openPhotoPanel(photo); }
         };
 
         const reportRegion = function (region) {
+            // The view, as the globe's camera gives it, for SHARE and the hover card: the middle,
+            // and the height the Mac map's flyTo would show this span from (span = height / 55,000).
+            if (nativeEntry) {
+                const north = region[0], south = region[1], east = region[2], west = region[3];
+                let lon = (east + west) / 2;
+                if (east < west) { lon += 180; if (lon > 180) lon -= 360; }
+                nativeEntry.currentView = { lat: (north + south) / 2, lon: lon, height: Math.max(0, north - south) * 55000 };
+            }
             if (nativeDotNetRef) nativeDotNetRef.invokeMethodAsync('OnGlobeViewChanged', region[0], region[1], region[2], region[3]).catch(function () { });
         };
 
@@ -5484,7 +5606,7 @@ window.tacticalGlobe = (function () {
             setRoadWeather: 'ROAD WEATHER', setMessageSigns: 'SIGN', setTrafficIncidents: 'INCIDENT',
             setConvergence: 'SIGNALS', setSatellites: 'SATELLITE', setHazards: 'HAZARD', setInternetOutages: 'INTERNET',
             setAirportStatus: 'AIRPORT', setChokepoints: 'CHOKEPOINT', setWeatherWarnings: 'WARNINGS', setTravelAdvice: 'TRAVEL', setFireHotspots: 'FIRE', setConflict: 'CONFLICT',
-            setHumanitarian: 'HUMANITARIAN', setMapNotes: 'NOTE'
+            setHumanitarian: 'HUMANITARIAN', setMapNotes: 'NOTE', setPhoto: 'PHOTO'
         };
         const openNativeChoices = function (group) {
             const items = (group && group.items) || [];
@@ -5527,6 +5649,20 @@ window.tacticalGlobe = (function () {
 
         window.gwsNativeOverwatch = {
             selectedMany: function (group) { openNativeChoices(group); },
+            located: function (answer) {
+                const done = answer && nativeLocates.get(answer.id);
+                if (!done) return;
+                nativeLocates.delete(answer.id);
+                done(Number.isFinite(answer.lat) && Number.isFinite(answer.lon) ? answer : null);
+            },
+            // A click that hit no pin: a city-traffic line under it opens, as on the globe.
+            missed: function (place) {
+                if (!place || !nativeEntry) return;
+                const hit = nearestTrafficLine(nativeEntry.roadTrafficData, place.lat, place.lon, place.metresPerPoint);
+                if (!hit) return;
+                if (hit.speed) openSpeedPanel(hit.speed);
+                else openRoadPanel(nativeEntry, hit.road, [place.lat, place.lon]);
+            },
             regionChanged: function (north, south, east, west) {
                 const region = [north, south, east, west];
                 if (nativePointer && nativeMoved) { nativeDeferredRegion = region; return; }
@@ -5561,7 +5697,8 @@ window.tacticalGlobe = (function () {
             'clearConvergence', 'setAirportStatus', 'clearAirportStatus', 'setChokepoints', 'clearChokepoints', 'setWeatherWarnings', 'clearWeatherWarnings', 'setAurora', 'clearAurora',
             'setSatellites', 'clearSatellites', 'setTravelAdvice', 'clearTravelAdvice',
             'setFireHotspots', 'clearFireHotspots', 'setConflict', 'clearConflict',
-            'setHumanitarian', 'clearHumanitarian', 'setWeatherSnapshot', 'focusLayer'
+            'setHumanitarian', 'clearHumanitarian', 'setWeatherSnapshot', 'focusLayer', 'splitSatelliteScene',
+            'setPhoto', 'clearPhoto'
         ]);
 
         // Ops that also draw page HTML (not the map) keep running on the page: the weather panel
@@ -5573,6 +5710,56 @@ window.tacticalGlobe = (function () {
                 ? function () { postNative(name, arguments); return original.apply(this, arguments); }
                 : function () { postNative(name, arguments); };
         });
+        // Alert highlights name cameras by id; the Mac map needs each one's place (20-11-26: they drew
+        // nothing there). The camera pins sent last give it.
+        const nativeCameraPlaces = new Map();
+        const forwardCameraPins = api.setCameraPins;
+        api.setCameraPins = function () {
+            const pins = Array.from(arguments).find(Array.isArray) || [];
+            nativeCameraPlaces.clear();
+            pins.forEach(function (pin) { if (pin && pin.id !== undefined) nativeCameraPlaces.set(String(pin.id), pin); });
+            return forwardCameraPins.apply(this, arguments);
+        };
+        api.setCameraAlertHighlights = function () {
+            const args = Array.from(arguments);
+            const index = args.findIndex(Array.isArray);
+            if (index >= 0) {
+                args[index] = args[index].map(function (highlight) {
+                    const camera = highlight && nativeCameraPlaces.get(String(highlight.cameraId));
+                    return camera ? Object.assign({ id: 'alert:' + highlight.cameraId, title: camera.name, lat: camera.lat, lon: camera.lon }, highlight) : highlight;
+                });
+            }
+            postNative('setCameraAlertHighlights', args);
+        };
+
+        // City traffic is also kept here, so a click on a road or speed line can open its panel.
+        const forwardRoadTraffic = api.setRoadTraffic;
+        api.setRoadTraffic = function (containerId, roads, speeds, options) {
+            if (nativeEntry) {
+                nativeEntry.roadTrafficData = { roads: roads || [], speeds: speeds || [] };
+                nativeEntry.liveLookup = !!(options && options.liveLookup);
+            }
+            return forwardRoadTraffic.apply(this, arguments);
+        };
+
+        // Controls wired once per page call the page's current .NET reference, not the first one.
+        const nativeDotNetProxy = {
+            invokeMethodAsync: function () {
+                return nativeDotNetRef ? nativeDotNetRef.invokeMethodAsync.apply(nativeDotNetRef, arguments) : Promise.resolve(null);
+            }
+        };
+
+        // Where a point of the map is (20-11-26): asked of the native map, answered by located().
+        let nativeLocateId = 0;
+        const nativeLocates = new Map();
+        nativeLocatePoint = function (x, y) {
+            return new Promise(function (resolve) {
+                const id = ++nativeLocateId;
+                const timer = setTimeout(function () { nativeLocates.delete(id); resolve(null); }, 2000);
+                nativeLocates.set(id, function (place) { clearTimeout(timer); resolve(place); });
+                postNative('locatePoint', [id, x, y]);
+            });
+        };
 
         // The native map sits under the page at the container's rectangle. It was sent once, at
         // init (before 12-11-26), so when the container later moved or resized (sidebar, window,
@@ -5692,6 +5879,27 @@ window.tacticalGlobe = (function () {
                             schedule();
                         }, { passive: false });
                     }
+                    // Hover to identify (20-11-26), as on the globe: once zoomed in close, the address
+                    // or business under a resting pointer.
+                    const shell = container.closest('.tg-shell') || container;
+                    const card = createHoverCard(shell, nativeDotNetProxy);
+                    let hoverTimer = null;
+                    container.addEventListener('pointermove', function (event) {
+                        card.hide();
+                        if (hoverTimer) clearTimeout(hoverTimer);
+                        if (nativePointer || event.pointerType === 'touch') return;
+                        const view = nativeEntry && nativeEntry.currentView;
+                        if (!view || view.height > MIN_HOVER_HEIGHT_METERS) return;
+                        const bounds = container.getBoundingClientRect(), shellBounds = shell.getBoundingClientRect();
+                        if (bounds.width <= 0 || bounds.height <= 0) return;
+                        const fx = (event.clientX - bounds.left) / bounds.width, fy = (event.clientY - bounds.top) / bounds.height;
+                        const x = event.clientX - shellBounds.left, y = event.clientY - shellBounds.top;
+                        hoverTimer = setTimeout(function () {
+                            nativeLocatePoint(fx, fy).then(function (place) { if (place) card.identify(x, y, place.lat, place.lon); });
+                        }, HOVER_DEBOUNCE_MS);
+                    });
+                    container.addEventListener('pointerleave', function () { if (hoverTimer) clearTimeout(hoverTimer); });
+                    container.addEventListener('pointerdown', function () { if (hoverTimer) clearTimeout(hoverTimer); card.hide(); });
                     container.addEventListener('click', function (event) {
                         if (nativeMoved) { nativeMoved = false; return; }
                         const bounds = container.getBoundingClientRect();
@@ -5715,6 +5923,24 @@ window.tacticalGlobe = (function () {
             document.documentElement.style.setProperty('background-color', 'transparent', 'important');
             document.body.style.setProperty('background-color', 'transparent', 'important');
             const rect = container ? container.getBoundingClientRect() : { x: 0, y: 0, width: innerWidth, height: innerHeight };
+            // The page's own controls, wired once per page as the globe's init does (20-11-26: on
+            // the Apple map, search, the photo button, SHARE and the keyboard shortcuts did nothing).
+            ensureKeyboardShortcutsRegistered();
+            const searchInput = document.getElementById('tg-search-input');
+            if (searchInput && searchInput.dataset.tgNativeWired !== 'true') {
+                searchInput.dataset.tgNativeWired = 'true';
+                setUpLocationSearch(function (lat, lon) { postNative('flyTo', [nativeContainerId, lat, lon, 150000]); }, nativeDotNetProxy);
+            }
+            const photoButton = document.getElementById('tg-photo-button');
+            if (photoButton && photoButton.dataset.tgNativeWired !== 'true') {
+                photoButton.dataset.tgNativeWired = 'true';
+                setUpPhotoPlacement(nativeContainerId);
+            }
+            const shareButton = document.getElementById('tg-share-button');
+            if (shareButton && shareButton.dataset.tgNativeWired !== 'true') {
+                shareButton.dataset.tgNativeWired = 'true';
+                setUpShareLink(nativeContainerId);
+            }
             await waitForNativeHandler();
             postNative('init', [rect.x, rect.y, rect.width, rect.height, window.innerWidth, window.innerHeight]);
             nativeLayoutKey = '';

@@ -141,3 +141,17 @@ and zoom lag. Causes found and fixed:
     with one /admin/logs line. The globe returns by itself once Apple fixes WebKit.
   - Truly one globe on the Mac today would need the Overwatch page in an AppKit WKWebView (an AppKit
     helper/bundle), not the Catalyst one. Not built; Grant's call.
+- [x] 20-11-26 Same functionality on the Mac's Apple map (Grant: work properly, same functions, every
+  layer visible on Mac and web/PWA). Audit: every page call vs the native branch.
+  - Were dead on the Mac (the globe's init wires them, the native init didn't): search, photo button
+    and photo drop, SHARE, keyboard shortcuts. Now wired once per page in the native init.
+  - Were missing: hover-to-identify (createHoverCard shared; the Mac asks the map `locatePoint`),
+    street-view drop (`locatePoint`), city-traffic line clicks (bridge sends `missed`, the page finds
+    the nearest road/speed line), satellite before/after split (SplitTileRenderer clips each scene).
+  - Drew nothing on the Mac: map notes ([lat, lon] points, one-point pins), the driving route (bare
+    path), the street-view marker (loose lat/lon), camera alert highlights (no place; the page adds
+    the camera's). Note clicks sent the whole note instead of its id. All fixed (NativeShapes.Payload).
+  - Proof: TestData/overwatch-layer-samples.json (31 layers, page shapes) drives both
+    `EveryLayer_ShouldDrawOnTheWebGlobe` (browser) and `EveryLayer_ShouldDrawOnTheMacMap` (NativeShapes,
+    the code the bridge draws from); `MacApp_ShouldRunSearchShareHoverTrafficAndHighlights_OnTheAppleMap`.
+  - Not checked on screen in the installed Mac app (needs Grant: `open gws`, Overwatch).

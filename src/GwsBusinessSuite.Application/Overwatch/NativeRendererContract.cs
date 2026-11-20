@@ -138,6 +138,11 @@ public static class NativeOverwatchOperations
     public const string SetRouteConditions = "setRouteConditions";
     public const string SetStreetViewMarker = "setStreetViewMarker";
     public const string ClearStreetViewMarker = "clearStreetViewMarker";
+    // A placed photo's pin and facing line (20-11-26: the photo button works on the Mac's map too).
+    public const string SetPhoto = "setPhoto";
+    public const string ClearPhoto = "clearPhoto";
+    // The before/after satellite split (0 = all after, 1 = all before).
+    public const string SplitSatelliteScene = "splitSatelliteScene";
 
     public static IReadOnlyList<string> All { get; } =
     [
@@ -151,7 +156,8 @@ public static class NativeOverwatchOperations
         SetSatellites, ClearSatellites, SetTravelAdvice, ClearTravelAdvice, SetFireHotspots,
         ClearFireHotspots, SetConflict, ClearConflict, SetHumanitarian, ClearHumanitarian,
         SetHazards, ClearHazards, SetShips, SetCoverageMarkers, ClearCoverageMarkers, SetRoute,
-        ClearRoute, SetRouteHighlights, SetRouteConditions, SetStreetViewMarker, ClearStreetViewMarker, FocusLayer
+        ClearRoute, SetRouteHighlights, SetRouteConditions, SetStreetViewMarker, ClearStreetViewMarker, FocusLayer,
+        SetPhoto, ClearPhoto, SplitSatelliteScene
     ];
 
     /// <summary>
@@ -164,6 +170,6 @@ public static class NativeOverwatchOperations
     {
         SetCameraPins, SetWorldNews, SetNewsShading, SetAircraft, SetRoadWeather, SetMessageSigns,
         SetTrafficIncidents, SetConvergence, SetSatellites, SetHazards, SetInternetOutages,
-        SetAirportStatus, SetChokepoints, SetWeatherWarnings, SetTravelAdvice, SetFireHotspots, SetConflict, SetHumanitarian, SetMapNotes
+        SetAirportStatus, SetChokepoints, SetWeatherWarnings, SetTravelAdvice, SetFireHotspots, SetConflict, SetHumanitarian, SetMapNotes, SetPhoto
     };
 }

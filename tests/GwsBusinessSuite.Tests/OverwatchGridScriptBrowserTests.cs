@@ -268,6 +268,139 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
         await page.CloseAsync();
     }
 
+    // 20-11-26 (Grant: every layer visible on the Mac app and the web/PWA app): each layer's sample,
+    // as the page sends it, draws something on the web globe. The Mac map's check uses the same
+    // samples (NativeShapesTests.EveryLayer_ShouldDrawOnTheMacMap).
+    [Fact]
+    public async Task EveryLayer_ShouldDrawOnTheWebGlobe()
+    {
+        var (page, _) = await OpenHarnessAsync(fixture.Browser);
+        await page.RouteAsync("http://localhost/admin/api/world-news/countries.geojson", route => route.FulfillAsync(new()
+        {
+            Status = 200,
+            ContentType = "application/json",
+            Body = """{"type":"FeatureCollection","features":[{"type":"Feature","properties":{"ISO_A2":"US","iso_a2":"US","code":"US","name":"United States"},"geometry":{"type":"Polygon","coordinates":[[[-120,30],[-80,30],[-80,45],[-120,45],[-120,30]]]}}]}"""
+        }));
+        (await InitAsync(page)).Should().BeNull();
+        await page.EvaluateAsync("""
+            () => {
+              window.__drawn = 0;
+              const count = function (C, name) {
+                if (!C || !C.prototype[name]) return;
+                const original = C.prototype[name];
+                C.prototype[name] = function () { window.__drawn++; return original.apply(this, arguments); };
+              };
+              count(Cesium.EntityCollection, 'add');
+              count(Cesium.PrimitiveCollection, 'add');
+              count(Cesium.BillboardCollection, 'add');
+              count(Cesium.LabelCollection, 'add');
+              count(Cesium.PointPrimitiveCollection, 'add');
+              count(Cesium.PolylineCollection, 'add');
+              count(Cesium.ImageryLayerCollection, 'add');
+              count(Cesium.ImageryLayerCollection, 'addImageryProvider');
+            }
+            """);
+
+        var missing = new List<string>();
+        foreach (var sample in OverwatchLayerSample.All)
+        {
+            if (sample.NeedsCameras)
+                await page.EvaluateAsync("json => window.tacticalGlobe.setCameraPins(...JSON.parse(json))", OverwatchLayerSample.Named("Cameras").Args.GetRawText());
+            await page.EvaluateAsync("() => { window.__drawn = 0; }");
+            await page.EvaluateAsync($"json => Promise.resolve(window.tacticalGlobe.{sample.Op}(...JSON.parse(json)))", sample.Args.GetRawText());
+            var drawn = await page.EvaluateAsync<bool>("""
+                async () => {
+                  for (let i = 0; i < 30 && window.__drawn === 0; i++) await new Promise(r => setTimeout(r, 100));
+                  return window.__drawn > 0;
+                }
+                """);
+            // A highlight restyles the camera's existing pin rather than adding a shape.
+            if (!drawn && sample.NeedsCameras)
+                drawn = await page.EvaluateAsync<bool>("() => window.tacticalGlobe.getCameraAlertSeverity('tg-viewport', 'a') === 'Severe'");
+            if (!drawn) missing.Add($"{sample.Layer} ({sample.Op})");
+        }
+
+        missing.Should().BeEmpty("every layer draws on the web globe");
+        await page.CloseAsync();
+    }
+
+    // 20-11-26: on the Mac's Apple map the page's own controls work as on the globe: search flies the
+    // map, SHARE builds a link from the map's view, the photo button pins the photo, hover asks the
+    // map where the pointer is, a click beside a city-traffic line opens it, alert highlights carry
+    // their camera's place, the satellite split reaches the map, and the keyboard shortcuts work.
+    [Fact]
+    public async Task MacApp_ShouldRunSearchShareHoverTrafficAndHighlights_OnTheAppleMap()
+    {
+        var (page, _) = await OpenHarnessAsync(fixture.Browser, macApp: true, nativeMap: true);
+        await page.EvaluateAsync("""
+            () => {
+              const shell = document.querySelector('.tg-shell');
+              shell.insertAdjacentHTML('afterbegin',
+                '<input id="tg-search-input" /><button id="tg-search-button">GO</button><span id="tg-search-status"></span>' +
+                '<button id="tg-share-button">SHARE</button><button data-tg-toggle="radar" id="radar-toggle">RADAR</button>');
+              document.getElementById('radar-toggle').addEventListener('click', () => { window.__radarToggled = true; });
+              window.__mockGeocodeResult = { latitude: 33.75, longitude: -84.39 };
+            }
+            """);
+        await InitAsync(page);
+        await page.EvaluateAsync("() => { window.__nativeMessages.length = 0; }");
+
+        // Search flies the Apple map.
+        await page.FillAsync("#tg-search-input", "Atlanta");
+        await page.PressAsync("#tg-search-input", "Enter");
+        await page.WaitForFunctionAsync("() => window.__nativeMessages.some(m => m.operation === 'flyTo' && m.arguments[1] === 33.75 && m.arguments[2] === -84.39)");
+
+        // SHARE uses the view the map last reported.
+        await page.EvaluateAsync("() => window.gwsNativeOverwatch.regionChanged(34, 33, -84, -85)");
+        await page.EvaluateAsync("() => document.getElementById('tg-share-button').click()");
+        await page.WaitForFunctionAsync("() => window.__invokedMethods.some(c => c.methodName === 'BuildShareLinkAsync')");
+        var share = await page.EvaluateAsync<double[]>("() => window.__invokedMethods.find(c => c.methodName === 'BuildShareLinkAsync').args.slice(0, 3)");
+        share[0].Should().Be(33.5);
+        share[1].Should().Be(-84.5);
+        share[2].Should().Be(55000);
+
+        // A photo is pinned on the map, with its facing line, and the map flies to it.
+        var message = await page.EvaluateAsync<string>("() => window.tacticalGlobe.placePhoto('tg-viewport', { latitude: 33.7, longitude: -84.4, heading: 90 }, 'IMG_1.jpg')");
+        message.Should().StartWith("PHOTO PLACED");
+        (await page.EvaluateAsync<int>("() => window.__nativeMessages.find(m => m.operation === 'setPhoto').arguments[1].length")).Should().Be(2);
+
+        // Hover: zoomed in (the region above is about 55 km tall, so zoom in first), a resting
+        // pointer asks the map where it is, and the answer brings the place card.
+        await page.EvaluateAsync("() => window.gwsNativeOverwatch.regionChanged(33.76, 33.74, -84.38, -84.40)");
+        await page.Mouse.MoveAsync(400, 300);
+        await page.Mouse.MoveAsync(402, 301);
+        await page.WaitForFunctionAsync("() => window.__nativeMessages.some(m => m.operation === 'locatePoint')");
+        await page.EvaluateAsync("""
+            () => {
+              const ask = window.__nativeMessages.filter(m => m.operation === 'locatePoint').pop();
+              window.__mockPlaceInfo = { displayName: 'Five Points', address: 'Atlanta', category: 'square' };
+              window.gwsNativeOverwatch.located({ id: ask.arguments[0], lat: 33.75, lon: -84.39, metresPerPoint: 3 });
+            }
+            """);
+        await page.WaitForFunctionAsync("() => { const t = document.querySelector('.tg-hover-tooltip'); return t && t.style.display === 'block' && t.textContent.includes('Five Points'); }");
+
+        // A click beside a live-speed line opens it.
+        await page.EvaluateAsync("json => window.tacticalGlobe.setRoadTraffic(...JSON.parse(json))", OverwatchLayerSample.Named("City traffic").Args.GetRawText());
+        await page.EvaluateAsync("() => window.gwsNativeOverwatch.missed({ lat: 33.7051, lon: -84.4049, metresPerPoint: 5 })");
+        await page.WaitForFunctionAsync("() => document.body.textContent.includes('Downtown Connector')");
+        await page.EvaluateAsync("() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))");
+
+        // Alert highlights carry their camera's place for the Apple map.
+        await page.EvaluateAsync("json => window.tacticalGlobe.setCameraPins(...JSON.parse(json))", OverwatchLayerSample.Named("Cameras").Args.GetRawText());
+        await page.EvaluateAsync("() => window.tacticalGlobe.setCameraAlertHighlights([{ cameraId: 'a', severity: 'Severe' }])");
+        (await page.EvaluateAsync<double>("() => window.__nativeMessages.filter(m => m.operation === 'setCameraAlertHighlights').pop().arguments[0][0].lat")).Should().Be(47.6);
+
+        // The satellite split reaches the map.
+        await page.EvaluateAsync("() => window.tacticalGlobe.splitSatelliteScene('tg-viewport', 0.3)");
+        (await page.EvaluateAsync<bool>("() => window.__nativeMessages.some(m => m.operation === 'splitSatelliteScene' && m.arguments[1] === 0.3)")).Should().BeTrue();
+
+        // Keyboard shortcuts.
+        await page.EvaluateAsync("() => document.activeElement && document.activeElement.blur()");
+        await page.Keyboard.PressAsync("r");
+        (await page.EvaluateAsync<bool>("() => window.__radarToggled === true")).Should().BeTrue();
+        await page.CloseAsync();
+    }
+
     internal static async Task<string?> InitAsync(IPage page) => await page.EvaluateAsync<string?>("""
         async () => {
           window.__invokedMethods = [];
