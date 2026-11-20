@@ -435,9 +435,15 @@ window.tacticalGlobe = (function () {
     // this file); a day later the globe is tried again, so an OS update that fixes WebKit is used.
     const NATIVE_MAP_KEY = 'gws-overwatch-native-map';
     const NATIVE_MAP_RETRY_MS = 24 * 60 * 60 * 1000;
+    // 20-11-26: on Grant's Mac the globe drew a black screen with no error, so the Mac uses the Apple
+    // map again by default. The shared globe is opt-in there (localStorage 'gws-overwatch-try-globe'
+    // = '1') until WebKit's own errors show why it draws nothing; a failure while trying it still
+    // falls back for a day.
+    const TRY_GLOBE_KEY = 'gws-overwatch-try-globe';
     function macUsesNativeMap() {
         if (window.__gwsForceNativeMap === true) return true;
         try {
+            if (window.localStorage.getItem(TRY_GLOBE_KEY) !== '1') return true;
             const at = Number(window.localStorage.getItem(NATIVE_MAP_KEY));
             return at > 0 && Date.now() - at < NATIVE_MAP_RETRY_MS;
         } catch {

@@ -171,7 +171,7 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
         {
             // What the Mac app injects (MacWebViewCompatibility), plus a stand-in for its native
             // message handler that records each message instead of drawing MapKit.
-            await page.AddInitScriptAsync((nativeMap ? "window.__gwsForceNativeMap = true;" : string.Empty) + """
+            await page.AddInitScriptAsync((nativeMap ? "window.__gwsForceNativeMap = true;" : "window.localStorage.setItem('gws-overwatch-try-globe', '1');") + """
                 window.__gwsMacCatalystWebView = true;
                 window.__nativeMessages = [];
                 window.webkit = { messageHandlers: { gwsNativeOverwatch: {
@@ -236,8 +236,8 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
     private static readonly Lazy<string> HoloLand = new(() => File.ReadAllText(Path.Combine(
         Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../..")), "src/GwsBusinessSuite.Web/wwwroot/data/overwatch-land.json")));
 
-    // 20-11-26 (Grant: Mac Overwatch identical in everything): the Mac app runs the same Cesium globe,
-    // not the Apple map, until the globe fails there; a failure is remembered for a day.
+    // 20-11-26 (Grant: Mac Overwatch identical in everything): with the globe switched on for the Mac
+    // (opt-in since it drew black there), the Mac app runs the same Cesium globe, not the Apple map.
     [Fact]
     public async Task MacApp_ShouldRunTheSameGlobe_AndFallBackToTheAppleMapOnlyAfterAFailure()
     {
