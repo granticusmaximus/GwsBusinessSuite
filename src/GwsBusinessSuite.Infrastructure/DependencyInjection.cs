@@ -1035,7 +1035,10 @@ public static class DependencyInjection
         {
             client.Timeout = TimeSpan.FromSeconds(30);
             client.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (compatible; GwsBusinessSuite-WorldNews/1.0; +https://www.gwsapp.net)");
-        });
+        })
+            // Feeds sent compressed (UN News, 20-11-26) were read as gzip bytes ("0x1F is an invalid
+            // character"); the handler now decompresses them.
+            .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AutomaticDecompression = System.Net.DecompressionMethods.All });
         // Wikipedia's most-read list beside a story (07-11-26), key-less; Wikimedia asks for a UA that
         // says who's asking.
         services.AddHttpClient<WikipediaMostReadService>(client =>
@@ -1523,12 +1526,11 @@ public static class DependencyInjection
         services.AddHostedService<GovernmentIntelligenceRefreshBackgroundService>();
         services.AddHttpClient(nameof(EventbriteEventsSource), client =>
         {
-            // Eventbrite serves a challenge page to clients with no recognisable User-Agent, so
-            // this identifies as a normal desktop browser; the pages it reads are the public,
-            // unauthenticated browse pages whose schema.org markup exists to be machine-read.
+            // An honest User-Agent (20-11-26): it used to pose as a desktop browser to get past
+            // Eventbrite's challenge page, which the house rules forbid. Eventbrite now refuses the
+            // server (405), and RefusedHostPauseHandler leaves it alone for a day each time.
             client.Timeout = TimeSpan.FromSeconds(30);
-            client.DefaultRequestHeaders.UserAgent.ParseAdd(
-                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36");
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (compatible; GWSuite/1.0; +https://grantwatson.dev)");
         }).AddHttpMessageHandler<RefusedHostPauseHandler>();
         services.AddSingleton<IEventbriteEventsSource, EventbriteEventsSource>();
         services.AddSingleton<ILocalEventsScraperService, LocalEventsScraperService>();

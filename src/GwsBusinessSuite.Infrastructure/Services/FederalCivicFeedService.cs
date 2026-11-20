@@ -128,8 +128,26 @@ public sealed class FederalCivicFeedService(
         await Task.WhenAll(newsTask, floorTask, hearingsTask);
     }
 
+    // A 429 from congress.gov (the shared DEMO_KEY's limit) pauses every refresh for an hour and is
+    // said once, not warned on each refresh (20-11-26: three warnings a refresh, all day).
+    private static DateTimeOffset _rateLimitedUntil = DateTimeOffset.MinValue;
+    private static bool RateLimited => DateTimeOffset.UtcNow < _rateLimitedUntil;
+
+    private void RefreshFailed(Exception ex, string what)
+    {
+        if (ex is HttpRequestException { StatusCode: System.Net.HttpStatusCode.TooManyRequests })
+        {
+            if (!RateLimited)
+                logger.LogInformation("Federal Civic Feed: congress.gov's rate limit was reached during the {What} refresh; pausing for an hour. Set CongressApi__ApiKey to lift it", what);
+            _rateLimitedUntil = DateTimeOffset.UtcNow.AddHours(1);
+            return;
+        }
+        logger.LogWarning(ex, "Federal Civic Feed: {What} refresh failed", what);
+    }
+
     private async Task RefreshNewsAsync(CancellationToken ct)
     {
+        if (RateLimited) return;
         try
         {
             var url = $"https://api.congress.gov/v3/bill?api_key={Uri.EscapeDataString(settings.ApiKey)}&sort=updateDate+desc&limit=40&format=json";
@@ -152,7 +170,7 @@ public sealed class FederalCivicFeedService(
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "Federal Civic Feed: news refresh failed");
+            RefreshFailed(ex, "news");
         }
     }
 
@@ -189,6 +207,7 @@ public sealed class FederalCivicFeedService(
     // link to the authoritative PDF, not fabricated transcript text.
     private async Task RefreshFloorStatusAsync(CancellationToken ct)
     {
+        if (RateLimited) return;
         try
         {
             var url = $"https://api.congress.gov/v3/congressional-record?api_key={Uri.EscapeDataString(settings.ApiKey)}&limit=5&format=json";
@@ -237,7 +256,7 @@ public sealed class FederalCivicFeedService(
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "Federal Civic Feed: floor status refresh failed");
+            RefreshFailed(ex, "floor status");
         }
     }
 
@@ -284,6 +303,7 @@ public sealed class FederalCivicFeedService(
     // blank out everything else that succeeded.
     private async Task RefreshHearingsAsync(CancellationToken ct)
     {
+        if (RateLimited) return;
         try
         {
             var senateTask = FetchChamberHearingsAsync("senate", ct);
@@ -300,7 +320,7 @@ public sealed class FederalCivicFeedService(
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "Federal Civic Feed: hearings refresh failed");
+            RefreshFailed(ex, "hearings");
         }
     }
 

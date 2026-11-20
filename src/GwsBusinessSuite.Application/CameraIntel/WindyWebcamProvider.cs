@@ -102,7 +102,7 @@ public sealed class WindyWebcamProvider(
             // Makes a "why are so few Windy cameras showing up" report diagnosable from the logs.
             if (skipped > 0)
             {
-                logger.LogWarning(
+                logger.LogDebug(
                     "Windy webcams: {Skipped} of {Total} entries were skipped (inactive, or missing id/location/image) - sample raw entry: {SampleEntry}",
                     skipped, webcams.Count, Truncate(webcams.Count > 0 ? webcams[0]?.ToJsonString() : null));
             }

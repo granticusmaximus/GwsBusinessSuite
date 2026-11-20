@@ -93,10 +93,10 @@ occurred.
 
 - [x] Reviewed existing `CameraFeed` and `WorldNewsContextService` contracts.
 - [x] Add Transport for NSW's CC BY public snapshot camera feed with focused parsing coverage.
-- [ ] Implement phases 1–2: provider policy, capability persistence, and compliant probing.
-- [ ] Implement phase 3: availability map/list UX.
-- [ ] Implement phase 4: World News visual context and capture policy.
-- [ ] Implement phase 5: tests, guides, release gate, and native/browser validation.
+- [x] Phases 1–2: done or decided 19-11-26 (see below: health kept across restarts, source terms page; submissions not built by Grant's choice).
+- [x] Phase 3: done 19-11-26 (pin shapes web and Mac, LIVE VIDEO ONLY, cameras in view).
+- [x] Phase 4: done 19-11-26 (visual context, still-image capture only).
+- [x] Phase 5: tests, guides and gates done 19-11-26; on-screen checks are Grant's.
 - [x] 19-11-26: World News visual context (phase 4 items 1-3, phase 3 item 3 in part).
   `CameraAvailability` (Application/CameraIntel) classifies each camera from its stream kind and
   the existing `CameraHealthService` checks: Live video / Still image; Available now / Not

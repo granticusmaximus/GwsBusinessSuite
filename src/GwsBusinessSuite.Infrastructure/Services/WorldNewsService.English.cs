@@ -71,7 +71,12 @@ public sealed partial class WorldNewsService
         catch (Exception ex) when (ex is HttpRequestException or JsonException or InvalidOperationException or SqliteException)
         {
             EnglishStatus = "English processing failed; reports remain pending and will retry automatically.";
-            _logger.LogWarning(ex, "World News English report processing failed; the backlog will retry");
+            // A dropped connection to the AI machine (the Mac going to sleep, a failover) is routine and
+            // retried; only other failures are warnings (20-11-26: 109 warnings a day, all retried).
+            if (ex is HttpRequestException { StatusCode: null })
+                _logger.LogInformation(ex, "World News English report processing paused: the AI machine dropped the connection; the backlog will retry");
+            else
+                _logger.LogWarning(ex, "World News English report processing failed; the backlog will retry");
             return false;
         }
         finally

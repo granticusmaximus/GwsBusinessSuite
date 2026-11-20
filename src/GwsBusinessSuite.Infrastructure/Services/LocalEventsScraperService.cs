@@ -107,7 +107,7 @@ public sealed class LocalEventsScraperService(
         try
         {
             await using var perryPage = await browser.NewPageAsync();
-            await perryPage.GotoAsync(PerryCalendarUrl, new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
+            await perryPage.GotoAsync(PerryCalendarUrl, new PageGotoOptions { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = 45000 });
             // FullCalendar finishes its client-side render a moment after the network
             // goes idle - a short settle delay avoids reading an incomplete DOM.
             await perryPage.WaitForTimeoutAsync(2000);
@@ -121,7 +121,7 @@ public sealed class LocalEventsScraperService(
         try
         {
             await using var chamberPage = await browser.NewPageAsync();
-            await chamberPage.GotoAsync(ChamberEventsUrl, new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
+            await chamberPage.GotoAsync(ChamberEventsUrl, new PageGotoOptions { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = 45000 });
             events.AddRange(await ExtractChamberEventsAsync(chamberPage));
         }
         catch (Exception ex)
