@@ -454,6 +454,43 @@ window.tacticalGlobe = (function () {
         return true;
     }
 
+    // WebKit in the Mac app can run Cesium without an error and still draw nothing (20-11-26: a black
+    // screen, nothing logged). Once the globe has had time to draw, a grid of its pixels is read in
+    // the frame just drawn; if none has any green or brightness (the holo globe always has its
+    // coastlines and grid), the failure is reported and the Mac falls back to the Apple map.
+    function watchForBlankGlobe(viewer) {
+        const scene = viewer.scene;
+        const started = Date.now();
+        let done = false;
+        const check = function () {
+            if (done || viewer.isDestroyed()) return;
+            const waited = Date.now() - started;
+            if ((!scene.globe.tilesLoaded || waited < 3000) && waited < 8000) { setTimeout(function () { if (!viewer.isDestroyed()) scene.requestRender(); }, 500); return; }
+            done = true;
+            scene.postRender.removeEventListener(check);
+            let lit = false;
+            try {
+                const gl = scene.context._gl;
+                const w = gl.drawingBufferWidth, h = gl.drawingBufferHeight, pixel = new Uint8Array(4);
+                for (let i = 1; i < 24 && !lit; i++) {
+                    for (let j = 1; j < 24 && !lit; j++) {
+                        gl.readPixels(Math.floor(w * i / 24), Math.floor(h * j / 24), 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel);
+                        if (pixel[1] > 40 || pixel[0] + pixel[1] + pixel[2] > 120) lit = true;
+                    }
+                }
+            } catch (err) {
+                lit = false;
+            }
+            if (lit) return;
+            reportNativeRendererFailure('The globe drew a blank (black) screen in the Mac app: no lit pixel after the tiles loaded.');
+            const container = viewer.container;
+            showGlobeFallback(container, 'WebGL drew a blank screen');
+        };
+        scene.postRender.addEventListener(check);
+        setTimeout(function () { if (!done && !viewer.isDestroyed()) scene.requestRender(); }, 1500);
+        setTimeout(function () { if (!done && !viewer.isDestroyed()) scene.requestRender(); }, 8500);
+    }
+
     function showGlobeFallback(container, reason) {
         if (!container || container.dataset.globeFallback === 'true') return;
         if (window.__gwsMacCatalystWebView === true && !macUsesNativeMap() && fallBackToNativeMap()) return;
@@ -708,6 +745,7 @@ window.tacticalGlobe = (function () {
             throw error;
         }
         const renderTimer = renderOnChange(viewer);
+        if (window.__gwsMacCatalystWebView === true) watchForBlankGlobe(viewer);
         viewer.scene.highDynamicRange = false;
         viewer.scene.logarithmicDepthBuffer = false;
         viewer.scene.fxaa = false;
