@@ -192,8 +192,8 @@ public sealed partial class ClientRadarService(
         var notes = (await db.ContactActivities.AsNoTracking().Where(a => a.ContactId == contactId).ToListAsync(ct))
             .OrderByDescending(a => a.CreatedAt).Take(8).ToList();
         var prompt = new StringBuilder($"Client: {contact.FullName}{(string.IsNullOrWhiteSpace(contact.Company) ? "" : $", {contact.Company}")}; status {contact.Status}.\n");
-        foreach (var d in deals) prompt.AppendLine($"Deal: {d.Title}, {d.Stage}, {d.ValueUsd:C0}");
-        foreach (var i in invoices) prompt.AppendLine($"Invoice: {i.Title}, {i.Status}, {i.LineItems.Sum(x => x.Quantity * x.UnitPriceUsd):C0}, due {i.DueDate?.ToGwsDate() ?? "-"}");
+        foreach (var d in deals) prompt.AppendLine($"Deal: {d.Title}, {d.Stage}, {GwsMoney.Usd(d.ValueUsd)}");
+        foreach (var i in invoices) prompt.AppendLine($"Invoice: {i.Title}, {i.Status}, {GwsMoney.Usd(i.LineItems.Sum(x => x.Quantity * x.UnitPriceUsd))}, due {i.DueDate?.ToGwsDate() ?? "-"}");
         foreach (var t in tickets) prompt.AppendLine($"Ticket: {t.Subject}, {t.Status}");
         foreach (var n in notes) prompt.AppendLine($"Note {n.CreatedAt.ToGwsDate()}: {Trim(n.Note, 200)}");
         foreach (var m in mentions.Take(10)) prompt.AppendLine($"{m.Kind}: {m.Title}");

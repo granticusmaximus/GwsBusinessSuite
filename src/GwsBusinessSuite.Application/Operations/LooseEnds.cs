@@ -38,7 +38,7 @@ public static class LooseEnds
         {
             var total = invoice.LineItems.Sum(item => item.Quantity * item.UnitPriceUsd);
             ends.Add(new(LooseEndKinds.Invoice, $"{invoice.Title} · {Name(invoice.ContactId)}",
-                $"{total:C0} due {invoice.DueDate!.Value.ToGwsDate()}, {(int)(now - invoice.DueDate!.Value).TotalDays} days ago" +
+                $"{GwsMoney.Usd(total)} due {invoice.DueDate!.Value.ToGwsDate()}, {(int)(now - invoice.DueDate!.Value).TotalDays} days ago" +
                 (invoice.RemindersSent > 0 ? $"; {invoice.RemindersSent} reminder(s) sent." : "; no reminder sent."),
                 invoice.DueDate.Value, "admin/billing"));
         }
@@ -58,7 +58,7 @@ public static class LooseEnds
             var touched = new[] { deal.UpdatedAt ?? deal.CreatedAt, lastActivity.GetValueOrDefault(deal.ContactId) }.Max();
             if (now - touched < QuietDealAfter) continue;
             ends.Add(new(LooseEndKinds.QuietDeal, $"{deal.Title} · {Name(deal.ContactId)}",
-                $"{deal.Stage}, {deal.ValueUsd:C0}; nothing logged for {(int)(now - touched).TotalDays} days.", touched, ContactLink(deal.ContactId)));
+                $"{deal.Stage}, {GwsMoney.Usd(deal.ValueUsd)}; nothing logged for {(int)(now - touched).TotalDays} days.", touched, ContactLink(deal.ContactId)));
         }
 
         return ends.OrderBy(e => LooseEndKindsOrder(e.Kind)).ThenBy(e => e.Since).ToList();

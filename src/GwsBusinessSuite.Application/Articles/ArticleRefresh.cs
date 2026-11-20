@@ -31,7 +31,7 @@ public static class ArticleRefresh
             if (before >= MinimumPriorViews && recent <= before * (1 - FallShare))
             {
                 var fall = 1 - (double)recent / before;
-                reason = $"Views fell {fall:P0}: {recent:N0} in the last 30 days against {before:N0} the 30 before.";
+                reason = $"Views fell {GwsBusinessSuite.Application.Abstractions.GwsMoney.Percent(fall)}: {recent:N0} in the last 30 days against {before:N0} the 30 before.";
                 rank = 1 + fall;
             }
             else if (now - touched >= StaleAfter)

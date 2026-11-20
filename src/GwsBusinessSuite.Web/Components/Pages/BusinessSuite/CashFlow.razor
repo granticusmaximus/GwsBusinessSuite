@@ -3,6 +3,7 @@
 @attribute [Authorize(Policy = "AdminOnly")]
 @using Microsoft.AspNetCore.Authorization
 @using GwsBusinessSuite.Application.Operations
+@using GwsBusinessSuite.Application.Abstractions
 @using GwsBusinessSuite.Infrastructure.Services
 @inject CashFlowService Service
 
@@ -49,8 +50,8 @@ else
 {
     var most = Math.Max(1m, _result.Weeks.Max(w => w.Total));
     <p class="text-muted small">
-        Expected in 13 weeks: <strong>@((_result.FromInvoices + _result.FromDeals).ToString("C0"))</strong>
-        (@_result.FromInvoices.ToString("C0") from sent invoices, @_result.FromDeals.ToString("C0") from open deals by stage).
+        Expected in 13 weeks: <strong>@(GwsMoney.Usd(_result.FromInvoices + _result.FromDeals))</strong>
+        (@GwsMoney.Usd(_result.FromInvoices) from sent invoices, @GwsMoney.Usd(_result.FromDeals) from open deals by stage).
         @if (_result.OverdueInvoices > 0) { <span>@_result.OverdueInvoices invoice@(_result.OverdueInvoices == 1 ? " is" : "s are") already overdue and counted from this week. </span> }
         Money going out isn't shown: the app holds no expense or recurring-cost records.
     </p>
@@ -61,9 +62,9 @@ else
                 <li class="list-group-item" @key="week.Start">
                     <div class="d-flex justify-content-between gap-2">
                         <span class="cf-week">Week of @week.Start.ToGwsDate()</span>
-                        <strong>@week.Total.ToString("C0")</strong>
+                        <strong>@GwsMoney.Usd(week.Total)</strong>
                     </div>
-                    <div class="cf-bar" role="img" aria-label="@($"{week.FromInvoices:C0} from invoices, {week.FromDeals:C0} from deals")">
+                    <div class="cf-bar" role="img" aria-label="@($"{GwsMoney.Usd(week.FromInvoices)} from invoices, {GwsMoney.Usd(week.FromDeals)} from deals")">
                         <span class="cf-bar-invoices" style="width: @Percent(week.FromInvoices, most)%"></span><span class="cf-bar-deals" style="width: @Percent(week.FromDeals, most)%"></span>
                     </div>
                     @if (week.Total == 0 && week.Start > DateTimeOffset.UtcNow.AddDays(-7))
@@ -72,7 +73,7 @@ else
                     }
                     @foreach (var item in week.Items)
                     {
-                        <div class="small text-muted">@item.Label · @item.Amount.ToString("C0") · @item.Basis</div>
+                        <div class="small text-muted">@item.Label · @GwsMoney.Usd(item.Amount) · @item.Basis</div>
                     }
                 </li>
             }

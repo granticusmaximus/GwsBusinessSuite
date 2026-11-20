@@ -77,6 +77,9 @@ all need to know belongs here.
 ## Conventions and known traps
 
 UI:
+- **Money and percentages:** use `GwsMoney.Usd`/`GwsMoney.Percent`, never `"C0"`/`"P0"`. CI and the
+  container run with the invariant culture, where those print `¤1,200` and `88 %`; a Mac's culture
+  hides it, so three deploys failed on it (19-11-26).
 - **Dates:** every date shown is `dd-MM-yy`, and every time is 24-hour `HH:mm` (`05-11-26 14:05`).
   This covers the public site, emails and the Mac app. Machine formats (ISO, `datetime-local`
   values) stay as they are.

@@ -69,7 +69,7 @@ public static class CashFlowForecast
             if (expected < now) expected = now;
             var share = StageShare(deal.Stage);
             items.Add((new CashFlowItem($"{deal.Title} · {Name(deal.ContactId)}", deal.ContactId, expected, deal.ValueUsd * share,
-                $"{deal.Stage} deal of {deal.ValueUsd:C0} counted at {share:P0}, closing {deal.ExpectedCloseDate!.Value.ToGwsDate()}"), false));
+                $"{deal.Stage} deal of {GwsMoney.Usd(deal.ValueUsd)} counted at {GwsMoney.Percent(share)}, closing {deal.ExpectedCloseDate!.Value.ToGwsDate()}"), false));
         }
 
         var weeks = Enumerable.Range(0, HorizonDays / 7).Select(w =>
