@@ -184,6 +184,8 @@ public static class DependencyInjection
                 client.Timeout = TimeSpan.FromHours(2);
             }).ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { ConnectTimeout = TimeSpan.FromSeconds(5) });
             services.AddSingleton<OllamaFailoverMonitor>();
+            // The AI health page's record of recent jobs (which machine, how long, how it ended).
+            services.AddSingleton<OllamaJobLog>();
             services.AddHostedService(sp => sp.GetRequiredService<OllamaFailoverMonitor>());
             services.AddTransient<IOllamaService>(sp =>
             {
@@ -197,7 +199,7 @@ public static class DependencyInjection
                     // promptly so several local models do not crowd a dense MapKit session.
                     new OllamaService(clients.CreateClient(OllamaFailoverMonitor.PrimaryClient), monitor.PrimaryLane, tracker, logger, options, "5m"),
                     new OllamaService(clients.CreateClient(OllamaFailoverMonitor.SecondaryClient), monitor.SecondaryLane, tracker, logger, options),
-                    monitor, sp.GetRequiredService<ILogger<FailoverOllamaService>>());
+                    monitor, sp.GetRequiredService<ILogger<FailoverOllamaService>>(), sp.GetRequiredService<OllamaJobLog>());
             });
             services.AddHostedService<OllamaModelWarmupBackgroundService>();
             // Lazy model loading on the connection that will answer (SentinelModelLoader).

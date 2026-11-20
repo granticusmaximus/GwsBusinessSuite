@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net.Http.Json;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
@@ -274,28 +275,29 @@ public sealed class FailoverOllamaService(
     IOllamaService primary,
     IOllamaService secondary,
     OllamaFailoverMonitor monitor,
-    ILogger<FailoverOllamaService> logger) : IOllamaService
+    ILogger<FailoverOllamaService> logger,
+    OllamaJobLog? jobs = null) : IOllamaService
 {
     public const string MidAnswerMessage =
         "SentinelGPT's Mac stopped answering part-way through that answer. Ask again: the backup answers now.";
 
     public Task<string> GenerateAsync(string model, string systemPrompt, string userPrompt, CancellationToken ct = default) =>
-        MacFirstAsync((ollama, token) => ollama.GenerateAsync(model, systemPrompt, userPrompt, token), ct);
+        MacFirstAsync("generate", model, (ollama, token) => ollama.GenerateAsync(model, systemPrompt, userPrompt, token), ct);
 
     public Task<string> GenerateAsync(string model, string systemPrompt, string userPrompt, int numCtx, CancellationToken ct = default) =>
-        MacFirstAsync((ollama, token) => ollama.GenerateAsync(model, systemPrompt, userPrompt, numCtx, token), ct);
+        MacFirstAsync("generate", model, (ollama, token) => ollama.GenerateAsync(model, systemPrompt, userPrompt, numCtx, token), ct);
 
     public Task WarmModelAsync(string model, CancellationToken ct = default) =>
-        MacFirstAsync(async (ollama, token) => { await ollama.WarmModelAsync(model, token); return true; }, ct);
+        MacFirstAsync("warm-up", model, async (ollama, token) => { await ollama.WarmModelAsync(model, token); return true; }, ct);
 
     public IAsyncEnumerable<string> GenerateStreamAsync(string model, string systemPrompt, string userPrompt, CancellationToken ct = default) =>
-        MacFirstStreamAsync((ollama, token) => ollama.GenerateStreamAsync(model, systemPrompt, userPrompt, token), ct);
+        MacFirstStreamAsync("stream", model, (ollama, token) => ollama.GenerateStreamAsync(model, systemPrompt, userPrompt, token), ct);
 
     public IAsyncEnumerable<string> GenerateStreamAsync(string model, string systemPrompt, string userPrompt, int maxOutputTokens, CancellationToken ct = default) =>
-        MacFirstStreamAsync((ollama, token) => ollama.GenerateStreamAsync(model, systemPrompt, userPrompt, maxOutputTokens, token), ct);
+        MacFirstStreamAsync("stream", model, (ollama, token) => ollama.GenerateStreamAsync(model, systemPrompt, userPrompt, maxOutputTokens, token), ct);
 
     public Task<IReadOnlyCollection<string>> ListModelsAsync(CancellationToken ct = default) =>
-        MacFirstAsync((ollama, token) => ollama.ListModelsAsync(token), ct);
+        MacFirstAsync("model list", "", (ollama, token) => ollama.ListModelsAsync(token), ct);
 
     public Task PullModelAsync(string model, CancellationToken ct = default) => secondary.PullModelAsync(model, ct);
 
@@ -303,46 +305,85 @@ public sealed class FailoverOllamaService(
 
     public async Task<IReadOnlyList<float[]>> EmbedAsync(string model, IReadOnlyList<string> inputs, CancellationToken ct = default)
     {
+        var started = Stopwatch.GetTimestamp();
         try
         {
-            return await secondary.EmbedAsync(model, inputs, ct);
+            var vectors = await secondary.EmbedAsync(model, inputs, ct);
+            jobs?.Record("embed", model, OllamaMachines.Droplet, Stopwatch.GetElapsedTime(started), OllamaJobOutcomes.Answered);
+            return vectors;
         }
         catch (Exception ex) when (!ct.IsCancellationRequested && monitor.PrimaryUp && monitor.SameModelOnBoth(model))
         {
+            jobs?.Record("embed", model, OllamaMachines.Droplet, Stopwatch.GetElapsedTime(started), OllamaJobOutcomes.Failed, ex);
             logger.LogDebug(ex, "Embedding on the Mac: the droplet didn't answer and both hold the same {Model}", model);
-            return await primary.EmbedAsync(model, inputs, ct);
+            return await TimedAsync("embed", model, OllamaMachines.Mac, () => primary.EmbedAsync(model, inputs, ct), ct);
+        }
+        catch (Exception ex)
+        {
+            jobs?.Record("embed", model, OllamaMachines.Droplet, Stopwatch.GetElapsedTime(started),
+                ct.IsCancellationRequested ? OllamaJobOutcomes.Cancelled : OllamaJobOutcomes.Failed, ex);
+            throw;
         }
     }
 
     public Task<string> GenerateImageAsync(string model, string prompt, CancellationToken ct = default) =>
-        MacFirstAsync((ollama, token) => ollama.GenerateImageAsync(model, prompt, token), ct);
+        MacFirstAsync("image", model, (ollama, token) => ollama.GenerateImageAsync(model, prompt, token), ct);
 
     public Task<OllamaChatResponse> ChatAsync(string model, IReadOnlyList<OllamaChatMessage> messages,
         IReadOnlyList<OllamaToolDefinition>? tools = null, CancellationToken ct = default) =>
-        MacFirstAsync((ollama, token) => ollama.ChatAsync(model, messages, tools, token), ct);
+        MacFirstAsync("chat", model, (ollama, token) => ollama.ChatAsync(model, messages, tools, token), ct);
 
     // The Mac does the work and the droplet is only the backup (Grant, 19-11-26). Every request
     // but embeddings starts on the Mac while it's up. From 15-11 small requests, SentinelGPT's first
     // chat round and Trend Research started on the droplet instead; a busy droplet doesn't fail, it
     // crawls (3 tokens/s) while the Mac sat idle. There's no way left to ask for the droplet first.
-    private async Task<T> MacFirstAsync<T>(Func<IOllamaService, CancellationToken, Task<T>> call, CancellationToken ct)
+    private async Task<T> MacFirstAsync<T>(string operation, string model, Func<IOllamaService, CancellationToken, Task<T>> call, CancellationToken ct)
     {
         if (monitor.PrimaryUp)
         {
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, monitor.PrimaryLostToken);
+            var started = Stopwatch.GetTimestamp();
             try
             {
-                return await call(primary, linked.Token);
+                var answer = await call(primary, linked.Token);
+                jobs?.Record(operation, model, OllamaMachines.Mac, Stopwatch.GetElapsedTime(started), OllamaJobOutcomes.Answered);
+                return answer;
             }
             catch (Exception ex) when (!ct.IsCancellationRequested && ex is not NotSupportedException)
             {
+                jobs?.Record(operation, model, OllamaMachines.Mac, Stopwatch.GetElapsedTime(started), OllamaJobOutcomes.HandedOver, ex);
                 Fallback(ex);
             }
+            catch (Exception ex)
+            {
+                jobs?.Record(operation, model, OllamaMachines.Mac, Stopwatch.GetElapsedTime(started),
+                    ct.IsCancellationRequested ? OllamaJobOutcomes.Cancelled : OllamaJobOutcomes.Failed, ex);
+                throw;
+            }
         }
-        return await call(secondary, ct);
+        return await TimedAsync(operation, model, OllamaMachines.Droplet, () => call(secondary, ct), ct);
     }
 
-    private async IAsyncEnumerable<string> MacFirstStreamAsync(Func<IOllamaService, CancellationToken, IAsyncEnumerable<string>> call,
+    // Runs one attempt on one machine and logs how it ended.
+    private async Task<T> TimedAsync<T>(string operation, string model, string machine, Func<Task<T>> attempt, CancellationToken ct)
+    {
+        var started = Stopwatch.GetTimestamp();
+        try
+        {
+            var answer = await attempt();
+            jobs?.Record(operation, model, machine, Stopwatch.GetElapsedTime(started), OllamaJobOutcomes.Answered);
+            return answer;
+        }
+        catch (Exception ex)
+        {
+            jobs?.Record(operation, model, machine, Stopwatch.GetElapsedTime(started),
+                ct.IsCancellationRequested ? OllamaJobOutcomes.Cancelled : OllamaJobOutcomes.Failed, ex);
+            throw;
+        }
+    }
+
+    private async IAsyncEnumerable<string> MacFirstStreamAsync(string operation, string model,
+        Func<IOllamaService, CancellationToken, IAsyncEnumerable<string>> call,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
         if (monitor.PrimaryUp)
@@ -351,6 +392,8 @@ public sealed class FailoverOllamaService(
             var stream = call(primary, linked.Token).GetAsyncEnumerator(linked.Token);
             var yielded = false;
             var fellBack = false;
+            var finished = false;
+            var started = Stopwatch.GetTimestamp();
             try
             {
                 while (true)
@@ -363,12 +406,14 @@ public sealed class FailoverOllamaService(
                     catch (Exception ex) when (!ct.IsCancellationRequested && ex is not NotSupportedException)
                     {
                         Fallback(ex);
+                        jobs?.Record(operation, model, OllamaMachines.Mac, Stopwatch.GetElapsedTime(started),
+                            yielded ? OllamaJobOutcomes.Failed : OllamaJobOutcomes.HandedOver, ex);
                         // Words already shown can't be taken back, so a half-finished answer says so.
                         if (yielded) throw new InvalidOperationException(MidAnswerMessage, ex);
                         fellBack = true;
                         break;
                     }
-                    if (!more) break;
+                    if (!more) { finished = true; break; }
                     yielded = true;
                     yield return stream.Current;
                 }
@@ -377,10 +422,24 @@ public sealed class FailoverOllamaService(
             {
                 try { await stream.DisposeAsync(); }
                 catch (Exception ex) when (ex is HttpRequestException or IOException or OperationCanceledException) { }
+                if (finished) jobs?.Record(operation, model, OllamaMachines.Mac, Stopwatch.GetElapsedTime(started), OllamaJobOutcomes.Answered);
+                else if (!fellBack && !yielded) jobs?.Record(operation, model, OllamaMachines.Mac, Stopwatch.GetElapsedTime(started),
+                    ct.IsCancellationRequested ? OllamaJobOutcomes.Cancelled : OllamaJobOutcomes.Failed);
             }
             if (!fellBack) yield break;
         }
-        await foreach (var piece in call(secondary, ct).WithCancellation(ct)) yield return piece;
+        var dropletStarted = Stopwatch.GetTimestamp();
+        var dropletFinished = false;
+        try
+        {
+            await foreach (var piece in call(secondary, ct).WithCancellation(ct)) yield return piece;
+            dropletFinished = true;
+        }
+        finally
+        {
+            jobs?.Record(operation, model, OllamaMachines.Droplet, Stopwatch.GetElapsedTime(dropletStarted),
+                dropletFinished ? OllamaJobOutcomes.Answered : ct.IsCancellationRequested ? OllamaJobOutcomes.Cancelled : OllamaJobOutcomes.Failed);
+        }
     }
 
     // Runs again on the droplet. A connection failure (or the monitor losing the Mac) marks the Mac

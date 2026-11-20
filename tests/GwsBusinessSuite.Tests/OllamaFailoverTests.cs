@@ -110,6 +110,43 @@ public sealed class OllamaFailoverTests
         down.Calls.Should().Be(1);
     }
 
+    // 19-11-26: the AI health page's job log says which machine answered and how each job ended.
+    [Fact]
+    public async Task JobLog_ShouldRecordTheMachine_AndAHandOver()
+    {
+        using var monitor = Monitor();
+        var log = new OllamaJobLog();
+        var service = new FailoverOllamaService(new Fake("mac"), new Fake("droplet"), monitor, NullLogger<FailoverOllamaService>.Instance, log);
+        await service.GenerateAsync("sentinelgpt", "s", "u");
+        await Collect(service.GenerateStreamAsync("sentinelgpt", "s", "u"));
+
+        using var monitor2 = Monitor();
+        var down = new FailoverOllamaService(new Fake("mac", new HttpRequestException("refused")), new Fake("droplet"), monitor2,
+            NullLogger<FailoverOllamaService>.Instance, log);
+        await down.ChatAsync("sentinelgpt", [new OllamaChatMessage("user", "hi")]);
+
+        log.Recent().Select(j => (j.Operation, j.Machine, j.Outcome)).Should().Equal(
+            ("chat", OllamaMachines.Droplet, OllamaJobOutcomes.Answered),
+            ("chat", OllamaMachines.Mac, OllamaJobOutcomes.HandedOver),
+            ("stream", OllamaMachines.Mac, OllamaJobOutcomes.Answered),
+            ("generate", OllamaMachines.Mac, OllamaJobOutcomes.Answered));
+        log.Recent().Single(j => j.Outcome == OllamaJobOutcomes.HandedOver).Error.Should().Contain("refused");
+        var summary = log.Summary(TimeSpan.FromDays(1));
+        summary.Single(m => m.Machine == OllamaMachines.Mac).Should().Match<OllamaMachineSummary>(m => m.Jobs == 3 && m.HandedOver == 1);
+        summary.Single(m => m.Machine == OllamaMachines.Droplet).Jobs.Should().Be(1);
+    }
+
+    [Fact]
+    public void AiHealthWarnings_ShouldFlagALongMacOutage_OrABurstOfFailures()
+    {
+        var now = At;
+        AiHealthWarnings.For(true, null, [], now).Should().BeNull();
+        AiHealthWarnings.For(false, now.AddMinutes(-5), [], now).Should().BeNull("a short blip isn't worth a warning");
+        AiHealthWarnings.For(false, now.AddMinutes(-20), [], now).Should().Contain("hasn't answered for 20 minutes");
+        var failures = Enumerable.Range(0, 5).Select(i => new OllamaJob(now.AddMinutes(-i), "chat", "m", OllamaMachines.Mac, 10, OllamaJobOutcomes.Failed, null)).ToList();
+        AiHealthWarnings.For(true, null, failures, now).Should().Contain("5 jobs failed");
+    }
+
     [Fact]
     public void NothingCanAskForTheDropletFirst()
     {

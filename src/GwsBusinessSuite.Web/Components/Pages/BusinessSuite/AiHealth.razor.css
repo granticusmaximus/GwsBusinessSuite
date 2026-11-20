@@ -1,0 +1,13 @@
+/* The two machines side by side; each state is said in words, the colour only repeats it. */
+.ai-machines {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+}
+
+.ai-state { font-weight: 600; }
+.ai-state.is-up { color: var(--gws-status-success-text); }
+.ai-state.is-down { color: var(--gws-status-danger-text); }
+
+.ai-jobs tr.is-failed td { color: var(--gws-status-danger-text); }

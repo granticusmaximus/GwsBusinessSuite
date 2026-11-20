@@ -41,3 +41,14 @@ Grant asked for features 6-10 of Claude's second list, split into two phases and
 - [x] Guides: Platform Operations, CRM, Site Building, Content Creation. verify-release run.
 - [ ] Grant: look at the four pages and a Publish with the review; the first restore drill runs
   with the next scheduled backup (check Loose ends after it).
+
+## Follow-on: AI health page (19-11-26)
+
+From the first idea list (item 3, Claude's pick). `OllamaJobLog` (last 500 jobs in memory: operation,
+model, machine, time, outcome, error; no prompts) is fed by `FailoverOllamaService` for every call,
+streams and embeddings included. `/admin/ai-health` shows machine state (`OllamaFailoverMonitor`),
+24-hour summary per machine, recent jobs, and `AiHealthWarnings` (Mac down 15 min; 5+
+failed/handed-over jobs in 10 min). Linked from Home > More. Tests in `OllamaFailoverTests`.
+- [x] Built and verified.
+- [ ] Not built from that list: client impact alerts, one page per person or company, offline field
+  kit, evidence pack.

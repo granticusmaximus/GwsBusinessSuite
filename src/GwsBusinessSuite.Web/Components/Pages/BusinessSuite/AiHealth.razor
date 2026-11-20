@@ -1,0 +1,126 @@
+@page "/admin/ai-health"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = "AdminOnly")]
+@implements IDisposable
+@using Microsoft.AspNetCore.Authorization
+@using GwsBusinessSuite.Infrastructure.Services
+@inject IServiceProvider Services
+
+@* AI health (19-11-26): SentinelGPT's two machines at a glance. Which is up, what each is doing,
+   how the last day went, and the latest jobs. The 19-11-26 "failed to read and generate" problem
+   took a log search to find; this shows it on one page. Jobs are kept in memory (the last 500). *@
+
+<PageTitle>AI health</PageTitle>
+
+<PageHeader Title="AI health" Icon="bi-cpu" Description="SentinelGPT's Mac and AI droplet: which is up, what each is doing, and how recent jobs went." />
+
+@if (_monitor is null || _jobs is null)
+{
+    <EmptyState Icon="bi-cpu" Title="One AI machine" Message="This server doesn't run the Mac-first setup (ServerAi:PrimaryOllamaUrl isn't set), so there's no failover to show." />
+}
+else
+{
+    @if (Warning() is { } warning)
+    {
+        <div class="alert alert-warning" role="alert"><i class="bi bi-exclamation-triangle me-1" aria-hidden="true"></i>@warning</div>
+    }
+    <div class="ai-machines">
+        @foreach (var (name, up, lane, since) in Machines())
+        {
+            <section class="card border-0 shadow-sm" aria-label="@name">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <strong>@name</strong>
+                        <span class="ai-state @(up ? "is-up" : "is-down")">@(up ? "Answering" : "Not answering")</span>
+                    </div>
+                    <div class="small text-muted mt-1">
+                        @(lane.Busy ? "Working on a job" : "Idle")@(lane.Waiting > 0 ? $" · {lane.Waiting} waiting" : "")
+                        @if (since is { } changed) { <span> · since @changed.ToLocalGwsDateTime()</span> }
+                    </div>
+                </div>
+            </section>
+        }
+    </div>
+
+    <section class="card border-0 shadow-sm mb-3" aria-label="The last 24 hours">
+        <div class="card-header"><strong>The last 24 hours</strong> <span class="text-muted small">(since the server started, if that's sooner)</span></div>
+        <ul class="list-group list-group-flush">
+            @foreach (var machine in _jobs.Summary(TimeSpan.FromDays(1)))
+            {
+                <li class="list-group-item d-flex flex-wrap justify-content-between gap-2">
+                    <strong>@machine.Machine</strong>
+                    <span class="small">
+                        @machine.Jobs.ToString("N0") job@(machine.Jobs == 1 ? "" : "s")
+                        · typical @(machine.MedianMilliseconds is { } ms ? Seconds(ms) : "—")
+                        · @machine.HandedOver handed over · @machine.Failed failed
+                    </span>
+                </li>
+            }
+        </ul>
+    </section>
+
+    <section class="card border-0 shadow-sm mb-3" aria-label="Recent jobs">
+        <div class="card-header"><strong>Recent jobs</strong></div>
+        <div class="table-responsive">
+            <table class="table align-middle mb-0 ai-jobs">
+                <thead><tr><th scope="col">When</th><th scope="col">Job</th><th scope="col">Model</th><th scope="col">Machine</th><th scope="col">Took</th><th scope="col">How it ended</th></tr></thead>
+                <tbody>
+                    @foreach (var job in _jobs.Recent(40))
+                    {
+                        <tr class="@(job.Outcome is OllamaJobOutcomes.Failed ? "is-failed" : "")">
+                            <td>@job.At.ToLocalGwsDateTime()</td>
+                            <td>@job.Operation</td>
+                            <td>@job.Model</td>
+                            <td>@job.Machine</td>
+                            <td>@Seconds(job.Milliseconds)</td>
+                            <td>@job.Outcome@if (job.Error is { } error) { <div class="small text-muted">@error</div> }</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </section>
+}
+
+@code {
+    private OllamaFailoverMonitor? _monitor;
+    private OllamaJobLog? _jobs;
+    private PeriodicTimer? _timer;
+    private readonly CancellationTokenSource _cts = new();
+
+    protected override void OnInitialized()
+    {
+        _monitor = Services.GetService<OllamaFailoverMonitor>();
+        _jobs = Services.GetService<OllamaJobLog>();
+        if (_monitor is not null) _ = RefreshLoopAsync();
+    }
+
+    private async Task RefreshLoopAsync()
+    {
+        _timer = new PeriodicTimer(TimeSpan.FromSeconds(5));
+        try
+        {
+            while (await _timer.WaitForNextTickAsync(_cts.Token)) await InvokeAsync(StateHasChanged);
+        }
+        catch (OperationCanceledException) { }
+    }
+
+    private IEnumerable<(string Name, bool Up, (bool Busy, int Waiting) Lane, DateTimeOffset? Since)> Machines()
+    {
+        yield return (OllamaMachines.Mac, _monitor!.PrimaryUp, _monitor.PrimaryLane.Activity, _monitor.PrimaryChangedAt);
+        yield return (OllamaMachines.Droplet, _monitor.SecondaryUp, _monitor.SecondaryLane.Activity, null);
+    }
+
+    // The same conditions the page leads with: the Mac down a while, or jobs failing.
+    private string? Warning() => AiHealthWarnings.For(_monitor!.PrimaryUp, _monitor.PrimaryChangedAt, _jobs!.Recent(OllamaJobLog.Capacity), DateTimeOffset.UtcNow);
+
+    private static string Seconds(double milliseconds) =>
+        milliseconds < 1000 ? $"{milliseconds:0} ms" : milliseconds < 120_000 ? $"{milliseconds / 1000:0.#} s" : $"{milliseconds / 60_000:0.#} min";
+
+    public void Dispose()
+    {
+        _cts.Cancel();
+        _timer?.Dispose();
+        _cts.Dispose();
+    }
+}
