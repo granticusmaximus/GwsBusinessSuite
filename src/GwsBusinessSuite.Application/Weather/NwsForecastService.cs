@@ -114,6 +114,9 @@ public sealed class NwsForecastService(HttpClient httpClient, IMemoryCache cache
             var lat = latitude.ToString(CultureInfo.InvariantCulture);
             var lon = longitude.ToString(CultureInfo.InvariantCulture);
             var pointResponse = await httpClient.GetAsync($"points/{lat},{lon}", cancellationToken);
+            // 404: outside NWS coverage (the US and its territories); not a failure, so no warning
+            // (20-11-26: views over Africa or the open sea logged one per move).
+            if (pointResponse.StatusCode == System.Net.HttpStatusCode.NotFound) return null;
             pointResponse.EnsureSuccessStatusCode();
             var pointRoot = JsonNode.Parse(await pointResponse.Content.ReadAsStringAsync(cancellationToken));
             var properties = pointRoot?["properties"];

@@ -294,7 +294,7 @@ public sealed class StreetLevelImageryService(
     private async Task<IReadOnlyList<StreetImage>> KartaViewAsync(double lat, double lon, double radius, CancellationToken cancellationToken)
     {
         var url = string.Create(CultureInfo.InvariantCulture,
-            $"https://api.openstreetcam.org/2.0/photo/?lat={lat:0.######}&lng={lon:0.######}&radius={radius:0}");
+            $"https://api.kartaview.org/2.0/photo/?lat={lat:0.######}&lng={lon:0.######}&radius={radius:0}");
         // KartaView's API is sometimes very slow; don't hold the panel up for long.
         var json = await GetAsync(url, "KartaView", TimeSpan.FromSeconds(8), cancellationToken);
         return json is null ? [] : ParseKartaView(json, lat, lon, radius);
@@ -360,7 +360,8 @@ public sealed class StreetLevelImageryService(
                 || data.ValueKind != JsonValueKind.Array) return images;
             foreach (var item in data.EnumerateArray())
             {
-                var image = String(item, "fileurlProc") ?? String(item, "fileurl") ?? String(item, "fileurlTh");
+                // The CDN copies (20-11-26): the fileurl* storage hosts no longer resolve.
+                var image = String(item, "imageProcUrl") ?? String(item, "imageLthUrl") ?? String(item, "imageThUrl");
                 if (image is null || Number(item, "lat") is not { } photoLat || Number(item, "lng") is not { } photoLon) continue;
                 if (image.StartsWith("//", StringComparison.Ordinal)) image = "https:" + image;
                 if (!image.StartsWith("https://", StringComparison.OrdinalIgnoreCase)) continue;

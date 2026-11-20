@@ -641,7 +641,10 @@ public partial class MainPage : ContentPage
             if (WorkspaceView.Handler?.PlatformView is WKWebView webView)
             {
                 MacWebViewCompatibility.Configure(webView);
-                await WorkspaceView.EvaluateJavaScriptAsync(MacWebViewCompatibility.Script);
+                // WebKit's own call: MAUI's EvaluateJavaScriptAsync wraps the script in a quoted string,
+                // and this one's line breaks then made "SyntaxError: Unexpected EOF" on every page load
+                // (/admin/logs, 20-11-26).
+                await webView.EvaluateJavaScriptAsync(MacWebViewCompatibility.Script);
                 if (!_nativeOverwatchCompatibilityReloaded
                     && args.Url.Contains("/admin/osint", StringComparison.OrdinalIgnoreCase))
                 {

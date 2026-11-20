@@ -71,7 +71,9 @@ public sealed class KartaViewProvider(
         var id = photo?["id"]?.GetValue<string>();
         var lat = TryParseDouble(photo?["lat"]);
         var lon = TryParseDouble(photo?["lng"]);
-        var thumbUrl = photo?["fileurlTh"]?.GetValue<string>();
+        // KartaView's CDN copy (20-11-26): the fileurl* links point at storage hosts that no longer
+        // resolve; imageThUrl works for photos still kept. One without it is skipped.
+        var thumbUrl = photo?["imageThUrl"]?.GetValue<string>();
         if (string.IsNullOrWhiteSpace(id) || lat is null || lon is null || string.IsNullOrWhiteSpace(thumbUrl))
         {
             return null;

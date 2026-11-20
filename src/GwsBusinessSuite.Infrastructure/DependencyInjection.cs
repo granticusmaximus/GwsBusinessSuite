@@ -489,7 +489,9 @@ public static class DependencyInjection
         // sparse/uneven street-level photo coverage.
         services.AddHttpClient<KartaViewProvider>(client =>
         {
-            client.BaseAddress = new Uri("https://api.openstreetcam.org/");
+            // api.openstreetcam.org's certificate stopped matching its name (20-11-26: every request
+            // failed TLS); KartaView serves the same API at its own host.
+            client.BaseAddress = new Uri("https://api.kartaview.org/");
             client.Timeout = TimeSpan.FromSeconds(20);
         });
         services.AddScoped<ICameraFeedProvider>(sp => sp.GetRequiredService<KartaViewProvider>());

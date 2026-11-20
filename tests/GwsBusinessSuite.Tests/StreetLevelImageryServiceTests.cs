@@ -41,9 +41,9 @@ public sealed class StreetLevelImageryServiceTests
         const string json = """
             {"result":{"data":[
               {"id":"9","sequenceId":"55","sequenceIndex":"3","lat":"33.7492","lng":"-84.3880","heading":"180",
-               "shotDate":"2023-06-01 14:30:00","fileurlProc":"https://storage.example/proc.jpg","fileurlTh":"https://storage.example/th.jpg"},
-              {"id":"10","lat":33.7491,"lng":-84.3881,"fileurlTh":"//storage.example/only-thumb.jpg"},
-              {"id":"11","lat":33.7491,"lng":-84.3881,"fileurl":"http://insecure.example/x.jpg"}
+               "shotDate":"2023-06-01 14:30:00","imageProcUrl":"https://storage.example/proc.jpg","imageThUrl":"https://storage.example/th.jpg"},
+              {"id":"10","lat":33.7491,"lng":-84.3881,"imageThUrl":"//storage.example/only-thumb.jpg"},
+              {"id":"11","lat":33.7491,"lng":-84.3881,"imageLthUrl":"http://insecure.example/x.jpg"}
             ]}}
             """;
 
@@ -82,14 +82,14 @@ public sealed class StreetLevelImageryServiceTests
         {
             hosts.Add(request.RequestUri!.Host);
             if (request.RequestUri.Host == "api.panoramax.xyz") return Json("""{"features":[]}""");
-            request.RequestUri.Host.Should().Be("api.openstreetcam.org");
+            request.RequestUri.Host.Should().Be("api.kartaview.org");
             radii.Add(System.Web.HttpUtility.ParseQueryString(request.RequestUri.Query)["radius"]!);
             return Json("""{"result":{"data":[]}}""");
         });
 
         var result = await service.FindNearAsync(Lat, Lon);
 
-        hosts.Should().Equal("api.panoramax.xyz", "api.openstreetcam.org", "api.panoramax.xyz", "api.openstreetcam.org");
+        hosts.Should().Equal("api.panoramax.xyz", "api.kartaview.org", "api.panoramax.xyz", "api.kartaview.org");
         radii.Should().Equal("60", "250");
         result.Images.Should().BeEmpty();
     }

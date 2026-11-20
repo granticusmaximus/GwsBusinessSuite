@@ -16,7 +16,7 @@ public sealed class KartaViewProviderTests
                 "id": "719329",
                 "lat": "44.426384",
                 "lng": "26.104135",
-                "fileurlTh": "https://storage2.openstreetcam.org/files/photo/2016/4/18/th/2385_71ad1_5714a34ebc8b1.jpg"
+                "imageThUrl": "https://storage2.openstreetcam.org/files/photo/2016/4/18/th/2385_71ad1_5714a34ebc8b1.jpg"
               },
               {
                 "id": "no-thumb-photo",
@@ -94,7 +94,7 @@ public sealed class KartaViewProviderTests
             count++;
             return responseFactory(request);
         });
-        var http = new HttpClient(handler) { BaseAddress = new Uri("https://api.openstreetcam.org/") };
+        var http = new HttpClient(handler) { BaseAddress = new Uri("https://api.kartaview.org/") };
         requestCount = () => count;
 
         return new KartaViewProvider(http, NullLogger<KartaViewProvider>.Instance);
