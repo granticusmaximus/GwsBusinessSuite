@@ -146,6 +146,8 @@ else
         @* Gmail's sidebar, GWS style (21-11-26): the menu button folds it to an icon rail; Inbox,
            Starred, Sent and Drafts up top, the rest under More; labels in Gmail's own colours. *@
         <nav class="mail-folders" aria-label="Mail folders">
+            @* The switcher and Compose stay at the top while a long folder list scrolls (21-11-26). *@
+            <div class="mail-folders-head">
             <div class="mail-folders-top">
                 <button type="button" class="mail-rail-toggle" aria-pressed="@(_rail ? "true" : "false")"
                         title="@(_rail ? "Show folder names" : "Fold the sidebar")" aria-label="@(_rail ? "Show folder names" : "Fold the sidebar")" @onclick="ToggleRailAsync">
@@ -166,6 +168,7 @@ else
             <button type="button" class="mail-compose-button" @onclick="() => StartCompose(ComposeKind.New)" title="Compose (c)">
                 <i class="bi bi-pencil" aria-hidden="true"></i><span>Compose</span>
             </button>
+            </div>
             @foreach (var (key, label, icon) in MailFolders.All.Where(folder => _moreOpen || MainFolders.Contains(folder.Key) || folder.Key == _folder))
             {
                 var active = key == MailFolders.Inbox ? MailTabs.IsInbox(_folder) : key == _folder;
@@ -280,13 +283,14 @@ else
                         var current = tab.Key == _folder;
                         var info = _tabs.FirstOrDefault(view => view.Key == tab.Key);
                         <button type="button" role="tab" class="mail-tab" data-tab="@tab.Category" data-drop-key="@(current ? null : tab.Key)" aria-selected="@(current ? "true" : "false")"
+                                title="@tab.Label" aria-label="@(info is { Unread: > 0 } ? $"{tab.Label}, {info.Unread} new" : tab.Label)"
                                 @onclick="() => OpenFolderAsync(tab.Key)">
                             <i class="bi @tab.Icon" aria-hidden="true"></i>
                             <span class="mail-tab-text">
-                                <span class="mail-tab-name">@tab.Label
+                                <span class="mail-tab-name"><span class="mail-tab-label">@tab.Label</span>
                                     @if (!current && info is { Unread: > 0 })
                                     {
-                                        <span class="mail-tab-new">@(info.Unread > 99 ? "99+" : info.Unread.ToString(System.Globalization.CultureInfo.InvariantCulture)) new</span>
+                                        <span class="mail-tab-new" title="@($"{info.Unread} new in {tab.Label}")">@(info.Unread > 99 ? "99+" : info.Unread.ToString(System.Globalization.CultureInfo.InvariantCulture))<span class="mail-tab-new-word"> new</span></span>
                                     }
                                 </span>
                                 @if (!current && info is { Unread: > 0, Senders.Count: > 0 })
@@ -481,10 +485,12 @@ else
                 <h2 class="mail-reader-subject">@(string.IsNullOrWhiteSpace(_detail.Subject) ? "(no subject)" : _detail.Subject)</h2>
                 <dl class="mail-reader-meta small">
                     <dt>From</dt><dd>@_detail.From.Display</dd>
-                    <dt>To</dt><dd>@string.Join(", ", _detail.To.Select(a => a.Display))</dd>
+                    @* A long To or Cc (a reply-all to 35 people) used to fill the pane before the message
+                       started (21-11-26): the first few, then "and N more" to see them all. *@
+                    <dt>To</dt><dd>@Recipients(_detail.To)</dd>
                     @if (_detail.Cc.Count > 0)
                     {
-                        <dt>Cc</dt><dd>@string.Join(", ", _detail.Cc.Select(a => a.Display))</dd>
+                        <dt>Cc</dt><dd>@Recipients(_detail.Cc)</dd>
                     }
                     <dt>Date</dt><dd>@_detail.Date.ToLocalGwsDateTime()</dd>
                 </dl>
@@ -766,7 +772,7 @@ else
                         @if (rules.Count > 0)
                         {
                             <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@_ruleBusy" @onclick="RunRulesNowAsync" title="Run the rules on what's already in the inbox">
-                                @if (_ruleBusy) { <span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span> }Run on inbox now
+                                @if (_ruleBusy) { <InlineProgress CssClass="me-1" /> }Run on inbox now
                             </button>
                         }
                         <button type="button" class="btn btn-sm btn-primary" @onclick="() => _ruleDraft = new RuleDraft()"><i class="bi bi-plus-lg me-1" aria-hidden="true"></i>New rule</button>
@@ -1108,6 +1114,7 @@ else
     {
         CloseMenus();
         _compose = null;
+        if (message.Id != _selectedId) _allRecipients = false;
         _selectedId = message.Id;
         _cursorId = message.Id;
         _loadingDetail = true;
@@ -1530,6 +1537,24 @@ else
         }
         catch (MailException ex) { _error = ex.Message; }
     }
+
+    private const int RecipientsShown = 3;
+    private bool _allRecipients;
+
+    private RenderFragment Recipients(IReadOnlyList<MailAddress> people) =>
+        @<text>@if (_allRecipients || people.Count <= RecipientsShown + 1)
+        {
+            @string.Join(", ", people.Select(a => a.Display))
+            @if (people.Count > RecipientsShown + 1)
+            {
+                <button type="button" class="btn btn-link btn-sm p-0 ms-1 align-baseline" @onclick="() => _allRecipients = false">Show fewer</button>
+            }
+        }
+        else
+        {
+            <span title="@string.Join(", ", people.Select(a => a.Display))">@string.Join(", ", people.Take(RecipientsShown).Select(a => string.IsNullOrWhiteSpace(a.Name) ? a.Address : a.Name))</span>
+            <button type="button" class="btn btn-link btn-sm p-0 ms-1 align-baseline" @onclick="() => _allRecipients = true">and @(people.Count - RecipientsShown) more</button>
+        }</text>;
 
     // ---- Mail rules (phase 6, 21-11-26) ----
     private IReadOnlyList<MailRuleView>? _rules;

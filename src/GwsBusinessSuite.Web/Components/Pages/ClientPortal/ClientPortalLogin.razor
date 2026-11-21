@@ -84,4 +84,8 @@
         padding-top: .85rem;
         color: var(--gws-text-soft);
     }
+
+    @@media (pointer: coarse) {
+        .gws-login-card :is(.form-control, .btn) { min-height: 44px; }
+    }
 </style>

@@ -2,3 +2,7 @@
 .tip-form { display: grid; }
 /* The bot trap: off screen for people, still in the form for bots that fill every field. */
 .tip-trap { position: absolute; left: -10000px; width: 1px; height: 1px; overflow: hidden; }
+
+@media (pointer: coarse) {
+    .tip-form :is(.form-control, .btn) { min-height: 44px; }
+}

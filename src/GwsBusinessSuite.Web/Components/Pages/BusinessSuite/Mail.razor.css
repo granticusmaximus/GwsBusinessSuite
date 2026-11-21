@@ -624,7 +624,8 @@
 
 @container gws-main (max-width: 796px) {
     .mail-folders-top { margin-bottom: 0; }
-    .mail-rail-toggle, .mail-more { display: none; }
+    .mail-rail-toggle { display: none; }
+    .mail-more { flex-shrink: 0; border-radius: var(--gws-radius-lg); }
     .mail-shell--rail, .mail-shell--rail.mail-shell--list { grid-template-columns: minmax(0, 1fr); }
     .mail-tabs { display: flex; overflow-x: auto; }
     .mail-tab { flex: 0 0 auto; }
@@ -679,3 +680,38 @@
     outline-offset: -3px;
 }
 .mail-item[draggable="true"] { -webkit-user-drag: element; }
+
+/* Responsive reading layout (21-11-26, Grant's screenshot: tabs colliding in the narrow list beside an
+   open message, a 35-person Cc filling the pane, Compose scrolled away). */
+.mail-folders-head {
+    position: sticky;
+    top: -.5rem;
+    z-index: 2;
+    display: flex;
+    flex-direction: column;
+    margin: -.5rem -.5rem 0;
+    padding: .5rem .5rem 0;
+    background: var(--bs-body-bg);
+}
+.mail-shell--rail .mail-folders-head { align-items: center; margin: -.5rem -.35rem 0; padding: .5rem .35rem 0; }
+
+/* The tabs fit the list column, wherever it is: full width shows names, counts and senders; a narrow
+   list (a message open beside it) shows names and counts; a very narrow one, icons with a count dot. */
+.mail-list { container: mail-list / inline-size; }
+.mail-tab-name { min-width: 0; }
+.mail-tab-label { overflow: hidden; text-overflow: ellipsis; }
+@container mail-list (max-width: 720px) {
+    .mail-tab-senders, .mail-tab-new-word { display: none; }
+    .mail-tab { padding: .6rem .5rem .5rem; gap: .4rem; justify-content: center; }
+    .mail-tab-new { padding: 0 .35rem; }
+}
+@container mail-list (max-width: 520px) {
+    .mail-tab-label { display: none; }
+    .mail-tab { position: relative; align-items: center; padding: .7rem 0 .55rem; }
+    .mail-tab > .bi { margin: 0; font-size: var(--gws-type-xl); }
+    .mail-tab-text { position: absolute; top: .3rem; left: calc(50% + .45rem); }
+    .mail-tab-new { min-width: 1.15rem; padding: 0 .3rem; font-size: var(--gws-type-xs); line-height: 1.35; text-align: center; }
+}
+@container gws-main (max-width: 796px) {
+    .mail-folders-head { position: static; flex-direction: row; align-items: center; margin: 0; padding: 0; background: none; }
+}

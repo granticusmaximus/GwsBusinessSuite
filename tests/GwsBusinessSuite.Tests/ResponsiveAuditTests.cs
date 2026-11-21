@@ -38,23 +38,61 @@ public sealed class ResponsiveAuditTests(PlaywrightBrowserFixture fixture)
         new("ultrawide-3440", 3440, 1440, false),
     ];
 
-    public static readonly string[] PublicRoutes = ["/", "/blog", "/about", "/cv", "/portfolio", "/contact"];
+    public static readonly string[] PublicRoutes =
+    [
+        "/", "/blog", "/about", "/cv", "/portfolio", "/contact", "/tip",
+        "/client-portal", "/client-portal/login", "/client-portal/support",
+        "/world-news/corrections", "/world-news/live", "/Error"
+    ];
+
+    // These pages must be opened without the application-auth cookie. In particular, requesting
+    // /admin/login after the shared sign-in below redirects to /admin and would audit the dashboard
+    // twice while silently leaving the login page unchecked.
+    public static readonly string[] AnonymousAdminRoutes = ["/admin/login"];
 
     public static readonly string[] AdminRoutes =
     [
         "/admin", "/admin/affiliate-analytics", "/admin/affiliate-suggestions", "/admin/app-generation",
         "/admin/app-generation-queue", "/admin/appearance/customize", "/admin/appearance/header-footer",
         "/admin/appearance/menus", "/admin/article-editor", "/admin/automation", "/admin/automation/credentials",
-        "/admin/automation/help", "/admin/billing", "/admin/business-intelligence", "/admin/cj-ads",
+        "/admin/automation/help", "/admin/billing", "/admin/boards", "/admin/shared-boards",
+        "/admin/business-intelligence", "/admin/cash-flow", "/admin/cj-ads", "/admin/client-impact",
         "/admin/cms-knowledge", "/admin/comments", "/admin/community", "/admin/community/activity",
         "/admin/community/departments", "/admin/community/messages", "/admin/crm",
-        "/admin/deal-scoring", "/admin/dev-tools", "/admin/docker-health", "/admin/email-campaigns",
+        "/admin/content-calendar", "/admin/content-studio", "/admin/deal-scoring", "/admin/dev-tools",
+        "/admin/docker-health", "/admin/email-campaigns",
         "/admin/form-submissions", "/admin/government-intelligence", "/admin/growth", "/admin/live-show",
-        "/admin/live-show-recordings", "/admin/localization", "/admin/media", "/admin/mind-maps",
-        "/admin/mission-control", "/admin/news-intelligence", "/admin/osint", "/admin/pages", "/admin/pages/all",
+        "/admin/live-show-recordings", "/admin/localization", "/admin/logs", "/admin/loose-ends",
+        "/admin/media", "/admin/mind-maps", "/admin/mission-control", "/admin/my-day",
+        "/admin/news-intelligence", "/admin/osint", "/admin/osint/camera-sources", "/admin/osint/directions",
+        "/admin/pages", "/admin/pages/all",
         "/admin/podcasts", "/admin/privacy-operations", "/admin/scheduling", "/admin/security-audit",
-        "/admin/sentinel", "/admin/seo-audit", "/admin/settings", "/admin/support", "/admin/mail", "/admin/threat-intel",
-        "/admin/users", "/admin/world-news"
+        "/admin/sentinel", "/admin/sentinel/window", "/admin/sentinelgpt/activity", "/admin/seo-audit",
+        "/admin/settings", "/admin/ssh-terminal-window", "/admin/support", "/admin/mail", "/admin/threat-intel",
+        "/admin/time", "/admin/users", "/admin/wiki", "/admin/world-news", "/admin/world-news/about",
+        "/admin/world-news/brief", "/admin/world-news/desk", "/admin/world-news/front-pages",
+        "/admin/world-news/methodology", "/admin/world-news/search", "/admin/world-news/source-book",
+        "/admin/world-news/sources", "/admin/access-denied", "/admin/account/touch-id", "/admin/ai-health",
+        "/admin/article-refresh", "/admin/not-found"
+    ];
+
+    // Parameterized pages require a real ID or secret token. The full audit supplies reachable
+    // examples through GWS_AUDIT_EXTRA_ROUTES; this list makes every deliberate exception visible
+    // and keeps the coverage guard below from turning a template into a bogus literal URL.
+    public static readonly string[] ParameterizedRouteTemplates =
+    [
+        "/book/manage/{Token}", "/book/{Slug}", "/admin/email-campaigns/alerts/{CampaignId:guid}",
+        "/admin/article-editor/{ArticleId:guid}", "/admin/automation/{WorkflowId:guid}",
+        "/admin/boards/{DatabaseId:guid}", "/admin/pages/{PageId:guid}/edit",
+        "/admin/canvas/editor/{PageId:guid}", "/admin/community/messages/{ThreadId:guid}",
+        "/admin/community/profile/{Username}", "/admin/crm/contacts/{ContactId:guid}",
+        "/admin/content-studio/draft/{DraftId:guid}", "/admin/docker-health/{ContainerName}",
+        "/admin/pages/edit/{PageId:guid?}", "/admin/form-submissions/{SubmissionId:guid}",
+        "/admin/mind-maps/{MindMapId:guid}", "/admin/world-news/events/{EventId}",
+        "/campaigns/unsubscribe/{Token}", "/watch/{Token}", "/roadmap/{Token}",
+        "/admin/sentinel/present/{PageId:guid}", "/sentinel/form/{Token}",
+        "/sentinel/share/{Token}", "/sentinel/share/{Token}/{PageId:guid}",
+        "/world-news/corrections/{CorrectionId}", "/world-news/live/{EventId}"
     ];
 
     // Open states the entry-page crawl never sees: drawers, menus, dialogs, editor panels.
@@ -165,6 +203,11 @@ public sealed class ResponsiveAuditTests(PlaywrightBrowserFixture fixture)
             if (r.left >= 0 && r.right <= vw && r.top >= 0 && r.bottom <= vh && getComputedStyle(el).pointerEvents !== 'none') {
               const hit = document.elementFromPoint(cx, cy);
               if (hit && hit !== el && !el.contains(hit) && !hit.contains(el) && !(el.labels && Array.from(el.labels).some(l => l.contains(hit)))) {
+                // The fixed phone bar can cover a control at the crawler's restored scroll
+                // position, but .gws-content reserves its height and the control remains reachable
+                // by ordinary scrolling. Do not confuse that transient overlap with an unreachable
+                // control; opened drawers and every other covering element still count.
+                if (hit.closest('.gws-bottom-bar') && de.scrollHeight > vh + 1) continue;
                 result.coveredCount++;
                 if (result.covered.length < 6) result.covered.push(desc(el) + ' under ' + desc(hit));
               }
@@ -328,6 +371,30 @@ public sealed class ResponsiveAuditTests(PlaywrightBrowserFixture fixture)
     }
 
     [Fact]
+    public void EveryRazorPageRoute_ShouldBeAuditedOrExplicitlyRequireSeededData()
+    {
+        var pagesRoot = Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory,
+            "../../../../../src/GwsBusinessSuite.Web/Components/Pages"));
+        var routePattern = new Regex("^@page\\s+\"([^\"]+)\"", RegexOptions.Multiline);
+        var declared = Directory.GetFiles(pagesRoot, "*.razor", SearchOption.AllDirectories)
+            .SelectMany(file => routePattern.Matches(File.ReadAllText(file)).Select(match => match.Groups[1].Value))
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(route => route, StringComparer.Ordinal)
+            .ToArray();
+        var covered = AdminRoutes
+            .Concat(AnonymousAdminRoutes)
+            .Concat(PublicRoutes)
+            .Concat(ParameterizedRouteTemplates)
+            .ToHashSet(StringComparer.Ordinal);
+
+        var missing = declared.Where(route => !covered.Contains(route)).ToArray();
+        Assert.True(missing.Length == 0,
+            "Every @page route must be in the responsive audit or the explicit seeded-data list. Missing: "
+            + string.Join(", ", missing));
+    }
+
+    [Fact]
     public async Task AuditEveryPageOnEveryDevice()
     {
         var adminBase = Environment.GetEnvironmentVariable("GWS_AUDIT_ADMIN_BASE");
@@ -342,8 +409,10 @@ public sealed class ResponsiveAuditTests(PlaywrightBrowserFixture fixture)
         var extraRoutes = (Environment.GetEnvironmentVariable("GWS_AUDIT_EXTRA_ROUTES") ?? "")
             .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         var adminRoutes = Filter(AdminRoutes, routeFilter, r => r, r => r).Concat(extraRoutes).ToArray();
+        var anonymousAdminRoutes = Filter(AnonymousAdminRoutes, routeFilter, r => r, r => r);
         var publicRoutes = Filter(PublicRoutes, routeFilter, r => r, r => r);
-        Assert.True(adminRoutes.Length + publicRoutes.Length > 0, "Audit route filter matched no routes.");
+        Assert.True(adminRoutes.Length + anonymousAdminRoutes.Length + publicRoutes.Length > 0,
+            "Audit route filter matched no routes.");
 
         // Sign in once and reuse the cookie for every device.
         var loginContext = await fixture.Browser.NewContextAsync();
@@ -361,21 +430,32 @@ public sealed class ResponsiveAuditTests(PlaywrightBrowserFixture fixture)
         {
             var scenarioName = textScale == 2 ? device.Name + "-text-200" : device.Name;
             File.Delete(Path.Combine(outDir, $"rows-{scenarioName}.jsonl"));
-            var context = await fixture.Browser.NewContextAsync(new()
+            var authenticatedContext = await fixture.Browser.NewContextAsync(new()
             {
                 ViewportSize = new() { Width = device.Width, Height = device.Height },
                 IsMobile = device.Touch && device.Width < 1000,
                 HasTouch = device.Touch,
                 StorageState = storage
             });
-            var targets = publicRoutes.Select(r => (Url: publicBase + r, Route: r, Area: "public"))
-                .Concat(adminRoutes.Select(r => (Url: adminBase + r, Route: r, Area: "admin")));
+            var anonymousContext = await fixture.Browser.NewContextAsync(new()
+            {
+                ViewportSize = new() { Width = device.Width, Height = device.Height },
+                IsMobile = device.Touch && device.Width < 1000,
+                HasTouch = device.Touch
+            });
+            await anonymousContext.AddInitScriptAsync("localStorage.setItem('gws_consent_v1', JSON.stringify({ analytics: false, affiliate: false, at: Date.now() }))");
+            var targets = publicRoutes.Select(r => (Url: publicBase + r, Route: r, Area: "public", Authenticated: false))
+                .Concat(anonymousAdminRoutes.Select(r => (Url: adminBase + r, Route: r, Area: "anonymous-admin", Authenticated: false)))
+                .Concat(adminRoutes.Select(r => (Url: adminBase + r, Route: r, Area: "admin", Authenticated: true)));
             var states = targets.SelectMany(target => Interactions
                     .Where(interaction => Regex.IsMatch(target.Route, interaction.Route))
-                    .Select(interaction => (target.Url, target.Route, target.Area, State: (Interaction?)interaction)))
+                    .Select(interaction => (target.Url, target.Route, target.Area, target.Authenticated, State: (Interaction?)interaction)))
                 .ToList();
-            foreach (var (url, route, area, state) in targets.Select(t => (t.Url, t.Route, t.Area, State: (Interaction?)null)).Concat(states))
+            foreach (var (url, route, area, authenticated, state) in targets
+                         .Select(t => (t.Url, t.Route, t.Area, t.Authenticated, State: (Interaction?)null))
+                         .Concat(states))
             {
+                var context = authenticated ? authenticatedContext : anonymousContext;
                 var page = await context.NewPageAsync();
                 var errors = new List<string>();
                 page.Console += (_, m) => { if (m.Type == "error" && errors.Count < 5) errors.Add(m.Text.Length > 140 ? m.Text[..140] : m.Text); };
@@ -427,7 +507,8 @@ public sealed class ResponsiveAuditTests(PlaywrightBrowserFixture fixture)
                 await File.AppendAllTextAsync(Path.Combine(outDir, $"rows-{scenarioName}.jsonl"), JsonSerializer.Serialize(row) + "\n");
                 await page.CloseAsync();
             }
-            await context.DisposeAsync();
+            await authenticatedContext.DisposeAsync();
+            await anonymousContext.DisposeAsync();
         });
 
         await WriteReportAsync(outDir);

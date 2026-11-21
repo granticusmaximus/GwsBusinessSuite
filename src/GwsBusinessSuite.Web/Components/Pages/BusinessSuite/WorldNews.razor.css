@@ -963,9 +963,8 @@ a.world-news-search-all { text-decoration: none; color: var(--gws-text-soft); }
     .world-news-chips {
         flex-wrap: nowrap;
         overflow-x: auto;
-        margin-left: calc(-1 * var(--gws-content-pad-x, 16px));
-        margin-right: calc(-1 * var(--gws-content-pad-x, 16px));
-        padding: 4px var(--gws-content-pad-x, 16px) 8px;
+        max-width: 100%;
+        padding: 4px 0 8px;
         scrollbar-width: none;
     }
 

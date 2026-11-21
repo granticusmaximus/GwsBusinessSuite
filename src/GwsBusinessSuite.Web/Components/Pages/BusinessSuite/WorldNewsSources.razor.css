@@ -16,6 +16,9 @@
 .sources-state-ok { color: var(--bs-success); }
 .sources-state-failing, .sources-state-refused { color: var(--bs-danger); }
 .sources-state-quiet, .sources-state-paused { color: var(--bs-warning-text-emphasis); }
+.sources-table :is(td, td > *) { min-width: 0; }
+.sources-table .text-nowrap { white-space: normal !important; }
+.sources-table small { overflow-wrap: anywhere; }
 
 @container gws-main (max-width: 1099.98px) {
     .sources-numbers { grid-template-columns: repeat(3, minmax(0, 1fr)); }

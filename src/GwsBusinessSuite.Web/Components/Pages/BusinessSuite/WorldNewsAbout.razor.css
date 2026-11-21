@@ -1,0 +1,14 @@
+.about-search > .form-control {
+    min-width: 0;
+}
+
+@container gws-main (max-width: 575.98px) {
+    .about-search {
+        flex-wrap: wrap;
+    }
+
+    .about-search > .form-control,
+    .about-search > .btn {
+        flex: 1 1 100%;
+    }
+}

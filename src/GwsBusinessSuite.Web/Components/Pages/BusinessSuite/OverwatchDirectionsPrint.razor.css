@@ -1,0 +1,5 @@
+@media (pointer: coarse) {
+    .gws-print-actions :is(.btn, button) {
+        min-height: 44px;
+    }
+}

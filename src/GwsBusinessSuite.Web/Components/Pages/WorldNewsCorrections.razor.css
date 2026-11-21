@@ -2,3 +2,11 @@
 .news-corrections-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .75rem; }
 .news-correction-text { white-space: pre-wrap; overflow-wrap: anywhere; margin: .75rem 0; }
 .news-corrections-page h2 { overflow-wrap: anywhere; }
+
+@media (pointer: coarse) {
+    .news-corrections-actions a {
+        display: inline-flex;
+        align-items: center;
+        min-height: 44px;
+    }
+}

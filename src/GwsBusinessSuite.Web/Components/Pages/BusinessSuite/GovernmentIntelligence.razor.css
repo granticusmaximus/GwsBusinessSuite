@@ -298,6 +298,15 @@
     margin: .75rem 0 .5rem;
 }
 
+.civic-search > :is(.form-control, .form-select) {
+    min-width: 0;
+}
+
+@container gws-main (max-width: 575.98px) {
+    .civic-search { flex-wrap: wrap; }
+    .civic-search > :is(.form-control, .form-select) { flex: 1 1 100%; }
+}
+
 .civic-bill-hits li {
     display: flex;
     justify-content: space-between;

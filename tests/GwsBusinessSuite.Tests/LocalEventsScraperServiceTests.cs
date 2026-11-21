@@ -179,7 +179,8 @@ public sealed class PlaywrightBrowserFixture : IAsyncLifetime
     public IPlaywright Playwright { get; private set; } = null!;
     public IBrowser Browser { get; private set; } = null!;
 
-    private static readonly Lazy<int> Installed = new(() => Microsoft.Playwright.Program.Main(["install", "chromium"]));
+    private static readonly Lazy<int> ChromiumInstalled = new(() => Microsoft.Playwright.Program.Main(["install", "chromium"]));
+    private static readonly Lazy<int> WebKitInstalled = new(() => Microsoft.Playwright.Program.Main(["install", "webkit"]));
 
     public async Task InitializeAsync()
     {
@@ -188,9 +189,11 @@ public sealed class PlaywrightBrowserFixture : IAsyncLifetime
         // though it won't install missing OS-level shared libraries the way
         // `--with-deps` does, so a fresh Linux CI runner still needs that step too.
         // Three collections start their browsers at once (12-11-26), so the install runs once.
-        _ = Installed.Value;
+        var browserName = Environment.GetEnvironmentVariable("GWS_PLAYWRIGHT_BROWSER")?.Trim().ToLowerInvariant();
+        _ = browserName == "webkit" ? WebKitInstalled.Value : ChromiumInstalled.Value;
         Playwright = await Microsoft.Playwright.Playwright.CreateAsync();
-        Browser = await Playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions { Headless = true });
+        Browser = await (browserName == "webkit" ? Playwright.Webkit : Playwright.Chromium)
+            .LaunchAsync(new BrowserTypeLaunchOptions { Headless = true });
     }
 
     public async Task DisposeAsync()

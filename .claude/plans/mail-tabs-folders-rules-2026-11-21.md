@@ -58,3 +58,8 @@
   (every 3 min, as each owner), Mail rules dialog (list with switches, editor, Run on inbox now, Make a
   rule for ...). Checked on screen with a demo backend; fixed the all/any select showing blank (bool
   bind). All six phases done; only drag-onto-a-tab not built.
+- 21-11-26 Drag and drop done (the last open item): rows draggable; tabs and your folders are drop
+  targets (data-drop-key); mail-list.js hands the drop to Mail.razor OnDropMail, which uses Move to tab /
+  Move to folder (sender remembered, Undo). A touch swipe never becomes a drag. Checked on screen in
+  Chromium and WebKit (drop on tab, drop on folder, Undo, no leftover highlights). MailDragDropTests
+  keeps the pieces wired. **All of the plan is built.**
