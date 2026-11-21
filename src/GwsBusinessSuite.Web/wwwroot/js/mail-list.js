@@ -126,9 +126,69 @@ function onClick(state, e) {
     }
 }
 
+// Drag and drop (21-11-26): a row dragged with a mouse onto a tab or folder ([data-drop-key]) moves
+// there (Mail.razor OnDropMail). Touch keeps its swipes: a drag that starts mid-swipe is cancelled.
+const dragType = 'application/x-gws-mail';
+
+function dropTarget(e) {
+    return e.target instanceof Element ? e.target.closest('[data-drop-key]') : null;
+}
+
+function carriesMail(e) {
+    return Array.from(e.dataTransfer?.types ?? []).includes(dragType);
+}
+
+function onDragStart(state, e) {
+    const item = e.target instanceof Element ? e.target.closest('.mail-item') : null;
+    if (!item || state.touch || state.active) { e.preventDefault(); return; }
+    e.dataTransfer.setData(dragType, item.dataset.id);
+    e.dataTransfer.setData('text/plain', item.querySelector('.mail-item-subject')?.textContent ?? '');
+    e.dataTransfer.effectAllowed = 'move';
+    item.closest('.mail-shell')?.classList.add('mail-shell--dragging');
+}
+
+function clearTargets() {
+    document.querySelectorAll('.is-drop-target').forEach(el => el.classList.remove('is-drop-target'));
+}
+
+function onDragOver(e) {
+    const target = dropTarget(e);
+    if (!target || !carriesMail(e)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    if (!target.classList.contains('is-drop-target')) { clearTargets(); target.classList.add('is-drop-target'); }
+}
+
+function onDragLeave(e) {
+    const target = dropTarget(e);
+    if (target && !target.contains(e.relatedTarget)) target.classList.remove('is-drop-target');
+}
+
+function onDrop(state, e) {
+    const target = dropTarget(e);
+    clearTargets();
+    if (!target || !carriesMail(e)) return;
+    e.preventDefault();
+    const id = e.dataTransfer.getData(dragType);
+    if (id) state.dotnet.invokeMethodAsync('OnDropMail', id, target.dataset.dropKey).catch(() => { /* the page went */ });
+}
+
+function onDragEnd() {
+    clearTargets();
+    document.querySelectorAll('.mail-shell--dragging').forEach(el => el.classList.remove('mail-shell--dragging'));
+}
+
 export function attach(list, dotnet) {
     const state = { dotnet, active: null, touch: null, lastSwipeAt: 0 };
+    const documentListeners = [
+        ['dragover', onDragOver],
+        ['dragleave', onDragLeave],
+        ['drop', e => onDrop(state, e)],
+        ['dragend', onDragEnd]
+    ];
+    for (const [name, handler] of documentListeners) document.addEventListener(name, handler);
     const listeners = [
+        ['dragstart', e => onDragStart(state, e)],
         ['wheel', e => onWheel(state, e), { passive: false }],
         ['pointerdown', e => onPointerDown(state, e)],
         ['pointermove', e => onPointerMove(state, e)],
@@ -140,6 +200,7 @@ export function attach(list, dotnet) {
     const handle = nextHandle++;
     handles.set(handle, () => {
         for (const [name, handler, options] of listeners) list.removeEventListener(name, handler, options);
+        for (const [name, handler] of documentListeners) document.removeEventListener(name, handler);
     });
     return handle;
 }

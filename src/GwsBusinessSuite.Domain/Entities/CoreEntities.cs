@@ -1072,6 +1072,29 @@ public static class MailTabSources
     public const string Unclear = "unclear";
     public const string Ai = "ai";
     public const string You = "you";
+    public const string Rule = "rule";
+}
+
+// A mail rule (Mail phase 6, 21-11-26): conditions and actions as JSON (MailRuleCondition /
+// MailRuleAction lists), run on new inbox mail in Order.
+public sealed class MailRule : AuditableEntity
+{
+    public Guid AccountId { get; set; }
+    public required string Username { get; set; }
+    public required string Name { get; set; }
+    public bool Enabled { get; set; } = true;
+    public bool MatchAll { get; set; } = true;
+    public string ConditionsJson { get; set; } = "[]";
+    public string ActionsJson { get; set; } = "[]";
+    public int Order { get; set; }
+}
+
+// An inbox message the rules have already looked at (its MessageKey), so each is handled once. The
+// first pass on a mailbox only records what's there: rules act on mail that arrives after.
+public sealed class MailRuleSeen : AuditableEntity
+{
+    public Guid AccountId { get; set; }
+    public required string MessageKey { get; set; }
 }
 
 // A sender the person moved to a tab: their mail goes to that tab from then on (Mail tabs, 21-11-26).

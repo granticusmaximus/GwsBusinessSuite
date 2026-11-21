@@ -445,6 +445,41 @@ public sealed class MailServiceTests
         await f.Service.Invoking(s => s.MoveToFolderAsync("grant", mailbox.Id, ["a"], "trash")).Should().ThrowAsync<MailException>();
     }
 
+    // Mail rules (phase 6, 21-11-26): the first pass only records the inbox, so rules act on new mail;
+    // the first matching rule acts, flags first and the folder move last; Run on inbox now acts on all.
+    [Fact]
+    public async Task MailRules_ShouldActOnNewMailOnly_FirstMatchWins_AndRunOnTheInboxWhenAsked()
+    {
+        var f = await CreateAsync();
+        var mailbox = await f.UseImapAsync();
+        static MailInboxItem Item(string id, string from, string subject) => new(
+            new MailMessageSummary(id, null, new MailAddress(string.Empty, from), [], subject, string.Empty, DateTimeOffset.UnixEpoch, true, false, false),
+            "<" + id + ">", new Dictionary<string, string>());
+        f.Imap.Inbox.Add(Item("old", "billing@power.example", "Your bill is ready"));
+        var bills = await f.Service.SaveRuleAsync("grant", mailbox.Id, new MailRuleView(Guid.Empty, " Bills ", true, true,
+            [new MailRuleCondition(MailRuleFields.From, MailRuleOps.Contains, "@power.example")],
+            [new MailRuleAction(MailRuleActionKinds.Folder, "folder:Receipts"), new MailRuleAction(MailRuleActionKinds.Read)], 0));
+        bills.Name.Should().Be("Bills");
+        await f.Service.SaveRuleAsync("grant", mailbox.Id, new MailRuleView(Guid.Empty, "Everything else from power", true, true,
+            [new MailRuleCondition(MailRuleFields.From, MailRuleOps.Contains, "power")], [new MailRuleAction(MailRuleActionKinds.Star)], 0));
+
+        (await f.Service.RunRulesAsync("grant", mailbox.Id, includeExisting: false)).Should().Be(0, "the first pass only records what's already there");
+        f.Imap.MovedToFolder.Should().BeEmpty();
+
+        f.Imap.Inbox.Insert(0, Item("new", "billing@power.example", "Your November bill"));
+        (await f.Service.RunRulesAsync("grant", mailbox.Id, includeExisting: false)).Should().Be(1);
+        f.Imap.Applied.Select(a => $"{string.Join(",", a.Ids)}:{a.Action}").Should().Equal(["new:read"], "flags first; the second rule didn't act, the first match wins");
+        f.Imap.MovedToFolder.Select(m => $"{string.Join(",", m.Ids)}:{m.Folder}").Should().Equal("new:folder:Receipts");
+        (await f.Service.RunRulesAsync("grant", mailbox.Id, includeExisting: false)).Should().Be(0, "each message is handled once");
+
+        (await f.Service.RunRulesAsync("grant", mailbox.Id, includeExisting: true)).Should().Be(2, "Run on inbox now acts on what's there");
+        (await f.Service.ListRulesAsync("grant", mailbox.Id)).Select(rule => rule.Name).Should().Equal("Bills", "Everything else from power");
+        (await f.Service.ListRulesAsync("sam", mailbox.Id)).Should().BeEmpty("someone else's mailbox has no rules for them");
+        await f.Service.Invoking(s => s.RunRulesAsync("sam", mailbox.Id, true)).Should().ThrowAsync<MailException>();
+        await f.Service.DeleteRuleAsync("grant", mailbox.Id, bills.Id);
+        (await f.Service.ListRulesAsync("grant", mailbox.Id)).Should().ContainSingle();
+    }
+
     [Fact]
     public async Task ManyMessagesAtOnce_ShouldGoToTheMailboxInOneCall_AndTrashShouldBeUndoable()
     {
@@ -584,6 +619,13 @@ public sealed class MailServiceTests
             Task.FromResult<IReadOnlyList<MailInboxItem>>(Inbox.Take(max).ToList());
         public List<(IReadOnlyList<string> Ids, string Action)> Applied { get; } = [];
         public List<MailUndo> Undone { get; } = [];
+
+        public List<(IReadOnlyList<string> Ids, string Folder)> MovedToFolder { get; } = [];
+        public Task<MailUndo?> MoveToFolderAsync(MailAccount account, IReadOnlyList<string> ids, string folderKey, CancellationToken cancellationToken)
+        {
+            MovedToFolder.Add((ids, folderKey));
+            return Task.FromResult<MailUndo?>(null);
+        }
 
         public Task<MailUndo?> ApplyAsync(MailAccount account, IReadOnlyList<string> ids, string action, CancellationToken cancellationToken)
         {

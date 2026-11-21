@@ -118,6 +118,127 @@ public sealed class MailService(
     public Task<IReadOnlyList<MailFolderView>> ListFoldersAsync(string username, Guid accountId, CancellationToken cancellationToken = default) =>
         RunAsync(username, accountId, (backend, account) => backend.ListFoldersAsync(account, cancellationToken), cancellationToken);
 
+    // ---- Mail rules (phase 6, 21-11-26) ----
+    public const int RulesWindow = 200;
+    public const int RuleSeenKeepDays = 60;
+
+    private static MailRuleView ToView(MailRule rule) => new(rule.Id, rule.Name, rule.Enabled, rule.MatchAll,
+        MailRuleEngine.FromJson<MailRuleCondition>(rule.ConditionsJson), MailRuleEngine.FromJson<MailRuleAction>(rule.ActionsJson), rule.Order);
+
+    public async Task<IReadOnlyList<MailRuleView>> ListRulesAsync(string username, Guid accountId, CancellationToken cancellationToken = default)
+    {
+        if (await FindAsync(username, accountId, cancellationToken) is null) return [];
+        return (await db.MailRules.AsNoTracking().Where(rule => rule.AccountId == accountId).ToListAsync(cancellationToken))
+            .OrderBy(rule => rule.Order).ThenBy(rule => rule.CreatedAt).Select(ToView).ToList();
+    }
+
+    public async Task<MailRuleView> SaveRuleAsync(string username, Guid accountId, MailRuleView rule, CancellationToken cancellationToken = default)
+    {
+        if (await FindAsync(username, accountId, cancellationToken) is null) throw new MailException("Connect a mailbox first.");
+        var clean = MailRuleEngine.Validate(rule);
+        var now = timeProvider.GetUtcNow();
+        var row = clean.Id == Guid.Empty ? null : await db.MailRules.FirstOrDefaultAsync(r => r.Id == clean.Id && r.AccountId == accountId, cancellationToken);
+        if (row is null)
+        {
+            if (await db.MailRules.CountAsync(r => r.AccountId == accountId, cancellationToken) >= MailRuleEngine.MaxRules)
+                throw new MailException($"A mailbox can have up to {MailRuleEngine.MaxRules} rules.");
+            var order = (await db.MailRules.Where(r => r.AccountId == accountId).Select(r => (int?)r.Order).MaxAsync(cancellationToken) ?? -1) + 1;
+            row = new MailRule { AccountId = accountId, Username = username, Name = clean.Name, Order = order, CreatedAt = now, CreatedBy = username };
+            db.MailRules.Add(row);
+        }
+        row.Name = clean.Name;
+        row.Enabled = clean.Enabled;
+        row.MatchAll = clean.MatchAll;
+        row.ConditionsJson = MailRuleEngine.ToJson(clean.Conditions);
+        row.ActionsJson = MailRuleEngine.ToJson(clean.Actions);
+        row.UpdatedAt = now;
+        row.UpdatedBy = username;
+        await db.SaveChangesAsync(cancellationToken);
+        return ToView(row);
+    }
+
+    public async Task DeleteRuleAsync(string username, Guid accountId, Guid ruleId, CancellationToken cancellationToken = default)
+    {
+        if (await FindAsync(username, accountId, cancellationToken) is null) return;
+        if (await db.MailRules.FirstOrDefaultAsync(r => r.Id == ruleId && r.AccountId == accountId, cancellationToken) is { } row)
+        {
+            db.MailRules.Remove(row);
+            await db.SaveChangesAsync(cancellationToken);
+        }
+    }
+
+    // The newest RulesWindow inbox messages the rules haven't seen (or all of them, includeExisting): the
+    // first rule that matches each one acts on it. The very first pass on a mailbox only records what's
+    // there, so rules act on mail that arrives after they're made. Returns how many messages a rule acted on.
+    public async Task<int> RunRulesAsync(string username, Guid accountId, bool includeExisting, CancellationToken cancellationToken = default)
+    {
+        if (await FindAsync(username, accountId, cancellationToken) is null) throw new MailException("Connect a mailbox first.");
+        var rules = (await ListRulesAsync(username, accountId, cancellationToken)).Where(rule => rule.Enabled).ToList();
+        if (rules.Count == 0) return 0;
+        var now = timeProvider.GetUtcNow();
+        var acted = 0;
+        await RunAsync(username, accountId, async (backend, account) =>
+        {
+            var items = await backend.InboxForSortingAsync(account, RulesWindow, cancellationToken);
+            var keys = items.Select(item => item.MessageKey).Distinct().ToList();
+            var seenRows = await db.MailRuleSeen.Where(row => row.AccountId == accountId).ToListAsync(cancellationToken);
+            var seen = seenRows.Select(row => row.MessageKey).ToHashSet(StringComparer.Ordinal);
+            var firstPass = seenRows.Count == 0 && !includeExisting;
+            foreach (var item in items)
+            {
+                if (seen.Contains(item.MessageKey) && !includeExisting) continue;
+                if (!firstPass && rules.FirstOrDefault(rule => MailRuleEngine.Matches(rule, item)) is { } rule)
+                {
+                    try
+                    {
+                        await ApplyRuleAsync(backend, account, item, rule, now, cancellationToken);
+                        acted++;
+                    }
+                    catch (MailException ex)
+                    {
+                        logger?.LogWarning("Mail rule {Rule} couldn't act on a message: {Message}", rule.Name, ex.Message);
+                    }
+                }
+                if (seen.Add(item.MessageKey))
+                    db.MailRuleSeen.Add(new MailRuleSeen { AccountId = accountId, MessageKey = item.MessageKey, CreatedAt = now, CreatedBy = "mail-rules" });
+            }
+            var cutoff = now.AddDays(-RuleSeenKeepDays);
+            db.MailRuleSeen.RemoveRange(seenRows.Where(row => row.CreatedAt < cutoff && !keys.Contains(row.MessageKey)));
+            await db.SaveChangesAsync(cancellationToken);
+            return true;
+        }, cancellationToken);
+        if (acted > 0) inboxCache?.Invalidate(accountId);
+        return acted;
+    }
+
+    private async Task ApplyRuleAsync(IMailboxBackend backend, MailAccount account, MailInboxItem item, MailRuleView rule, DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        var id = item.Summary.Id;
+        foreach (var action in MailRuleEngine.InRunOrder(rule.Actions))
+        {
+            switch (action.Kind)
+            {
+                case MailRuleActionKinds.Read: await backend.ApplyAsync(account, [id], MailActions.MarkRead, cancellationToken); break;
+                case MailRuleActionKinds.Star: await backend.ApplyAsync(account, [id], MailActions.Star, cancellationToken); break;
+                case MailRuleActionKinds.Archive: await backend.ApplyAsync(account, [id], MailActions.Archive, cancellationToken); break;
+                case MailRuleActionKinds.Folder: await backend.MoveToFolderAsync(account, [id], action.Target, cancellationToken); break;
+                case MailRuleActionKinds.Tab:
+                    var row = await db.MailMessageTabs.FirstOrDefaultAsync(r => r.AccountId == account.Id && r.MessageKey == item.MessageKey, cancellationToken);
+                    if (row is null)
+                    {
+                        row = new MailMessageTab { AccountId = account.Id, MessageKey = item.MessageKey, TabKey = action.Target, CreatedAt = now, CreatedBy = "mail-rules" };
+                        db.MailMessageTabs.Add(row);
+                    }
+                    row.TabKey = action.Target;
+                    row.Source = MailTabSources.Rule;
+                    row.Reason = $"the rule \"{rule.Name}\"";
+                    row.Subject = string.Empty;
+                    row.UpdatedAt = now;
+                    break;
+            }
+        }
+    }
+
     // ---- Folders (phase 5, 21-11-26) ----
     public const int MaxFolderNameLength = 100;
 
@@ -210,7 +331,7 @@ public sealed class MailService(
         {
             var sender = item.Summary.From.Address.Trim().ToLowerInvariant();
             stored.TryGetValue(item.MessageKey, out var row);
-            if (row is { Source: MailTabSources.You or MailTabSources.Ai } && MailTabs.Find(row.TabKey) is not null)
+            if (row is { Source: MailTabSources.You or MailTabSources.Ai or MailTabSources.Rule } && MailTabs.Find(row.TabKey) is not null)
             {
                 sorted.Add(new Sorted(item, row.TabKey, row.Source, row.Reason));
                 continue;

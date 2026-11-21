@@ -47,3 +47,14 @@
   tabs" dialog in the mailbox menu. Gmail-style sidebar: folding rail, More, label colours. Visual check:
   demo backend in a throwaway worktree (1440 and 390). Earlier Gmail-category tab code removed.
   Next: phase 5 (folders), phase 6 (mail rules).
+- 21-11-26 Shipped 64415b0d (phases 1-5). Live check: migration applied; 103 unclear messages queued from
+  Grant's inbox; SentinelGPT decided its first 10 at 19:11 (10 per 2 minutes). Ownership fix before the
+  inbox cache (two-user test, negative control on a scratch copy). Phase 5 (folders) checked on screen with
+  a demo backend: create, Move to folder + Undo, rename (stays open), delete with confirm. Drag onto a tab
+  not built (right-click only). Next: phase 6, mail rules.
+- 21-11-26 Phase 6 done: MailRule / MailRuleSeen (migration AddMailRules), MailRuleEngine (fields, ops,
+  validation, run order: flags, tab, then folder or archive), RunRulesAsync (first pass only records the
+  inbox; first match wins; each message once; seen rows pruned after 60 days), MailRulesBackgroundService
+  (every 3 min, as each owner), Mail rules dialog (list with switches, editor, Run on inbox now, Make a
+  rule for ...). Checked on screen with a demo backend; fixed the all/any select showing blank (bool
+  bind). All six phases done; only drag-onto-a-tab not built.

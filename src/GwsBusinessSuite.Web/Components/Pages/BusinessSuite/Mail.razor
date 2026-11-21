@@ -193,7 +193,7 @@ else
             {
                 <div class="mail-folder-row">
                     <button type="button" class="mail-folder @(folder.Key == _folder ? "active" : string.Empty)" aria-current="@(folder.Key == _folder ? "page" : null)"
-                            title="@folder.Label" @onclick="() => OpenFolderAsync(folder.Key)">
+                            title="@folder.Label" data-drop-key="@(folder.Key == _folder ? null : folder.Key)" @onclick="() => OpenFolderAsync(folder.Key)">
                         @if (_account.Provider == MailProviders.Google || folder.Color is not null)
                         {
                             <i class="bi bi-tag-fill mail-folder-icon mail-label-dot" style="@LabelStyle(folder.Color)" aria-hidden="true"></i>
@@ -279,7 +279,7 @@ else
                     {
                         var current = tab.Key == _folder;
                         var info = _tabs.FirstOrDefault(view => view.Key == tab.Key);
-                        <button type="button" role="tab" class="mail-tab" data-tab="@tab.Category" aria-selected="@(current ? "true" : "false")"
+                        <button type="button" role="tab" class="mail-tab" data-tab="@tab.Category" data-drop-key="@(current ? null : tab.Key)" aria-selected="@(current ? "true" : "false")"
                                 @onclick="() => OpenFolderAsync(tab.Key)">
                             <i class="bi @tab.Icon" aria-hidden="true"></i>
                             <span class="mail-tab-text">
@@ -313,7 +313,7 @@ else
                     {
                         var isChecked = _checked.Contains(message.Id);
                         <li class="mail-item @(message.Unread ? "unread" : string.Empty) @(message.Id == _selectedId ? "selected" : string.Empty) @(isChecked ? "checked" : string.Empty) @(message.Id == _cursorId ? "cursor" : string.Empty)"
-                            @key="message.Id" data-id="@message.Id" @oncontextmenu="e => OpenMenu(e, message)" @oncontextmenu:preventDefault="true">
+                            @key="message.Id" data-id="@message.Id" draggable="true" @oncontextmenu="e => OpenMenu(e, message)" @oncontextmenu:preventDefault="true">
                             <span class="mail-item-swipe mail-item-swipe--read" aria-hidden="true">
                                 <i class="bi @(message.Unread ? "bi-envelope-open" : "bi-envelope")"></i>@(message.Unread ? "Read" : "Unread")
                             </span>
@@ -594,6 +594,9 @@ else
             @if (single && !string.IsNullOrWhiteSpace(menu.Message.From.Address))
             {
                 <div class="mail-menu-separator" role="separator"></div>
+                <button type="button" role="menuitem" class="mail-menu-item" @onclick="() => OpenRulesAsync(menu.Message.From)">
+                    <i class="bi bi-funnel" aria-hidden="true"></i><span class="text-truncate">Make a rule for @Name(menu.Message.From)…</span>
+                </button>
                 <button type="button" role="menuitem" class="mail-menu-item" @onclick="() => FindFromAsync(menu.Message.From)">
                     <i class="bi bi-search" aria-hidden="true"></i><span class="text-truncate">Find emails from @Name(menu.Message.From)</span>
                 </button>
@@ -642,6 +645,7 @@ else
             {
                 <button type="button" role="menuitem" class="mail-menu-item" @onclick="StartEditAccount"><i class="bi bi-pencil" aria-hidden="true"></i>Edit this mailbox</button>
                 <button type="button" role="menuitem" class="mail-menu-item" @onclick="OpenSenderTabsAsync"><i class="bi bi-person-lines-fill" aria-hidden="true"></i>Senders sorted into tabs</button>
+                <button type="button" role="menuitem" class="mail-menu-item" @onclick="() => OpenRulesAsync(null)"><i class="bi bi-funnel" aria-hidden="true"></i>Mail rules</button>
             }
             <button type="button" role="menuitem" class="mail-menu-item mail-menu-item--danger" @onclick="() => { _accountMenuOpen = false; _confirmRemove = true; }">
                 <i class="bi bi-box-arrow-right" aria-hidden="true"></i><span class="text-truncate">Remove @_account.Address</span>
@@ -658,6 +662,119 @@ else
     <ConfirmModal Show="_confirmRemove" Title="Remove this mailbox?" ConfirmText="Remove"
                   Message="@($"{_account.Address} leaves Mail. Nothing from it is kept in the app, and you can connect it again any time.")"
                   OnConfirm="DisconnectAsync" OnCancel="() => _confirmRemove = false" />
+
+    @if (_rules is { } rules)
+    {
+        @* Mail rules (phase 6, 21-11-26): run on new inbox mail every few minutes; the first that matches acts. *@
+        <div class="modal-backdrop fade show"></div>
+        <div class="modal d-block" tabindex="-1" role="dialog" aria-modal="true" aria-labelledby="mail-rules-title">
+            <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable modal-lg"><div class="modal-content">
+                <div class="modal-header">
+                    <h2 class="modal-title h5" id="mail-rules-title">@(_ruleDraft is null ? "Mail rules" : _ruleDraft.Id == Guid.Empty ? "New rule" : "Edit rule")</h2>
+                    <button type="button" class="btn-close" aria-label="Close" @onclick="CloseRules"></button>
+                </div>
+                <div class="modal-body">
+                    @if (_ruleDraft is { } draft)
+                    {
+                        <div class="mail-rule-editor">
+                            <label class="form-label small" for="mail-rule-name">Name</label>
+                            <input id="mail-rule-name" class="form-control form-control-sm" @bind="draft.Name" @bind:event="oninput" maxlength="100" placeholder="Power bills" />
+                            <div class="mail-rule-line">
+                                <span>For new inbox mail that matches</span>
+                                <select class="form-select form-select-sm w-auto" @bind="draft.Match" aria-label="Match all or any conditions">
+                                    <option value="all">all of these</option>
+                                    <option value="any">any of these</option>
+                                </select>
+                            </div>
+                            @foreach (var condition in draft.Conditions)
+                            {
+                                <div class="mail-rule-condition">
+                                    <select class="form-select form-select-sm" @bind="condition.Field" aria-label="What to check">
+                                        @foreach (var (key, label) in MailRuleFields.All) { <option value="@key">@label</option> }
+                                    </select>
+                                    <select class="form-select form-select-sm" @bind="condition.Op" aria-label="How to compare">
+                                        @foreach (var (key, label) in MailRuleOps.All) { <option value="@key">@label</option> }
+                                    </select>
+                                    <input class="form-control form-control-sm" @bind="condition.Value" @bind:event="oninput" maxlength="200" aria-label="Value" placeholder="@("@amazon.com")" />
+                                    <button type="button" class="btn btn-sm btn-link" aria-label="Remove this condition" disabled="@(draft.Conditions.Count == 1)" @onclick="() => draft.Conditions.Remove(condition)"><i class="bi bi-x-lg" aria-hidden="true"></i></button>
+                                </div>
+                            }
+                            @if (draft.Conditions.Count < MailRuleEngine.MaxConditions)
+                            {
+                                <button type="button" class="btn btn-sm btn-link px-0" @onclick="() => draft.Conditions.Add(new RuleConditionDraft())"><i class="bi bi-plus-lg me-1" aria-hidden="true"></i>Add a condition</button>
+                            }
+                            <div class="mail-rule-line mt-2"><span>Then</span></div>
+                            <div class="mail-rule-actions">
+                                <label class="form-check">
+                                    <input type="checkbox" class="form-check-input" @bind="draft.ToFolder" disabled="@(_customFolders.Count == 0)" />
+                                    <span>Move to @FolderWord.ToLowerInvariant()[..^1]</span>
+                                    <select class="form-select form-select-sm w-auto" @bind="draft.Folder" disabled="@(!draft.ToFolder)" aria-label="Which folder">
+                                        <option value="">Choose…</option>
+                                        @foreach (var folder in _customFolders) { <option value="@folder.Key">@folder.Label</option> }
+                                    </select>
+                                </label>
+                                <label class="form-check">
+                                    <input type="checkbox" class="form-check-input" @bind="draft.ToTab" />
+                                    <span>Put in the tab</span>
+                                    <select class="form-select form-select-sm w-auto" @bind="draft.Tab" disabled="@(!draft.ToTab)" aria-label="Which tab">
+                                        @foreach (var tab in MailTabs.All) { <option value="@tab.Key">@tab.Label</option> }
+                                    </select>
+                                </label>
+                                <label class="form-check"><input type="checkbox" class="form-check-input" @bind="draft.Read" /><span>Mark as read</span></label>
+                                <label class="form-check"><input type="checkbox" class="form-check-input" @bind="draft.Star" /><span>Star it</span></label>
+                                <label class="form-check"><input type="checkbox" class="form-check-input" @bind="draft.Archive" disabled="@draft.ToFolder" /><span>Archive it (skip the inbox)</span></label>
+                            </div>
+                            @if (_ruleError is { } ruleError)
+                            {
+                                <p class="text-danger small mt-2 mb-0" role="alert">@ruleError</p>
+                            }
+                        </div>
+                    }
+                    else if (rules.Count == 0)
+                    {
+                        <p class="small text-secondary">No rules yet. A rule files new mail for you: for example, mail from <strong>@("@georgiapower.com")</strong> goes to a Bills folder and is marked read.</p>
+                    }
+                    else
+                    {
+                        <p class="small text-secondary">Rules run on new inbox mail every few minutes. The first rule that matches a message is the one used.</p>
+                        <ul class="list-unstyled mb-0 mail-rules">
+                            @foreach (var rule in rules)
+                            {
+                                <li>
+                                    <label class="form-check form-switch mb-0" title="@(rule.Enabled ? "On" : "Off")">
+                                        <input type="checkbox" role="switch" class="form-check-input" checked="@rule.Enabled" aria-label="@($"{rule.Name} on")" @onchange="() => ToggleRuleAsync(rule)" />
+                                    </label>
+                                    <span class="mail-rule-text">
+                                        <strong>@rule.Name</strong>
+                                        <span class="small text-secondary">@RuleSummary(rule)</span>
+                                    </span>
+                                    <button type="button" class="btn btn-sm btn-link" @onclick="() => EditRule(rule)">Edit</button>
+                                    <button type="button" class="btn btn-sm btn-link text-danger" @onclick="() => DeleteRuleAsync(rule)">Delete</button>
+                                </li>
+                            }
+                        </ul>
+                    }
+                </div>
+                <div class="modal-footer">
+                    @if (_ruleDraft is not null)
+                    {
+                        <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => { _ruleDraft = null; _ruleError = null; }">Cancel</button>
+                        <button type="button" class="btn btn-sm btn-primary" disabled="@(_ruleBusy || string.IsNullOrWhiteSpace(_ruleDraft.Name))" @onclick="SaveRuleAsync">Save rule</button>
+                    }
+                    else
+                    {
+                        @if (rules.Count > 0)
+                        {
+                            <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@_ruleBusy" @onclick="RunRulesNowAsync" title="Run the rules on what's already in the inbox">
+                                @if (_ruleBusy) { <span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span> }Run on inbox now
+                            </button>
+                        }
+                        <button type="button" class="btn btn-sm btn-primary" @onclick="() => _ruleDraft = new RuleDraft()"><i class="bi bi-plus-lg me-1" aria-hidden="true"></i>New rule</button>
+                    }
+                </div>
+            </div></div>
+        </div>
+    }
 
     @if (_senderTabs is { } senderTabs)
     {
@@ -1414,6 +1531,156 @@ else
         catch (MailException ex) { _error = ex.Message; }
     }
 
+    // ---- Mail rules (phase 6, 21-11-26) ----
+    private IReadOnlyList<MailRuleView>? _rules;
+    private RuleDraft? _ruleDraft;
+    private string? _ruleError;
+    private bool _ruleBusy;
+
+    private sealed class RuleConditionDraft
+    {
+        public string Field { get; set; } = MailRuleFields.From;
+        public string Op { get; set; } = MailRuleOps.Contains;
+        public string Value { get; set; } = string.Empty;
+    }
+
+    private sealed class RuleDraft
+    {
+        public Guid Id { get; set; }
+        public string Name { get; set; } = string.Empty;
+        public bool MatchAll { get; set; } = true;
+        // The select's value: a bool binds as "true"/"false", which matched no option and showed blank.
+        public string Match { get => MatchAll ? "all" : "any"; set => MatchAll = value != "any"; }
+        public List<RuleConditionDraft> Conditions { get; set; } = [new()];
+        public bool ToFolder { get; set; }
+        public string Folder { get; set; } = string.Empty;
+        public bool ToTab { get; set; }
+        public string Tab { get; set; } = MailTabs.Primary.Key;
+        public bool Read { get; set; }
+        public bool Star { get; set; }
+        public bool Archive { get; set; }
+        public bool Enabled { get; set; } = true;
+    }
+
+    private async Task OpenRulesAsync(MailAddress? from)
+    {
+        CloseMenus();
+        if (_account is not { } account) return;
+        try
+        {
+            _rules = await GatedAsync(() => MailService.ListRulesAsync(_username, account.Id));
+            _ruleError = null;
+            _ruleDraft = from is null ? null : new RuleDraft
+            {
+                Name = string.IsNullOrWhiteSpace(from.Name) ? from.Address : from.Name,
+                Conditions = [new RuleConditionDraft { Value = from.Address }]
+            };
+        }
+        catch (MailException ex) { _error = ex.Message; }
+    }
+
+    private void CloseRules()
+    {
+        _rules = null;
+        _ruleDraft = null;
+        _ruleError = null;
+    }
+
+    private void EditRule(MailRuleView rule)
+    {
+        string Target(string kind) => rule.Actions.FirstOrDefault(action => action.Kind == kind)?.Target ?? string.Empty;
+        bool Has(string kind) => rule.Actions.Any(action => action.Kind == kind);
+        _ruleError = null;
+        _ruleDraft = new RuleDraft
+        {
+            Id = rule.Id, Name = rule.Name, MatchAll = rule.MatchAll, Enabled = rule.Enabled,
+            Conditions = rule.Conditions.Select(c => new RuleConditionDraft { Field = c.Field, Op = c.Op, Value = c.Value }).ToList(),
+            ToFolder = Has(MailRuleActionKinds.Folder), Folder = Target(MailRuleActionKinds.Folder),
+            ToTab = Has(MailRuleActionKinds.Tab), Tab = Has(MailRuleActionKinds.Tab) ? Target(MailRuleActionKinds.Tab) : MailTabs.Primary.Key,
+            Read = Has(MailRuleActionKinds.Read), Star = Has(MailRuleActionKinds.Star), Archive = Has(MailRuleActionKinds.Archive)
+        };
+    }
+
+    private static MailRuleView ToRule(RuleDraft draft)
+    {
+        var actions = new List<MailRuleAction>();
+        if (draft.ToFolder) actions.Add(new(MailRuleActionKinds.Folder, draft.Folder));
+        if (draft.ToTab) actions.Add(new(MailRuleActionKinds.Tab, draft.Tab));
+        if (draft.Read) actions.Add(new(MailRuleActionKinds.Read));
+        if (draft.Star) actions.Add(new(MailRuleActionKinds.Star));
+        if (draft.Archive && !draft.ToFolder) actions.Add(new(MailRuleActionKinds.Archive));
+        return new MailRuleView(draft.Id, draft.Name, draft.Enabled, draft.MatchAll,
+            draft.Conditions.Select(c => new MailRuleCondition(c.Field, c.Op, c.Value)).ToList(), actions, 0);
+    }
+
+    private async Task SaveRuleAsync()
+    {
+        if (_account is not { } account || _ruleDraft is not { } draft) return;
+        _ruleBusy = true;
+        try
+        {
+            await GatedAsync(() => MailService.SaveRuleAsync(_username, account.Id, ToRule(draft)));
+            _rules = await GatedAsync(() => MailService.ListRulesAsync(_username, account.Id));
+            _ruleDraft = null;
+            _ruleError = null;
+        }
+        catch (MailException ex) { _ruleError = ex.Message; }
+        finally { _ruleBusy = false; }
+    }
+
+    private async Task ToggleRuleAsync(MailRuleView rule)
+    {
+        if (_account is not { } account) return;
+        try
+        {
+            await GatedAsync(() => MailService.SaveRuleAsync(_username, account.Id, rule with { Enabled = !rule.Enabled }));
+            _rules = await GatedAsync(() => MailService.ListRulesAsync(_username, account.Id));
+        }
+        catch (MailException ex) { _ruleError = ex.Message; }
+    }
+
+    private async Task DeleteRuleAsync(MailRuleView rule)
+    {
+        if (_account is not { } account) return;
+        try
+        {
+            await GatedAsync(async () => { await MailService.DeleteRuleAsync(_username, account.Id, rule.Id); return true; });
+            _rules = await GatedAsync(() => MailService.ListRulesAsync(_username, account.Id));
+            ShowSnack($"Deleted the rule {rule.Name}.", null, account.Id);
+        }
+        catch (MailException ex) { _error = ex.Message; }
+    }
+
+    private async Task RunRulesNowAsync()
+    {
+        if (_account is not { } account) return;
+        _ruleBusy = true;
+        try
+        {
+            var acted = await GatedAsync(() => MailService.RunRulesAsync(_username, account.Id, includeExisting: true));
+            ShowSnack(acted == 0 ? "No inbox mail matched a rule." : $"Rules filed {Count(acted, "message")}.", null, account.Id);
+            MailUnread.Invalidate(_username);
+            await LoadListAsync(reset: true);
+        }
+        catch (MailException ex) { _ruleError = ex.Message; }
+        finally { _ruleBusy = false; }
+    }
+
+    private string RuleSummary(MailRuleView rule)
+    {
+        var when = string.Join(rule.MatchAll ? " and " : " or ", rule.Conditions.Select(c =>
+            $"{MailRuleFields.All.FirstOrDefault(f => f.Key == c.Field).Label?.ToLowerInvariant()} {MailRuleOps.All.FirstOrDefault(o => o.Key == c.Op).Label} \"{c.Value}\""));
+        var then = string.Join(", ", rule.Actions.Select(a => a.Kind switch
+        {
+            MailRuleActionKinds.Folder => $"move to {_customFolders.FirstOrDefault(f => f.Key == a.Target)?.Label ?? "a folder"}",
+            MailRuleActionKinds.Tab => $"put in {MailTabs.Find(a.Target)?.Label ?? "a tab"}",
+            MailRuleActionKinds.Read => "mark read",
+            MailRuleActionKinds.Star => "star",
+            _ => "archive"
+        }));
+        return $"When {when}: {then}.";
+    }
+
     private IReadOnlyList<MailSenderTabView>? _senderTabs;
 
     private async Task OpenSenderTabsAsync()
@@ -1480,6 +1747,19 @@ else
     private bool _showShortcuts;
 
     // Right: read or unread. Left: delete. True when the message left the list.
+    // Drag and drop (21-11-26): a message dropped on a tab or one of your folders moves there, as
+    // right-click "Move to tab" / "Move to folder" does (Undo, and a tab remembers the sender). A dragged
+    // message that's selected brings the whole selection.
+    [JSInvokable]
+    public Task OnDropMail(string id, string targetKey) => InvokeAsync(async () =>
+    {
+        if (_messages.FirstOrDefault(message => message.Id == id) is not { } dragged) return;
+        var targets = _checked.Contains(id) ? _messages.Where(message => _checked.Contains(message.Id)).ToList() : [dragged];
+        if (MailTabs.Find(targetKey) is not null && ShowTabs) await MoveToTabAsync(targets, targetKey);
+        else if (_customFolders.FirstOrDefault(folder => folder.Key == targetKey) is { } folder) await MoveToFolderAsync(targets, folder);
+        StateHasChanged();
+    });
+
     [JSInvokable]
     public async Task<bool> OnSwipe(string id, string side)
     {

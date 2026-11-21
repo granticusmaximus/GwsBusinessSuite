@@ -190,6 +190,14 @@ public interface IMailService
         throw new NotSupportedException();
     Task<MailActionResult> MoveToFolderAsync(string username, Guid accountId, IReadOnlyList<string> messageIds, string folderKey, CancellationToken cancellationToken = default) =>
         throw new NotSupportedException();
+    // Mail rules (phase 6): the mailbox's rules in order, saving one (Id Guid.Empty adds it), deleting
+    // one, and running them now (includeExisting: on what's already in the inbox, not only new mail).
+    Task<IReadOnlyList<MailRuleView>> ListRulesAsync(string username, Guid accountId, CancellationToken cancellationToken = default) =>
+        Task.FromResult<IReadOnlyList<MailRuleView>>([]);
+    Task<MailRuleView> SaveRuleAsync(string username, Guid accountId, MailRuleView rule, CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException();
+    Task DeleteRuleAsync(string username, Guid accountId, Guid ruleId, CancellationToken cancellationToken = default) => Task.CompletedTask;
+    Task<int> RunRulesAsync(string username, Guid accountId, bool includeExisting, CancellationToken cancellationToken = default) => Task.FromResult(0);
     // Senders the person moved to a tab, and forgetting one.
     Task<IReadOnlyList<MailSenderTabView>> ListSenderTabsAsync(string username, Guid accountId, CancellationToken cancellationToken = default) =>
         Task.FromResult<IReadOnlyList<MailSenderTabView>>([]);

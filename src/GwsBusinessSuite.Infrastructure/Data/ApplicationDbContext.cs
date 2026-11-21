@@ -146,6 +146,8 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<MailAccount> MailAccounts => Set<MailAccount>();
     public DbSet<MailMessageTab> MailMessageTabs => Set<MailMessageTab>();
     public DbSet<MailSenderTab> MailSenderTabs => Set<MailSenderTab>();
+    public DbSet<MailRule> MailRules => Set<MailRule>();
+    public DbSet<MailRuleSeen> MailRuleSeen => Set<MailRuleSeen>();
     public DbSet<SentinelInboundEmail> SentinelInboundEmails => Set<SentinelInboundEmail>();
     public DbSet<SupportMailboxSettings> SupportMailboxSettings => Set<SupportMailboxSettings>();
     public DbSet<SupportInboundEmail> SupportInboundEmails => Set<SupportInboundEmail>();
@@ -534,6 +536,8 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         modelBuilder.Entity<MailMessageTab>().HasIndex(x => new { x.AccountId, x.MessageKey }).IsUnique();
         modelBuilder.Entity<MailMessageTab>().HasIndex(x => new { x.Source, x.AccountId });
         modelBuilder.Entity<MailSenderTab>().HasIndex(x => new { x.AccountId, x.Sender }).IsUnique();
+        modelBuilder.Entity<MailRule>().HasIndex(x => new { x.AccountId, x.Order });
+        modelBuilder.Entity<MailRuleSeen>().HasIndex(x => new { x.AccountId, x.MessageKey }).IsUnique();
         modelBuilder.Entity<SentinelPasskey>().HasIndex(x => x.CredentialId).IsUnique();
         modelBuilder.Entity<SentinelPasskey>().HasIndex(x => x.Username);
         modelBuilder.Entity<SentinelDeviceKey>().HasIndex(x => x.Username);
