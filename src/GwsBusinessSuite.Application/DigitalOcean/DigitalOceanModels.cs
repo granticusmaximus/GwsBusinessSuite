@@ -74,3 +74,34 @@ public sealed class DropletActionView
 }
 
 public sealed record DigitalOceanActionResult(bool Succeeded, string Message);
+
+public sealed record DropletContainerImageView(
+    string ContainerName,
+    string Image,
+    string State,
+    string Status);
+
+public sealed class ActiveDropletView
+{
+    public long Id { get; init; }
+    public string Name { get; init; } = string.Empty;
+    public string Status { get; init; } = string.Empty;
+    public string Region { get; init; } = string.Empty;
+    public string Size { get; init; } = string.Empty;
+    public string? PublicIpAddress { get; init; }
+    public string? PrivateIpAddress { get; init; }
+    public string? MemoryDescription { get; init; }
+    public string? DiskDescription { get; init; }
+    public string? VcpuDescription { get; init; }
+    public string BaseImageName { get; init; } = string.Empty;
+    public string? BaseImageSlug { get; init; }
+    public string? BaseImageType { get; init; }
+    public bool IsCurrentHost { get; init; }
+    public IReadOnlyList<DropletContainerImageView> ActiveContainerImages { get; init; } = Array.Empty<DropletContainerImageView>();
+    public string? ContainerProbeStatus { get; init; }
+}
+
+public sealed record ActiveDropletsImagesResult(
+    bool Available,
+    IReadOnlyList<ActiveDropletView> Droplets,
+    string? UnavailableReason = null);

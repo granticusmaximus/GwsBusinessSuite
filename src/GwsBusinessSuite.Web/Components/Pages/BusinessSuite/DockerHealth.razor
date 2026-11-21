@@ -7,6 +7,7 @@
 @using GwsBusinessSuite.Application.Abstractions
 @inject IDockerHealthService DockerHealthService
 @inject IDigitalOceanService DigitalOceanService
+@inject IDropletRemoteDockerService DropletRemoteDockerService
 @inject IDockerDeploymentService DockerDeploymentService
 @inject IWebHostEnvironment Env
 @inject ICurrentUserAccessor CurrentUserAccessor
@@ -119,6 +120,243 @@
     </div>
 </div>
 
+@if (HasDoApiToken)
+{
+    <div class="card border-0 shadow-sm mb-4">
+        <div class="card-header bg-white border-bottom py-3 d-flex align-items-center justify-content-between">
+            <span class="fw-semibold">
+                <i class="bi bi-hdd-stack me-1 text-secondary"></i>Active Droplets &amp; Images
+                @if (ActiveDropletsResult is { Available: true } activeResult)
+                {
+                    <span class="badge text-bg-light border ms-2">@activeResult.Droplets.Count active</span>
+                }
+            </span>
+            <button type="button" class="btn btn-sm btn-outline-primary d-inline-flex align-items-center gap-1"
+                    @onclick="RefreshActiveDropletsAsync" disabled="@IsLoadingActiveDroplets">
+                @if (IsLoadingActiveDroplets)
+                {
+                    <InlineProgress />
+                }
+                else
+                {
+                    <i class="bi bi-arrow-clockwise" aria-hidden="true"></i>
+                }
+                <span>Refresh Droplets</span>
+            </button>
+        </div>
+        <div class="card-body">
+            @if (IsLoadingActiveDroplets && ActiveDropletsResult is null)
+            {
+                <LoadingIndicator Message="Inspecting active droplets and images…" CssClass="text-secondary" />
+            }
+            else if (ActiveDropletsResult is { Available: false, UnavailableReason: { } activeUnavailable })
+            {
+                <div class="small text-secondary"><i class="bi bi-info-circle me-1"></i>@activeUnavailable</div>
+            }
+            else if (ActiveDropletsResult is { Available: true, Droplets.Count: 0 })
+            {
+                <div class="small text-secondary">No active droplets found in this DigitalOcean account.</div>
+            }
+            else if (ActiveDropletsResult is { Available: true, Droplets: { } activeDroplets })
+            {
+                <div class="row g-3">
+                    @foreach (var d in activeDroplets)
+                    {
+                        <div class="col-md-6">
+                            <div class="border rounded p-3 h-100">
+                                <div class="d-flex align-items-center justify-content-between mb-1">
+                                    <div class="fw-semibold">
+                                        @d.Name
+                                        @if (d.IsCurrentHost)
+                                        {
+                                            <span class="badge text-bg-info ms-1">This host</span>
+                                        }
+                                    </div>
+                                    <span class="badge text-bg-success">@d.Status</span>
+                                </div>
+                                <div class="small text-secondary mb-2">
+                                    @d.Region &middot; @d.Size
+                                    @if (d.VcpuDescription is not null) { <text> &middot; @d.VcpuDescription</text> }
+                                    @if (d.MemoryDescription is not null) { <text> &middot; @d.MemoryDescription</text> }
+                                    @if (d.DiskDescription is not null) { <text> &middot; @d.DiskDescription</text> }
+                                </div>
+                                <div class="small text-secondary mb-2">
+                                    @if (d.PublicIpAddress is not null)
+                                    {
+                                        <span>Public: <code>@d.PublicIpAddress</code></span>
+                                    }
+                                    @if (d.PrivateIpAddress is not null)
+                                    {
+                                        <span class="@(d.PublicIpAddress is not null ? "ms-2" : "")">Private: <code>@d.PrivateIpAddress</code></span>
+                                    }
+                                </div>
+                                <div class="small mb-2">
+                                    <strong>Droplet Image:</strong> @d.BaseImageName
+                                    @if (!string.IsNullOrWhiteSpace(d.BaseImageSlug))
+                                    {
+                                        <span class="text-secondary"> (<code>@d.BaseImageSlug</code>)</span>
+                                    }
+                                    @if (!string.IsNullOrWhiteSpace(d.BaseImageType))
+                                    {
+                                        <span class="badge text-bg-light border ms-1">@d.BaseImageType</span>
+                                    }
+                                </div>
+                                <div class="small mb-2">
+                                    <strong>Active Container Images:</strong>
+                                    @if (d.ActiveContainerImages.Count > 0)
+                                    {
+                                        <ul class="list-unstyled mb-0 mt-1">
+                                            @foreach (var img in d.ActiveContainerImages)
+                                            {
+                                                <li class="mb-2">
+                                                    <div class="d-flex flex-wrap align-items-center justify-content-between gap-1">
+                                                        <span>
+                                                            <span class="fw-medium">@img.ContainerName</span>
+                                                            <span class="text-secondary"> &rarr; </span>
+                                                            <code>@img.Image</code>
+                                                            <span class="text-secondary"> (@img.Status)</span>
+                                                        </span>
+                                                        <span class="d-inline-flex gap-1">
+                                                            <button type="button" class="btn btn-sm btn-outline-secondary py-0 px-1"
+                                                                    disabled="@IsDropletBusy(d.Id)"
+                                                                    @onclick="() => TailRemoteLogsAsync(d, img.ContainerName)">Logs</button>
+                                                            <button type="button" class="btn btn-sm btn-outline-primary py-0 px-1"
+                                                                    disabled="@IsDropletBusy(d.Id)"
+                                                                    @onclick="() => RequestRemoteAction(d, RemoteDropletActionKind.Pull, img.Image)">Pull</button>
+                                                            <button type="button" class="btn btn-sm btn-outline-warning py-0 px-1"
+                                                                    disabled="@IsDropletBusy(d.Id)"
+                                                                    @onclick="() => RequestRemoteAction(d, RemoteDropletActionKind.RestartContainer, img.ContainerName)">Restart</button>
+                                                        </span>
+                                                    </div>
+                                                </li>
+                                            }
+                                        </ul>
+                                    }
+                                    else if (!string.IsNullOrWhiteSpace(d.ContainerProbeStatus))
+                                    {
+                                        <div class="text-secondary mt-1">@d.ContainerProbeStatus</div>
+                                    }
+                                    else
+                                    {
+                                        <div class="text-secondary mt-1">No running Docker containers.</div>
+                                    }
+                                </div>
+
+                                <div class="d-flex flex-wrap gap-1 mt-2">
+                                    <button type="button" class="btn btn-sm btn-outline-primary"
+                                            disabled="@IsDropletBusy(d.Id)"
+                                            @onclick="() => InspectDropletDetailsAsync(d)">
+                                        @(IsDropletInspecting(d.Id) ? "Inspecting…" : "Inspect Images & Disk")
+                                    </button>
+                                    <button type="button" class="btn btn-sm btn-outline-secondary"
+                                            disabled="@IsDropletBusy(d.Id)"
+                                            @onclick="() => RequestRemoteAction(d, RemoteDropletActionKind.PruneDangling, null)">
+                                        Prune Dangling
+                                    </button>
+                                    <button type="button" class="btn btn-sm btn-outline-danger"
+                                            disabled="@IsDropletBusy(d.Id)"
+                                            @onclick="() => RequestRemoteAction(d, RemoteDropletActionKind.PruneStale, null)">
+                                        Prune Stale (&gt;7d)
+                                    </button>
+                                </div>
+
+                                @if (RemoteActionMessages.TryGetValue(d.Id, out var remoteMsg))
+                                {
+                                    <div class="small mt-2 @(remoteMsg.Succeeded ? "text-success" : "text-danger")">@remoteMsg.Message</div>
+                                }
+
+                                @if (DropletInspections.TryGetValue(d.Id, out var inspection))
+                                {
+                                    <hr class="my-2" />
+                                    @if (!inspection.Succeeded)
+                                    {
+                                        <div class="small text-danger">@inspection.ErrorMessage</div>
+                                    }
+                                    else
+                                    {
+                                        @if (inspection.DiskUsage.Count > 0)
+                                        {
+                                            <div class="small mb-2">
+                                                <strong>Docker Disk Usage:</strong>
+                                                <div class="table-responsive mt-1">
+                                                    <table class="table table-sm mb-0">
+                                                        <thead><tr><th>Type</th><th>Total</th><th>Active</th><th>Size</th><th>Reclaimable</th></tr></thead>
+                                                        <tbody>
+                                                            @foreach (var df in inspection.DiskUsage)
+                                                            {
+                                                                <tr><td>@df.Type</td><td>@df.TotalCount</td><td>@df.ActiveCount</td><td>@df.Size</td><td>@df.Reclaimable</td></tr>
+                                                            }
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                            </div>
+                                        }
+                                        @if (inspection.CachedImages.Count > 0)
+                                        {
+                                            <div class="small mb-2">
+                                                <strong>Cached Images (@inspection.CachedImages.Count):</strong>
+                                                <ul class="list-unstyled mb-0 mt-1">
+                                                    @foreach (var cached in inspection.CachedImages)
+                                                    {
+                                                        <li>
+                                                            <code>@cached.FullName</code>
+                                                            <span class="text-secondary"> &middot; @cached.Size &middot; @cached.ImageId</span>
+                                                            @if (cached.IsDangling)
+                                                            {
+                                                                <span class="badge text-bg-warning ms-1">dangling</span>
+                                                            }
+                                                        </li>
+                                                    }
+                                                </ul>
+                                            </div>
+                                        }
+                                        @if (inspection.AiRuntime is { Installed: true } ai)
+                                        {
+                                            <div class="small mb-2">
+                                                <div class="d-flex align-items-center justify-content-between gap-2">
+                                                    <span>
+                                                        <strong>AI Runtime:</strong> Ollama <code>@ai.OllamaServiceState</code>
+                                                        &middot; Watchdog <code>@ai.WatchdogTimerState</code>
+                                                    </span>
+                                                    <button type="button" class="btn btn-sm btn-outline-warning py-0 px-2"
+                                                            disabled="@IsDropletBusy(d.Id)"
+                                                            @onclick="() => RequestRemoteAction(d, RemoteDropletActionKind.RestartOllama, null)">
+                                                        Restart Ollama
+                                                    </button>
+                                                </div>
+                                                @if (ai.Models.Count > 0)
+                                                {
+                                                    <ul class="list-unstyled mb-0 mt-1">
+                                                        @foreach (var m in ai.Models)
+                                                        {
+                                                            <li><code>@m.Name</code> <span class="text-secondary">&middot; @m.Size</span></li>
+                                                        }
+                                                    </ul>
+                                                }
+                                            </div>
+                                        }
+                                    }
+                                }
+
+                                @if (DropletLogs.TryGetValue(d.Id, out var remoteLogs))
+                                {
+                                    <div class="small mt-2">
+                                        <div class="d-flex align-items-center justify-content-between">
+                                            <strong>Logs (@remoteLogs.ContainerName)</strong>
+                                            <button type="button" class="btn btn-sm btn-link p-0" @onclick="() => DropletLogs.Remove(d.Id)">Close</button>
+                                        </div>
+                                        <pre class="bg-dark text-light p-2 rounded mt-1 mb-0" style="max-height: 220px; overflow: auto; font-size: 0.75rem;">@remoteLogs.Content</pre>
+                                    </div>
+                                }
+                            </div>
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+    </div>
+}
+
 <div class="card border-0 shadow-sm mb-4">
     <div class="card-header bg-white border-bottom py-3">
         <span class="fw-semibold"><i class="bi bi-hammer me-1 text-secondary"></i>Build App Image</span>
@@ -214,6 +452,12 @@ else
 <ConfirmModal Show="PendingStopContainerName is not null" Title="Stop container" Message="@($"Stop {PendingStopContainerName}?")"
               ConfirmText="Stop" Busy="@(PendingStopContainerName is not null && IsContainerBusy(PendingStopContainerName))"
               OnConfirm="ConfirmStopAsync" OnCancel="() => PendingStopContainerName = null" />
+<ConfirmModal Show="PendingRemoteAction is not null"
+              Title="@(PendingRemoteAction?.Title ?? "Confirm remote action")"
+              Message="@(PendingRemoteAction?.Message ?? string.Empty)"
+              ConfirmText="@(PendingRemoteAction?.ConfirmText ?? "Run")"
+              Busy="@(PendingRemoteAction is not null && IsDropletBusy(PendingRemoteAction.Droplet.Id))"
+              OnConfirm="ConfirmRemoteActionAsync" OnCancel="() => PendingRemoteAction = null" />
 
 @code {
     private List<ContainerHealthView> Containers { get; set; } = new();
@@ -242,8 +486,33 @@ else
     private string DoSaveMessage { get; set; } = string.Empty;
     private DropletInfoResult? DropletResult { get; set; }
     private List<DropletActionView> DropletActions { get; set; } = new();
+    private ActiveDropletsImagesResult? ActiveDropletsResult { get; set; }
+    private bool IsLoadingActiveDroplets { get; set; }
     private bool ShowRebootConfirm { get; set; }
     private string? PendingStopContainerName { get; set; }
+    private readonly HashSet<long> _busyDroplets = new();
+    private readonly HashSet<long> _inspectingDroplets = new();
+    private Dictionary<long, DropletRemoteInspectionResult> DropletInspections { get; } = new();
+    private Dictionary<long, DockerActionResult> RemoteActionMessages { get; } = new();
+    private Dictionary<long, (string ContainerName, string Content)> DropletLogs { get; } = new();
+    private PendingRemoteDropletAction? PendingRemoteAction { get; set; }
+
+    private enum RemoteDropletActionKind
+    {
+        Pull,
+        RestartContainer,
+        PruneDangling,
+        PruneStale,
+        RestartOllama
+    }
+
+    private sealed record PendingRemoteDropletAction(
+        ActiveDropletView Droplet,
+        RemoteDropletActionKind Kind,
+        string? Target,
+        string Title,
+        string Message,
+        string ConfirmText);
 
     private Task OpenTerminalWindowAsync() => JS.InvokeVoidAsync("gwsSshTerminal.openWindow").AsTask();
 
@@ -297,6 +566,26 @@ else
             {
                 DropletActions = (await DigitalOceanService.ListRecentActionsAsync()).ToList();
             }
+            await RefreshActiveDropletsAsync();
+        }
+    }
+
+    private async Task RefreshActiveDropletsAsync()
+    {
+        if (!HasDoApiToken) return;
+        IsLoadingActiveDroplets = true;
+        try
+        {
+            ActiveDropletsResult = await DigitalOceanService.ListActiveDropletsWithImagesAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Unable to load active DigitalOcean droplets and images.");
+            ActiveDropletsResult = new ActiveDropletsImagesResult(false, [], $"Unable to load active droplets: {ex.Message}");
+        }
+        finally
+        {
+            IsLoadingActiveDroplets = false;
         }
     }
 
@@ -318,6 +607,7 @@ else
             {
                 DropletActions = (await DigitalOceanService.ListRecentActionsAsync()).ToList();
             }
+            await RefreshActiveDropletsAsync();
         }
         catch (Exception ex)
         {
@@ -453,5 +743,91 @@ else
 
     private static string StatusLabel(ContainerHealthView c) =>
         c.IsError ? "Error" : c.State;
+
+    private bool IsDropletBusy(long dropletId) => _busyDroplets.Contains(dropletId);
+
+    private bool IsDropletInspecting(long dropletId) => _inspectingDroplets.Contains(dropletId);
+
+    private async Task InspectDropletDetailsAsync(ActiveDropletView droplet)
+    {
+        _busyDroplets.Add(droplet.Id);
+        _inspectingDroplets.Add(droplet.Id);
+        StateHasChanged();
+        try
+        {
+            DropletInspections[droplet.Id] = await DropletRemoteDockerService.InspectDropletAsync(droplet);
+        }
+        finally
+        {
+            _inspectingDroplets.Remove(droplet.Id);
+            _busyDroplets.Remove(droplet.Id);
+        }
+    }
+
+    private async Task TailRemoteLogsAsync(ActiveDropletView droplet, string containerName)
+    {
+        _busyDroplets.Add(droplet.Id);
+        StateHasChanged();
+        try
+        {
+            var result = await DropletRemoteDockerService.TailContainerLogsAsync(droplet, containerName);
+            DropletLogs[droplet.Id] = result.Succeeded
+                ? (containerName, result.Logs)
+                : (containerName, result.ErrorMessage ?? "Could not fetch logs.");
+        }
+        finally
+        {
+            _busyDroplets.Remove(droplet.Id);
+        }
+    }
+
+    private void RequestRemoteAction(ActiveDropletView droplet, RemoteDropletActionKind kind, string? target)
+    {
+        PendingRemoteAction = kind switch
+        {
+            RemoteDropletActionKind.Pull => new(droplet, kind, target, "Pull image on droplet",
+                $"Pull latest {target} on {droplet.Name}?", "Pull"),
+            RemoteDropletActionKind.RestartContainer => new(droplet, kind, target, "Restart container on droplet",
+                $"Restart container {target} on {droplet.Name}?", "Restart"),
+            RemoteDropletActionKind.PruneDangling => new(droplet, kind, target, "Prune dangling images",
+                $"Remove untagged (<none>) dangling Docker image layers on {droplet.Name}?", "Prune Dangling"),
+            RemoteDropletActionKind.PruneStale => new(droplet, kind, target, "Prune stale unused images",
+                $"Remove unused Docker images older than 7 days on {droplet.Name}? Recent rollback tags are preserved.", "Prune Stale"),
+            RemoteDropletActionKind.RestartOllama => new(droplet, kind, target, "Restart Ollama service",
+                $"Restart the ollama systemd service on {droplet.Name}?", "Restart Ollama"),
+            _ => null
+        };
+    }
+
+    private async Task ConfirmRemoteActionAsync()
+    {
+        if (PendingRemoteAction is not { } pending) return;
+        PendingRemoteAction = null;
+        _busyDroplets.Add(pending.Droplet.Id);
+        StateHasChanged();
+        try
+        {
+            var user = await CurrentUserNameAsync();
+            var result = pending.Kind switch
+            {
+                RemoteDropletActionKind.Pull => await DropletRemoteDockerService.PullImageAsync(pending.Droplet, pending.Target!, user),
+                RemoteDropletActionKind.RestartContainer => await DropletRemoteDockerService.RestartContainerAsync(pending.Droplet, pending.Target!, user),
+                RemoteDropletActionKind.PruneDangling => await DropletRemoteDockerService.PruneDanglingImagesAsync(pending.Droplet, user),
+                RemoteDropletActionKind.PruneStale => await DropletRemoteDockerService.PruneStaleImagesAsync(pending.Droplet, user),
+                RemoteDropletActionKind.RestartOllama => await DropletRemoteDockerService.RestartOllamaAsync(pending.Droplet, user),
+                _ => new DockerActionResult(false, "Unknown action.")
+            };
+            RemoteActionMessages[pending.Droplet.Id] = result;
+            if (result.Succeeded)
+            {
+                DropletInspections[pending.Droplet.Id] = await DropletRemoteDockerService.InspectDropletAsync(pending.Droplet);
+                await RefreshActiveDropletsAsync();
+            }
+        }
+        finally
+        {
+            _busyDroplets.Remove(pending.Droplet.Id);
+        }
+    }
 
 }

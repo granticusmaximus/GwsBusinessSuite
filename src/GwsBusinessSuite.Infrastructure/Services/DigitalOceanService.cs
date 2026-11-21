@@ -1,11 +1,15 @@
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Text;
 using System.Text.Json.Serialization;
 using GwsBusinessSuite.Application.Abstractions;
 using GwsBusinessSuite.Application.DigitalOcean;
+using GwsBusinessSuite.Application.DockerHealth;
 using GwsBusinessSuite.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using Renci.SshNet;
+using Renci.SshNet.Common;
 
 namespace GwsBusinessSuite.Infrastructure.Services;
 
@@ -14,7 +18,8 @@ public sealed class DigitalOceanService(
     IAppDbContext dbContext,
     ISecretProtector secretProtector,
     ILogger<DigitalOceanService> logger,
-    ICurrentUserAccessor? currentUserAccessor = null) : IDigitalOceanService
+    ICurrentUserAccessor? currentUserAccessor = null,
+    IDockerHealthService? dockerHealthService = null) : IDigitalOceanService
 {
     // DigitalOcean's local droplet metadata service - only reachable from inside the
     // droplet itself. Used to auto-detect the droplet's own ID so the user doesn't have
@@ -220,6 +225,286 @@ public sealed class DigitalOceanService(
     public async Task<DigitalOceanActionResult> CreateSnapshotAsync(string snapshotName, string performedBy, CancellationToken cancellationToken = default) =>
         await PostActionAsync("snapshot", new { name = snapshotName }, performedBy, cancellationToken);
 
+    public async Task<ActiveDropletsImagesResult> ListActiveDropletsWithImagesAsync(CancellationToken cancellationToken = default)
+    {
+        var row = await dbContext.DigitalOceanSettings.AsNoTracking().OrderBy(oneRow => oneRow.Id).FirstOrDefaultAsync(cancellationToken);
+        if (row is null || string.IsNullOrWhiteSpace(row.ApiToken))
+        {
+            return new ActiveDropletsImagesResult(false, [], "DigitalOcean isn't connected yet. Add an API token below.");
+        }
+
+        var (apiToken, isTokenUnreadable) = UnprotectApiToken(row.ApiToken);
+        if (isTokenUnreadable || string.IsNullOrWhiteSpace(apiToken))
+        {
+            return new ActiveDropletsImagesResult(false, [], "Saved DigitalOcean API token could not be decrypted. Re-enter it below.");
+        }
+
+        IReadOnlyList<DropletDto> droplets;
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, "droplets?per_page=200");
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiToken);
+            var response = await httpClient.SendAsync(request, cancellationToken);
+            if (!response.IsSuccessStatusCode)
+            {
+                return new ActiveDropletsImagesResult(false, [], $"DigitalOcean API returned {(int)response.StatusCode}. Check the API token.");
+            }
+
+            var payload = await response.Content.ReadFromJsonAsync<DropletsListResponse>(cancellationToken);
+            if (payload?.Droplets is null)
+            {
+                return new ActiveDropletsImagesResult(false, [], "DigitalOcean API returned an unexpected response.");
+            }
+
+            droplets = payload.Droplets
+                .Where(d => string.Equals(d.Status, "active", StringComparison.OrdinalIgnoreCase))
+                .OrderBy(d => d.Name, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            logger.LogWarning(ex, "Failed to list DigitalOcean droplets.");
+            return new ActiveDropletsImagesResult(false, [], "Could not reach the DigitalOcean API.");
+        }
+
+        var currentDropletId = !string.IsNullOrWhiteSpace(row.DropletId)
+            ? row.DropletId.Trim()
+            : await TryAutoDetectDropletIdAsync(cancellationToken);
+
+        var sshCredentials = TryLoadSshCredentials(row);
+        var views = await Task.WhenAll(droplets.Select(droplet =>
+            InspectDropletAsync(droplet, currentDropletId, row, sshCredentials, cancellationToken)));
+
+        return new ActiveDropletsImagesResult(true, views);
+    }
+
+    public static IReadOnlyList<DropletContainerImageView> ParseDockerPsOutput(string output)
+    {
+        if (string.IsNullOrWhiteSpace(output))
+        {
+            return [];
+        }
+
+        var results = new List<DropletContainerImageView>();
+        foreach (var rawLine in output.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries))
+        {
+            var parts = rawLine.Split('\t');
+            if (parts.Length < 2)
+            {
+                continue;
+            }
+
+            var name = parts[0].Trim();
+            var image = parts[1].Trim();
+            var state = parts.Length >= 3 ? parts[2].Trim() : "running";
+            var status = parts.Length >= 4 ? parts[3].Trim() : state;
+            if (name.Length == 0 || image.Length == 0)
+            {
+                continue;
+            }
+
+            results.Add(new DropletContainerImageView(name, image, state, status));
+        }
+
+        return results.OrderBy(c => c.ContainerName, StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    private async Task<ActiveDropletView> InspectDropletAsync(
+        DropletDto droplet,
+        string? currentDropletId,
+        DigitalOceanSettings settings,
+        SshCredentialsResult sshCredentials,
+        CancellationToken cancellationToken)
+    {
+        var publicIp = droplet.Networks?.V4?.FirstOrDefault(n => n.Type == "public")?.IpAddress;
+        var privateIp = droplet.Networks?.V4?.FirstOrDefault(n => n.Type == "private")?.IpAddress;
+        var isCurrentHost = !string.IsNullOrWhiteSpace(currentDropletId)
+            && string.Equals(droplet.Id.ToString(), currentDropletId, StringComparison.Ordinal);
+
+        IReadOnlyList<DropletContainerImageView> containerImages = [];
+        string? probeStatus = null;
+
+        if (isCurrentHost && dockerHealthService is not null)
+        {
+            var local = await dockerHealthService.ListContainersAsync(cancellationToken);
+            if (local.Available)
+            {
+                containerImages = local.Containers
+                    .Where(c => string.Equals(c.State, "running", StringComparison.OrdinalIgnoreCase))
+                    .Select(c => new DropletContainerImageView(c.Name, c.Image, c.State, c.Status))
+                    .OrderBy(c => c.ContainerName, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+                if (containerImages.Count == 0)
+                {
+                    probeStatus = "No running Docker containers.";
+                }
+                return BuildActiveDropletView(droplet, publicIp, privateIp, isCurrentHost, containerImages, probeStatus);
+            }
+        }
+
+        if (!sshCredentials.HasKey)
+        {
+            probeStatus = "Add an SSH private key in Terminal settings to inspect running Docker images on remote droplets.";
+        }
+        else if (sshCredentials.Error is not null)
+        {
+            probeStatus = sshCredentials.Error;
+        }
+        else
+        {
+            var hosts = new[] { publicIp, privateIp }
+                .Where(ip => !string.IsNullOrWhiteSpace(ip))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Cast<string>()
+                .ToList();
+            if (hosts.Count == 0)
+            {
+                probeStatus = "No IP address available for SSH inspection.";
+            }
+            else
+            {
+                var username = string.IsNullOrWhiteSpace(settings.SshUsername) ? "root" : settings.SshUsername;
+                var port = settings.SshPort <= 0 ? 22 : settings.SshPort;
+                var pinnedFingerprint = isCurrentHost ? settings.SshHostKeyFingerprint : null;
+                (containerImages, probeStatus) = await QueryRemoteDockerPsAsync(
+                    hosts, port, username, sshCredentials.PrivateKeyPem!, sshCredentials.Passphrase, pinnedFingerprint, cancellationToken);
+            }
+        }
+
+        return BuildActiveDropletView(droplet, publicIp, privateIp, isCurrentHost, containerImages, probeStatus);
+    }
+
+    private static ActiveDropletView BuildActiveDropletView(
+        DropletDto droplet,
+        string? publicIp,
+        string? privateIp,
+        bool isCurrentHost,
+        IReadOnlyList<DropletContainerImageView> containerImages,
+        string? probeStatus) => new()
+        {
+            Id = droplet.Id,
+            Name = droplet.Name,
+            Status = droplet.Status,
+            Region = droplet.Region?.Name ?? droplet.Region?.Slug ?? "unknown",
+            Size = droplet.SizeSlug,
+            PublicIpAddress = publicIp,
+            PrivateIpAddress = privateIp,
+            MemoryDescription = droplet.Size?.Memory is { } mem ? $"{mem / 1024.0:0.#} GB RAM" : null,
+            DiskDescription = droplet.Size?.Disk is { } disk ? $"{disk} GB disk" : null,
+            VcpuDescription = droplet.Vcpus is { } vcpus ? $"{vcpus} vCPU" : null,
+            BaseImageName = FormatBaseImageName(droplet.Image),
+            BaseImageSlug = droplet.Image?.Slug,
+            BaseImageType = droplet.Image?.Type,
+            IsCurrentHost = isCurrentHost,
+            ActiveContainerImages = containerImages,
+            ContainerProbeStatus = probeStatus
+        };
+
+    private static string FormatBaseImageName(DropletImageDto? image)
+    {
+        if (image is null) return "Unknown";
+        var dist = image.Distribution?.Trim();
+        var name = image.Name?.Trim();
+        if (string.IsNullOrEmpty(name)) return string.IsNullOrEmpty(dist) ? "Unknown" : dist;
+        if (string.IsNullOrEmpty(dist) || name.StartsWith(dist, StringComparison.OrdinalIgnoreCase)) return name;
+        return $"{dist} {name}";
+    }
+
+    private sealed record SshCredentialsResult(bool HasKey, string? PrivateKeyPem, string? Passphrase, string? Error);
+
+    private SshCredentialsResult TryLoadSshCredentials(DigitalOceanSettings row)
+    {
+        if (string.IsNullOrWhiteSpace(row.SshPrivateKey))
+        {
+            return new SshCredentialsResult(false, null, null, null);
+        }
+
+        try
+        {
+            var pem = secretProtector.Unprotect(row.SshPrivateKey);
+            var passphrase = string.IsNullOrEmpty(row.SshPrivateKeyPassphrase)
+                ? null
+                : secretProtector.Unprotect(row.SshPrivateKeyPassphrase);
+            return new SshCredentialsResult(true, pem, passphrase, null);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Unable to decrypt stored SSH private key for droplet image inspection.");
+            return new SshCredentialsResult(true, null, null, "Saved SSH private key could not be decrypted.");
+        }
+    }
+
+    private async Task<(IReadOnlyList<DropletContainerImageView> Images, string? ProbeStatus)> QueryRemoteDockerPsAsync(
+        IReadOnlyList<string> hosts,
+        int port,
+        string username,
+        string privateKeyPem,
+        string? passphrase,
+        string? expectedFingerprint,
+        CancellationToken cancellationToken)
+    {
+        string? lastError = null;
+        foreach (var host in hosts)
+        {
+            try
+            {
+                return await Task.Run(() =>
+                {
+                    using var keyStream = new MemoryStream(Encoding.UTF8.GetBytes(privateKeyPem));
+                    var keyFile = passphrase is null
+                        ? new PrivateKeyFile(keyStream)
+                        : new PrivateKeyFile(keyStream, passphrase);
+                    var authMethod = new PrivateKeyAuthenticationMethod(username, keyFile);
+                    var connectionInfo = new ConnectionInfo(host, port, username, authMethod)
+                    {
+                        Timeout = TimeSpan.FromSeconds(5)
+                    };
+                    using var client = new SshClient(connectionInfo);
+                    client.HostKeyReceived += (_, e) =>
+                    {
+                        if (string.IsNullOrEmpty(expectedFingerprint))
+                        {
+                            e.CanTrust = true;
+                            return;
+                        }
+
+                        e.CanTrust = SshTerminalService.IsHostKeyTrusted(expectedFingerprint, e.FingerPrintSHA256);
+                    };
+
+                    client.Connect();
+                    try
+                    {
+                        using var cmd = client.CreateCommand("docker ps --format '{{.Names}}\\t{{.Image}}\\t{{.State}}\\t{{.Status}}'");
+                        cmd.CommandTimeout = TimeSpan.FromSeconds(10);
+                        var output = cmd.Execute();
+                        if (cmd.ExitStatus != 0)
+                        {
+                            var err = cmd.Error?.Trim() ?? string.Empty;
+                            if (err.Contains("not found", StringComparison.OrdinalIgnoreCase))
+                            {
+                                return ((IReadOnlyList<DropletContainerImageView>)[], "Docker is not installed on this droplet.");
+                            }
+                            return ((IReadOnlyList<DropletContainerImageView>)[], string.IsNullOrEmpty(err) ? $"docker ps exited with code {cmd.ExitStatus}." : err);
+                        }
+
+                        var parsed = ParseDockerPsOutput(output);
+                        return (parsed, parsed.Count == 0 ? "No running Docker containers." : null);
+                    }
+                    finally
+                    {
+                        if (client.IsConnected) client.Disconnect();
+                    }
+                }, cancellationToken);
+            }
+            catch (Exception ex) when (ex is SshConnectionException or SshException or System.Net.Sockets.SocketException or TimeoutException)
+            {
+                lastError = $"SSH to {host} failed: {ex.Message}";
+            }
+        }
+
+        return ([], lastError ?? "Could not reach droplet over SSH.");
+    }
+
     private async Task<DigitalOceanActionResult> PostActionAsync(string type, object? extraFields, string performedBy, CancellationToken cancellationToken)
     {
         var context = await BuildRequestContextAsync(cancellationToken);
@@ -354,14 +639,25 @@ public sealed class DigitalOceanService(
 
     private sealed record DropletResponse([property: JsonPropertyName("droplet")] DropletDto? Droplet);
 
+    private sealed record DropletsListResponse([property: JsonPropertyName("droplets")] IReadOnlyList<DropletDto>? Droplets);
+
     private sealed record DropletDto(
+        [property: JsonPropertyName("id")] long Id,
         [property: JsonPropertyName("name")] string Name,
         [property: JsonPropertyName("status")] string Status,
         [property: JsonPropertyName("size_slug")] string SizeSlug,
         [property: JsonPropertyName("vcpus")] int? Vcpus,
         [property: JsonPropertyName("region")] DropletRegionDto? Region,
         [property: JsonPropertyName("size")] DropletSizeDto? Size,
-        [property: JsonPropertyName("networks")] DropletNetworksDto? Networks);
+        [property: JsonPropertyName("networks")] DropletNetworksDto? Networks,
+        [property: JsonPropertyName("image")] DropletImageDto? Image);
+
+    private sealed record DropletImageDto(
+        [property: JsonPropertyName("id")] long Id,
+        [property: JsonPropertyName("name")] string? Name,
+        [property: JsonPropertyName("distribution")] string? Distribution,
+        [property: JsonPropertyName("slug")] string? Slug,
+        [property: JsonPropertyName("type")] string? Type);
 
     private sealed record DropletRegionDto(
         [property: JsonPropertyName("name")] string? Name,

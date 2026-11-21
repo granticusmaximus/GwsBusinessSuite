@@ -17,4 +17,6 @@ public interface IDigitalOceanService
     Task<DigitalOceanActionResult> ResizeDropletAsync(string newSize, bool resizeDisk, string performedBy, CancellationToken cancellationToken = default);
 
     Task<DigitalOceanActionResult> CreateSnapshotAsync(string snapshotName, string performedBy, CancellationToken cancellationToken = default);
+
+    Task<ActiveDropletsImagesResult> ListActiveDropletsWithImagesAsync(CancellationToken cancellationToken = default);
 }

@@ -3,6 +3,7 @@ using System.Text;
 using FluentAssertions;
 using GwsBusinessSuite.Application.Abstractions;
 using GwsBusinessSuite.Application.DigitalOcean;
+using GwsBusinessSuite.Application.DockerHealth;
 using GwsBusinessSuite.Infrastructure.Data;
 using GwsBusinessSuite.Infrastructure.Services;
 using Microsoft.Data.Sqlite;
@@ -180,7 +181,84 @@ public sealed class DigitalOceanServiceTests
         log.Succeeded.Should().BeFalse();
     }
 
-    private static DigitalOceanService CreateService(ApplicationDbContext db, HttpMessageHandler handler)
+    [Fact]
+    public async Task ListActiveDropletsWithImagesAsync_ShouldFilterToActiveDroplets_AndIncludeBaseAndLocalImages()
+    {
+        await using var db = await CreateDbAsync();
+        using var handler = new RecordingHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(
+                """
+                {"droplets":[
+                  {"id":101,"name":"gws-web","status":"active","size_slug":"s-2vcpu-4gb","vcpus":2,
+                   "region":{"name":"NYC1","slug":"nyc1"},
+                   "size":{"memory":4096,"disk":80},
+                   "image":{"id":1,"name":"24.04 (LTS) x64","distribution":"Ubuntu","slug":"ubuntu-24-04-x64","type":"base"},
+                   "networks":{"v4":[{"ip_address":"203.0.113.5","type":"public"},{"ip_address":"10.10.0.2","type":"private"}]}},
+                  {"id":102,"name":"gws-ai","status":"active","size_slug":"s-4vcpu-8gb","vcpus":4,
+                   "region":{"name":"NYC1","slug":"nyc1"},
+                   "size":{"memory":8192,"disk":160},
+                   "image":{"id":2,"name":"ai-snapshot-1","distribution":"Ubuntu","slug":null,"type":"snapshot"},
+                   "networks":{"v4":[{"ip_address":"10.10.0.3","type":"private"}]}},
+                  {"id":103,"name":"gws-old","status":"off","size_slug":"s-1vcpu-1gb","vcpus":1,
+                   "region":{"name":"NYC1","slug":"nyc1"},
+                   "size":{"memory":1024,"disk":25},
+                   "image":{"id":3,"name":"22.04","distribution":"Ubuntu","slug":"ubuntu-22-04-x64","type":"base"},
+                   "networks":{"v4":[]}}
+                ]}
+                """, Encoding.UTF8, "application/json")
+        });
+
+        var dockerHealth = new StubDockerHealthService(new ContainerListResult(true,
+        [
+            new ContainerHealthView { Name = "gwssuite", Image = "gwssuite-web:latest", State = "running", Status = "Up 2 hours" },
+            new ContainerHealthView { Name = "stopped-job", Image = "busybox:latest", State = "exited", Status = "Exited (0)" }
+        ]));
+
+        var service = CreateService(db, handler, dockerHealth);
+        await service.SaveSettingsAsync(new DigitalOceanApiSettingsInput { NewApiToken = "dop_v1_secret", DropletId = "101" });
+
+        var result = await service.ListActiveDropletsWithImagesAsync();
+
+        result.Available.Should().BeTrue();
+        result.Droplets.Should().HaveCount(2);
+
+        var ai = result.Droplets[0];
+        ai.Name.Should().Be("gws-ai");
+        ai.IsCurrentHost.Should().BeFalse();
+        ai.BaseImageName.Should().Be("Ubuntu ai-snapshot-1");
+        ai.BaseImageType.Should().Be("snapshot");
+        ai.PrivateIpAddress.Should().Be("10.10.0.3");
+        ai.ContainerProbeStatus.Should().Contain("SSH private key");
+
+        var web = result.Droplets[1];
+        web.Name.Should().Be("gws-web");
+        web.IsCurrentHost.Should().BeTrue();
+        web.BaseImageName.Should().Be("Ubuntu 24.04 (LTS) x64");
+        web.BaseImageSlug.Should().Be("ubuntu-24-04-x64");
+        web.ActiveContainerImages.Should().ContainSingle();
+        web.ActiveContainerImages[0].ContainerName.Should().Be("gwssuite");
+        web.ActiveContainerImages[0].Image.Should().Be("gwssuite-web:latest");
+    }
+
+    [Fact]
+    public void ParseDockerPsOutput_ShouldParseTabDelimitedLines_AndSortByName()
+    {
+        var output = "searxng\tsearxng/searxng:latest\trunning\tUp 3 days\r\ngwssuite\tgwssuite-web:local\trunning\tUp 1 hour\n\n";
+
+        var parsed = DigitalOceanService.ParseDockerPsOutput(output);
+
+        parsed.Should().HaveCount(2);
+        parsed[0].ContainerName.Should().Be("gwssuite");
+        parsed[0].Image.Should().Be("gwssuite-web:local");
+        parsed[1].ContainerName.Should().Be("searxng");
+        parsed[1].Image.Should().Be("searxng/searxng:latest");
+    }
+
+    private static DigitalOceanService CreateService(
+        ApplicationDbContext db,
+        HttpMessageHandler handler,
+        IDockerHealthService? dockerHealth = null)
     {
         var client = new HttpClient(handler) { BaseAddress = new Uri("https://api.digitalocean.com/v2/") };
         return new DigitalOceanService(
@@ -188,7 +266,27 @@ public sealed class DigitalOceanServiceTests
             db,
             new FakeSecretProtector(),
             NullLogger<DigitalOceanService>.Instance,
-            new FixedCurrentUserAccessor("grantwatson"));
+            new FixedCurrentUserAccessor("grantwatson"),
+            dockerHealth);
+    }
+
+    private sealed class StubDockerHealthService(ContainerListResult listResult) : IDockerHealthService
+    {
+        public Task<ContainerListResult> ListContainersAsync(CancellationToken cancellationToken = default) => Task.FromResult(listResult);
+        public Task<ContainerDetailView?> GetContainerDetailsAsync(string containerName, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<IReadOnlyList<DockerHealthAlertView>> ListAlertsAsync(bool unreadOnly, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task MarkAlertReadAsync(Guid alertId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task MarkAllAlertsReadAsync(CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<IReadOnlyList<int>> CountAlertsByDayAsync(DayRange range, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<int> CountUnreadAlertsAsync(CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<DockerActionResult> StartContainerAsync(string containerName, string performedBy, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<DockerActionResult> StopContainerAsync(string containerName, string performedBy, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<DockerActionResult> RestartContainerAsync(string containerName, string performedBy, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<DockerActionResult> RemoveContainerAsync(string containerName, string performedBy, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<DockerActionResult> PullImageAsync(string containerName, string performedBy, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<DockerActionResult> RecreateContainerAsync(string containerName, string performedBy, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<DockerActionResult> ExecCommandAsync(string containerName, string command, string performedBy, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<IReadOnlyList<DockerActionLogView>> ListActionLogsAsync(string? containerName, CancellationToken cancellationToken = default) => throw new NotImplementedException();
     }
 
     private static async Task<ApplicationDbContext> CreateDbAsync()

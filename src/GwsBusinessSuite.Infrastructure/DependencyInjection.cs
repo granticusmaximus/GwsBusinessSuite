@@ -309,6 +309,7 @@ public static class DependencyInjection
             client.BaseAddress = new Uri("https://api.digitalocean.com/v2/");
             client.Timeout = TimeSpan.FromSeconds(20);
         });
+        services.AddScoped<IDropletRemoteDockerService, DropletRemoteDockerService>();
         services.AddScoped<ISshTerminalService, SshTerminalService>();
         services.AddScoped<IPageRevisionService, PageRevisionService>();
         services.AddScoped<ICmsKnowledgeService, CmsKnowledgeService>();
