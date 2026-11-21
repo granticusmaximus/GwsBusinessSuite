@@ -1198,16 +1198,28 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
         double.TryParse(value?.ToString(), NumberStyles.Float, CultureInfo.InvariantCulture, out number) && double.IsFinite(number);
     private static double NormalizeLongitude(double longitude) => (longitude + 540) % 360 - 180;
 
-    private sealed class NativeAnnotation(string operation, Dictionary<string, object?> payload, CLLocationCoordinate2D coordinate) : MKPointAnnotation
+    // The coordinate is MKPointAnnotation's own (21-11-26). It used to be a C# override, so moving a
+    // kept pin (Update) changed a managed field and never ran MapKit's setter, which tells the map
+    // (KVO on "coordinate") to re-file the pin in its quad trie. The trie went stale and the next
+    // AddAnnotations crashed in MKQuadTrie _insert (EXC_BAD_ACCESS at 0x20): 19-11-26 twice (blamed on
+    // our own grouping) and 21-11-26.
+    private sealed class NativeAnnotation : MKPointAnnotation
     {
-        public string Operation { get; } = operation;
-        public Dictionary<string, object?> Payload { get; private set; } = payload;
-        public override CLLocationCoordinate2D Coordinate { get; set; } = coordinate;
+        public NativeAnnotation(string operation, Dictionary<string, object?> payload, CLLocationCoordinate2D coordinate)
+        {
+            Operation = operation;
+            Payload = payload;
+            Coordinate = coordinate;
+        }
+
+        public string Operation { get; }
+        public Dictionary<string, object?> Payload { get; private set; }
 
         public void Update(Dictionary<string, object?> next, CLLocationCoordinate2D coordinate)
         {
             Payload = next;
-            Coordinate = coordinate;
+            var current = Coordinate;
+            if (current.Latitude != coordinate.Latitude || current.Longitude != coordinate.Longitude) Coordinate = coordinate;
             Title = ReadString(next, "title", "name", "label", "callsign", "code", "id") ?? Operation[3..];
             Subtitle = ReadString(next, "summary", "description", "status", "source", "kind");
         }

@@ -227,6 +227,10 @@ public sealed class NativeOverwatchMacMapBridgeTests
             // Satellite (21-11-26): Apple's satellite map is always underneath; the look hides the holo overlays.
             .And.Contain("MapType = MKMapType.HybridFlyover,")
             .And.Contain("case NativeOverwatchOperations.SetLook: SetLook(arguments); return;")
+            // A moved pin must go through MapKit's own coordinate setter (KVO), or its quad trie goes
+            // stale and the next AddAnnotations crashes (21-11-26).
+            .And.NotContain("override CLLocationCoordinate2D Coordinate")
+            .And.Contain("private sealed class NativeAnnotation : MKPointAnnotation")
             .And.Contain("_holoShown = OverwatchMapLook.ShowsHolo(arguments.LastOrDefault() as string);")
             .And.Contain("_landRenderer.Alpha = !_holoShown || share >= 0.98 ? 0 : 1;");
 
