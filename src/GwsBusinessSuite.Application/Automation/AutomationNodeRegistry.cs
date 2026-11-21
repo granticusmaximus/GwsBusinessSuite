@@ -1253,6 +1253,15 @@ public sealed partial class AutomationNodeRegistry(
         return SingleOutput(isTrue ? "true" : "false", input);
     }
 
+    // A desktop or mobile browser's User-Agent ("Mozilla/5.0 (Macintosh; ...) AppleWebKit/... Chrome/...").
+    // A self-identifying one ("Mozilla/5.0 (compatible; MyBot/1.0; +https://...)") is not impersonation.
+    public static bool IsBrowserImpersonation(string userAgent) =>
+        userAgent.Contains("Mozilla/", StringComparison.OrdinalIgnoreCase)
+        && !userAgent.Contains("compatible;", StringComparison.OrdinalIgnoreCase)
+        && (userAgent.Contains("AppleWebKit/", StringComparison.OrdinalIgnoreCase) || userAgent.Contains("Gecko/", StringComparison.OrdinalIgnoreCase)
+            || userAgent.Contains("Chrome/", StringComparison.OrdinalIgnoreCase) || userAgent.Contains("Safari/", StringComparison.OrdinalIgnoreCase)
+            || userAgent.Contains("Firefox/", StringComparison.OrdinalIgnoreCase));
+
     private async Task<AutomationNodeRunResult> ExecuteHttpAsync(
         AutomationNodeSnapshot node,
         JsonElement input,
@@ -1289,6 +1298,10 @@ public sealed partial class AutomationNodeRegistry(
                 }
             }
         }
+        // House rule (AGENTS.md): never get past bot protection by posing as a browser. A workflow's
+        // own User-Agent is kept unless it impersonates one; then the engine's honest one is sent
+        // (21-11-26: the Local events starter posed as Chrome to reach Eventbrite).
+        if (headers.TryGetValue("User-Agent", out var userAgent) && IsBrowserImpersonation(userAgent)) headers.Remove("User-Agent");
         var body = root["body"] is JsonValue bodyValue && bodyValue.TryGetValue<string>(out var bodyText)
             ? ResolveText(bodyText, input, nodeOutputsByName)
             : root["body"]?.ToJsonString();

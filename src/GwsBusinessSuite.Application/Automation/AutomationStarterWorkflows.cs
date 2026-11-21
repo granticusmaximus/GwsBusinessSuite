@@ -82,8 +82,12 @@ public static class AutomationStarterWorkflows
     {
         var trigger = NewNode("Every 6 hours", "core.scheduleTrigger", 120, 160,
             "{\"intervalMinutes\":360,\"cronExpression\":\"\"}");
+        // The Macon Centreplex calendar (21-11-26): it publishes schema.org events, accepts the
+        // workflow engine's own User-Agent, and its robots.txt allows it. This used to fetch
+        // Eventbrite posing as Chrome, which the house rules forbid (Eventbrite refuses the server
+        // with an honest User-Agent; see EventbriteEventsSource).
         var fetch = NewNode("Fetch events page", "core.httpRequest", 400, 160,
-            "{\"method\":\"GET\",\"url\":\"https://www.eventbrite.com/d/ga--warner-robins/events/\",\"headers\":{\"User-Agent\":\"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36\"},\"body\":\"\"}");
+            "{\"method\":\"GET\",\"url\":\"https://www.maconcentreplex.org/events/\",\"headers\":{},\"body\":\"\"}");
         // maxMiles 25 keeps it to things worth driving to from Kathleen; online listings are
         // dropped by default because they are tagged to a town but happen nowhere near it.
         var extract = NewNode("Extract events", "civic.extractEvents", 680, 160,

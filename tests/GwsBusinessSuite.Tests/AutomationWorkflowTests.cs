@@ -104,6 +104,51 @@ public sealed class AutomationWorkflowTests
         AutomationStarterWorkflows.All.Select(starter => starter.Key).Should().OnlyHaveUniqueItems();
     }
 
+    // 21-11-26: Run on "Local events: scrape a calendar" (a schedule trigger and nothing else) failed
+    // with "no enabled trigger for Manual execution". A manual run now starts at the schedule trigger,
+    // with a scheduled run's input; a workflow whose only trigger is an event says how to fix it.
+    [Fact]
+    public async Task ExecuteAsync_ManualRunOfAScheduledWorkflow_ShouldStartAtTheScheduleTrigger()
+    {
+        await using var db = await CreateDbAsync();
+        var http = new FakeHttpClient();
+        var registry = new AutomationNodeRegistry(http);
+        var workflowService = new AutomationWorkflowService(db, registry, TimeProvider.System);
+        var credentialService = new AutomationCredentialService(db, new FakeSecretProtector(), TimeProvider.System);
+        var executionService = new AutomationExecutionService(db, workflowService, registry, credentialService, TimeProvider.System);
+        var starter = AutomationStarterWorkflows.All.Single(item => item.Graph.Name == "Local events: scrape a calendar");
+        var created = await workflowService.CreateFromGraphAsync(
+            starter.Graph.Name, starter.Graph.Description, starter.Graph.Nodes, starter.Graph.Connections, "user");
+        await workflowService.PublishAsync(created.Id, "v1");
+
+        var execution = await executionService.ExecuteAsync(created.Id);
+
+        execution.Nodes.Should().Contain(node => node.NodeName == "Every 6 hours" && node.Status == "Succeeded");
+        http.CallCount.Should().Be(1, "the run reached the HTTP step");
+        http.LastRequest!.Url.Should().Be("https://www.maconcentreplex.org/events/");
+        http.LastRequest.Headers.Should().NotContainKey("User-Agent", "the starter no longer poses as a browser");
+        execution.Nodes.Single(node => node.NodeName == "Every 6 hours").OutputJson.Should().Contain("scheduledAt", "it gets a scheduled run's input");
+
+        var webhookOnly = await workflowService.CreateAsync("Webhook only");
+        await workflowService.DeleteNodeAsync(webhookOnly.Id, webhookOnly.Nodes.Single().Id);
+        await workflowService.SaveNodeAsync(webhookOnly.Id, new AutomationNodeEditor
+        {
+            Name = "Hook", TypeKey = "core.webhookTrigger", PositionX = 100, PositionY = 100, ParametersJson = "{\"path\":\"hook-only\"}"
+        });
+        await workflowService.PublishAsync(webhookOnly.Id, "v1");
+        var failed = await executionService.ExecuteAsync(webhookOnly.Id);
+        failed.ErrorMessage.Should().Contain("Add a Manual trigger");
+    }
+
+    [Theory]
+    [InlineData("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36", true)]
+    [InlineData("Mozilla/5.0 (Windows NT 10.0; rv:128.0) Gecko/20100101 Firefox/128.0", true)]
+    [InlineData("Mozilla/5.0 (compatible; GWSuite/1.0; +https://grantwatson.dev)", false)]
+    [InlineData("GwsBusinessSuite-WorkflowAutomation/1.0", false)]
+    [InlineData("my-weather-app (me@example.com)", false)]
+    public void HttpRequest_ShouldNotPoseAsABrowser(string userAgent, bool impersonates) =>
+        AutomationNodeRegistry.IsBrowserImpersonation(userAgent).Should().Be(impersonates);
+
     [Fact]
     public async Task ExecuteAsync_ShouldMapInputAndPersistPerNodeEvidence()
     {
@@ -3018,10 +3063,12 @@ public sealed class AutomationWorkflowTests
     {
         public TimeSpan Delay { get; set; } = TimeSpan.Zero;
         public int CallCount { get; private set; }
+        public AutomationHttpRequest? LastRequest { get; private set; }
 
         public async Task<AutomationHttpResponse> SendAsync(AutomationHttpRequest request, CancellationToken cancellationToken = default)
         {
             CallCount++;
+            LastRequest = request;
             if (Delay > TimeSpan.Zero) await Task.Delay(Delay, cancellationToken);
             return new AutomationHttpResponse(200, "{}", new Dictionary<string, string>());
         }

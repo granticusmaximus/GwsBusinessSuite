@@ -81,12 +81,37 @@ public sealed class AutomationExecutionService(
                 _ => "core.manualTrigger"
             };
             var startNodes = snapshot.Nodes.Where(node => node.TypeKey == triggerType && !node.IsDisabled).ToList();
-            if (startNodes.Count == 0) throw new InvalidOperationException($"The published workflow has no enabled trigger for {mode} execution.");
+            var startInput = input;
+            // Run now on a scheduled workflow (21-11-26: "Local events: scrape a calendar" has only a
+            // schedule trigger, and Run failed with "no enabled trigger for Manual execution"). With
+            // no Manual trigger, a manual run starts at the schedule trigger, with the input a
+            // scheduled run gets, as if the schedule had fired now.
+            if (startNodes.Count == 0 && mode == AutomationExecutionModes.Manual && triggerTypeKeyOverride is null)
+            {
+                startNodes = snapshot.Nodes.Where(node => node.TypeKey == "core.scheduleTrigger" && !node.IsDisabled).ToList();
+                if (startNodes.Count > 0) startInput = ScheduledRunInput(input, workflowId, now);
+            }
+            if (startNodes.Count == 0)
+                throw new InvalidOperationException(mode == AutomationExecutionModes.Manual
+                    ? "This workflow can't be run by hand: its trigger only starts on its own event (a webhook, a database change and so on). Add a Manual trigger, connected to the first step, to run it with Run."
+                    : $"The published workflow has no enabled trigger for {mode} execution.");
 
-            var frontier = new Frontier { LastOutput = input.Clone() };
-            foreach (var trigger in startNodes) frontier.Queue.Enqueue((trigger.Id, input.Clone(), "main"));
+            var frontier = new Frontier { LastOutput = startInput.Clone() };
+            foreach (var trigger in startNodes) frontier.Queue.Enqueue((trigger.Id, startInput.Clone(), "main"));
             return frontier;
         }, subWorkflowChain, isDryRun, historicalOutputByNodeId, cancellationToken);
+    }
+
+    // The input a scheduled run gets (AutomationTriggerService): scheduledAt and workflowId, added to
+    // whatever a manual run was given.
+    public static JsonElement ScheduledRunInput(JsonElement input, Guid workflowId, DateTimeOffset now)
+    {
+        var merged = input.ValueKind == JsonValueKind.Object
+            ? System.Text.Json.Nodes.JsonObject.Create(input) ?? new System.Text.Json.Nodes.JsonObject()
+            : new System.Text.Json.Nodes.JsonObject();
+        merged.TryAdd("scheduledAt", now);
+        merged.TryAdd("workflowId", workflowId);
+        return JsonSerializer.SerializeToElement(merged);
     }
 
     // Re-runs a past execution's exact recorded trigger input against the current published
