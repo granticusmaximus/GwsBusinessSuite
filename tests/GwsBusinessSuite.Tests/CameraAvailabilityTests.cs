@@ -94,10 +94,10 @@ public sealed class CameraAvailabilityTests
         var js = File.ReadAllText(Path.Combine(root, "src/GwsBusinessSuite.Web/wwwroot/js/tactical-globe.js"));
         var page = File.ReadAllText(Path.Combine(root, "src/GwsBusinessSuite.Web/Components/Pages/BusinessSuite/OverwatchGrid.razor"));
 
-        js.Should().Contain("function cameraPinImage(pin, selected)")
+        js.Should().Contain("function cameraPinImage(pin, selected, alert)")
             .And.Contain("image: cameraPinImage(pin, entry.selectedCameras.has(pin.id))",
                 "new camera pins take their shape from the camera")
-            .And.Contain("entity.billboard.image = cameraPinImage(entity._tacticalGlobeCamera, selected)",
+            .And.Contain("entity.billboard.image = cameraPinImage(entity._tacticalGlobeCamera, selected, entity._tacticalGlobeAlertSeverity)",
                 "selecting a pin keeps its shape")
             .And.Contain("tg-stream-panel-availability");
         page.Should().Contain("mode = availability.Mode.ToString()")

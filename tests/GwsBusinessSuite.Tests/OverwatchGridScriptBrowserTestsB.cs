@@ -408,8 +408,9 @@ public sealed class OverwatchGridScriptBrowserTestsB(PlaywrightBrowserFixture fi
         var panelText = await page.InnerTextAsync(".tg-aircraft-panel");
         panelText.Should().Contain("COMMERCIAL - PASSENGER AIRLINE").And.Contain("DL1536").And.Contain("177-220")
             .And.Contain("NOT PUBLISHED").And.Contain("STL (ST LOUIS) - TRACKED TAKEOFF").And.Contain("DEN (DENVER) - ON FILE, HEADING THERE").And.Contain("starts somewhere else").And.Contain("35,000 FT");
-        // Track (solid), remaining leg (dashed), and the two airports.
-        (await page.EvaluateAsync<int>("window.__pathEntities.size")).Should().Be(4);
+        // Track (solid), remaining leg (dashed), the two airports, and the selection's Night Ops target
+        // brackets (21-11-26; OverwatchNightOpsBrowserTests checks they go when the window closes).
+        (await page.EvaluateAsync<int>("window.__pathEntities.size")).Should().Be(5);
         (await page.IsVisibleAsync(".tg-modal-backdrop")).Should().BeFalse("the path has to stay visible behind the panel");
 
         // The minute's refresh moves the plane and its readings.

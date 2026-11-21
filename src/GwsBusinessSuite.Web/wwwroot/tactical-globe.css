@@ -986,3 +986,65 @@
     color: var(--ow-muted, #5f9a68);
     font-variant-numeric: tabular-nums;
 }
+
+/* Night Ops line of sight (20-11-26): the action in a camera's window and the clear button on the
+   map while the shading shows (both made by tactical-globe.js). */
+.tg-los-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    min-width: 0;
+    padding: 0.2rem 0.5rem;
+    flex-shrink: 0;
+}
+
+.tg-los-button,
+.tg-los-clear {
+    background: rgba(2, 12, 7, 0.88);
+    border: 1px solid rgb(var(--ow-accent-rgb, 89 240 122) / 0.6);
+    color: var(--ow-accent, #59f07a);
+    cursor: pointer;
+    font-family: var(--ow-mono, "IBM Plex Mono", ui-monospace, Menlo, monospace);
+    font-size: max(0.65rem, 12px);
+    letter-spacing: 0.06em;
+    line-height: 1;
+    padding: 0.3rem 0.55rem;
+    min-height: 28px;
+    flex-shrink: 0;
+}
+
+.tg-los-button:disabled { opacity: 0.5; cursor: default; }
+
+.tg-los-status {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: max(0.65rem, 12px);
+    opacity: 0.85;
+}
+
+.tg-los-clear {
+    position: absolute;
+    z-index: 9;
+    top: 3.6rem;
+    left: 50%;
+    transform: translateX(-50%);
+    max-width: calc(100% - 2rem);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.tg-los-clear:hover,
+.tg-los-button:hover:not(:disabled) { background: rgb(var(--ow-accent-rgb, 89 240 122) / 0.16); }
+
+@container gws-main (max-width: 720px) {
+    .tg-los-clear { top: auto; bottom: 4.6rem; }
+    .tg-los-clear-label { display: none; }
+}
+
+@media (pointer: coarse) {
+    .tg-los-button,
+    .tg-los-clear { min-height: 44px; min-width: 44px; }
+}

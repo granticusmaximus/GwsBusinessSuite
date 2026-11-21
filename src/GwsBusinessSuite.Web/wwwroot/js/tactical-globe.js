@@ -153,7 +153,7 @@ window.tacticalGlobe = (function () {
     // Each dimmed entity keeps its own colours (_tgUndim) so ending the focus puts them back, and
     // entities a layer adds while dimmed are dimmed as they arrive.
     const FOCUS_DIM = 0.25;
-    const focusExempt = new Set(['tg-holo-land', 'tg-measure']);
+    const focusExempt = new Set(['tg-holo-land', 'tg-measure', 'tg-line-of-sight']);
     function dimColor(property, factor) {
         if (!property) return property;
         const value = typeof property.getValue === 'function' ? property.getValue(Cesium.JulianDate.now()) : property;
@@ -272,6 +272,7 @@ window.tacticalGlobe = (function () {
             const height = viewer.camera.positionCartographic.height;
             const share = holoStreetShare(height);
             const stage = zoomStage(height);
+            onStageChanged(stage);
             if (shell && shell.dataset.owStage !== stage) {
                 shell.dataset.owStage = stage;
                 if (stageName) stageName.textContent = stage.toUpperCase();
@@ -309,47 +310,17 @@ window.tacticalGlobe = (function () {
     const pinBillboardImageSelected = createPinBillboardImage('#b8ffd6', 4);
 
     // Camera pins by what the camera offers (19-11-26, camera availability phase 3), by shape so
-    // colour isn't the only cue (billboard.color stays the alert tint): a still image is the disc,
-    // live video a rounded square, and a camera found not working is hollow. The camera window
-    // says the same in words.
-    const cameraPinImages = new Map();
-    function cameraPinImage(pin, selected) {
-        const video = !!pin && pin.mode === 'LiveVideo';
-        const hollow = !!pin && pin.state === 'Unavailable';
-        if (!video && !hollow) return selected ? pinBillboardImageSelected : pinBillboardImage;
-        const key = (video ? 'video' : 'still') + (hollow ? '-hollow' : '') + (selected ? '-selected' : '');
-        let image = cameraPinImages.get(key);
-        if (image) return image;
-        const size = 28;
-        const outlineWidth = selected ? 4 : 2;
-        const canvas = document.createElement('canvas');
-        canvas.width = size;
-        canvas.height = size;
-        const ctx = canvas.getContext('2d');
-        const inset = outlineWidth / 2 + 1;
-        ctx.beginPath();
-        if (video) {
-            ctx.roundRect(inset, inset, size - inset * 2, size - inset * 2, 5);
-        } else {
-            ctx.arc(size / 2, size / 2, size / 2 - inset, 0, Math.PI * 2);
-        }
-        if (hollow) {
-            ctx.lineWidth = outlineWidth + 4;
-            ctx.strokeStyle = selected ? '#b8ffd6' : '#05080a';
-            ctx.stroke();
-            ctx.lineWidth = 3;
-            ctx.strokeStyle = '#ffffff';
-            ctx.stroke();
-        } else {
-            ctx.fillStyle = '#ffffff';
-            ctx.fill();
-            ctx.lineWidth = outlineWidth;
-            ctx.strokeStyle = selected ? '#b8ffd6' : '#05080a';
-            ctx.stroke();
-        }
-        image = canvas.toDataURL();
-        cameraPinImages.set(key, image);
-        return image;
+    // colour isn't the only cue (billboard.color stays the alert tint). Night Ops kit (20-11-26): a
+    // lens square for a still image, the same with a camcorder tab for live video, hollow when the
+    // camera was found not working, and a ring around it while it sits inside a weather alert.
+    // The camera window says the same in words.
+    function cameraPinImage(pin, selected, alert) {
+        const parts = [];
+        if (pin && pin.mode === 'LiveVideo') parts.push('video');
+        if (pin && pin.state === 'Unavailable') parts.push('hollow');
+        if (selected) parts.push('selected');
+        if (alert) parts.push('alert');
+        return markerGlyph('lens', parts.join('-'));
     }
 
     // World News pins carry their story's Bootstrap icon (18-11-26). Same white-fill pin, with the
@@ -383,35 +354,366 @@ window.tacticalGlobe = (function () {
         return false;
     }
 
+    // World News pins are kit hexagons with the story's Bootstrap icon cut in near-black.
     function iconPinImage(name) {
-        if (!name || !iconFontReady) return pinBillboardImage;
+        if (!name || !iconFontReady) return markerGlyph('hexagon');
         if (iconPinImages.has(name)) return iconPinImages.get(name);
         const glyph = iconGlyph(name);
         if (!glyph) {
-            iconPinImages.set(name, pinBillboardImage);
-            return pinBillboardImage;
+            iconPinImages.set(name, markerGlyph('hexagon'));
+            return markerGlyph('hexagon');
         }
         const size = 56;
         const canvas = document.createElement('canvas');
-        canvas.width = size;
-        canvas.height = size;
+        canvas.width = canvas.height = size;
         const ctx = canvas.getContext('2d');
-        ctx.beginPath();
-        ctx.arc(size / 2, size / 2, size / 2 - 3, 0, Math.PI * 2);
-        ctx.fillStyle = '#ffffff';
-        ctx.fill();
-        ctx.lineWidth = 4;
-        ctx.strokeStyle = '#05080a';
-        ctx.stroke();
-        ctx.fillStyle = '#05080a';
-        ctx.font = '30px "bootstrap-icons"';
+        ctx.translate(size / 2, size / 2);
+        const points = [];
+        for (let i = 0; i < 6; i++) points.push([Math.cos(Math.PI / 6 + i * Math.PI / 3) * 25, Math.sin(Math.PI / 6 + i * Math.PI / 3) * 25]);
+        polygonPath(ctx, points);
+        glyphSolid(ctx, GLYPH_EDGE, 4);
+        ctx.fillStyle = GLYPH_EDGE;
+        ctx.font = '26px "bootstrap-icons"';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText(glyph, size / 2, size / 2 + 1);
+        ctx.fillText(glyph, 0, 1);
         const image = canvas.toDataURL();
         iconPinImages.set(name, image);
         return image;
     }
+    // Night Ops marker kit (combined design, 20-11-26): one glyph per layer, drawn to a canvas once
+    // and cached by name. Like the pins above, each glyph is a white shape with a near-black edge, so
+    // billboard.color tints the shape and the edge stays dark. A faint backing disc keeps the whole
+    // square clickable (Cesium drops fully transparent billboard pixels when picking), so hollow
+    // shapes pick as easily as solid ones. The Mac keeps its SF Symbols (NativeShapes.Style).
+    const GLYPH_SIZE = 48;
+    const GLYPH_EDGE = '#05080a';
+    const markerGlyphs = new Map();
+    const hazardKindLetters = {
+        earthquake: 'E', wildfire: 'W', cyclone: 'C', flood: 'F', river: 'F', volcano: 'V', drought: 'D',
+        landslide: 'L', dust: 'H', ice: 'I', tsunami: 'T'
+    };
+
+    function glyphSolid(ctx, edge, width) {
+        ctx.fillStyle = '#ffffff';
+        ctx.fill();
+        ctx.lineJoin = 'round';
+        ctx.lineWidth = width || 3;
+        ctx.strokeStyle = edge || GLYPH_EDGE;
+        ctx.stroke();
+    }
+
+    function glyphHollow(ctx, edge) {
+        ctx.lineJoin = 'round';
+        ctx.lineCap = 'round';
+        ctx.lineWidth = 8;
+        ctx.strokeStyle = edge || GLYPH_EDGE;
+        ctx.stroke();
+        ctx.lineWidth = 3.5;
+        ctx.strokeStyle = '#ffffff';
+        ctx.stroke();
+    }
+
+    function glyphText(ctx, text, size, y) {
+        ctx.fillStyle = GLYPH_EDGE;
+        ctx.font = 'bold ' + size + 'px "IBM Plex Mono", ui-monospace, monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(text, 0, y || 1);
+    }
+
+    function polygonPath(ctx, points) {
+        ctx.beginPath();
+        points.forEach(function (p, i) { if (i === 0) ctx.moveTo(p[0], p[1]); else ctx.lineTo(p[0], p[1]); });
+        ctx.closePath();
+    }
+
+    // name: a kit glyph; variant: what changes the drawing (a severity, a letter, a level, 'selected').
+    function markerGlyph(name, variant) {
+        const key = name + (variant ? ':' + variant : '');
+        const cached = markerGlyphs.get(key);
+        if (cached) return cached;
+        const canvas = document.createElement('canvas');
+        canvas.width = canvas.height = GLYPH_SIZE;
+        const ctx = canvas.getContext('2d');
+        ctx.translate(GLYPH_SIZE / 2, GLYPH_SIZE / 2);
+        ctx.beginPath();
+        ctx.arc(0, 0, GLYPH_SIZE / 2 - 1, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.02)';
+        ctx.fill();
+        drawGlyph(ctx, name, variant || '');
+        const image = canvas.toDataURL();
+        markerGlyphs.set(key, image);
+        return image;
+    }
+
+    function drawGlyph(ctx, name, variant) {
+        switch (name) {
+            case 'chevron': // aircraft, pointing along its heading (the billboard rotates)
+                polygonPath(ctx, [[0, -21], [16, 17], [0, 8], [-16, 17]]);
+                glyphSolid(ctx);
+                return;
+            case 'engines': // the thermal tint behind an aircraft chevron: two warm engine spots
+                [[-7, 8], [7, 8]].forEach(function (p) {
+                    const glow = ctx.createRadialGradient(p[0], p[1], 0, p[0], p[1], 11);
+                    glow.addColorStop(0, 'rgba(255, 240, 200, 1)');
+                    glow.addColorStop(0.35, 'rgba(255, 176, 0, 0.85)');
+                    glow.addColorStop(0.75, 'rgba(255, 69, 58, 0.35)');
+                    glow.addColorStop(1, 'rgba(255, 69, 58, 0)');
+                    ctx.fillStyle = glow;
+                    ctx.fillRect(p[0] - 11, p[1] - 11, 22, 22);
+                });
+                return;
+            case 'heat-halo': // the thermal tint around a fire hotspot
+            {
+                const glow = ctx.createRadialGradient(0, 0, 0, 0, 0, 23);
+                glow.addColorStop(0, 'rgba(255, 214, 120, 0.95)');
+                glow.addColorStop(0.3, 'rgba(255, 176, 0, 0.7)');
+                glow.addColorStop(0.7, 'rgba(255, 69, 58, 0.3)');
+                glow.addColorStop(1, 'rgba(255, 69, 58, 0)');
+                ctx.fillStyle = glow;
+                ctx.fillRect(-24, -24, 48, 48);
+                return;
+            }
+            case 'diamond': // ships, long axis along the heading
+                polygonPath(ctx, [[0, -21], [11, 0], [0, 21], [-11, 0]]);
+                glyphSolid(ctx);
+                return;
+            case 'dot': // satellites, route conditions, road weather stations
+                ctx.beginPath();
+                ctx.arc(0, 0, 11, 0, Math.PI * 2);
+                glyphSolid(ctx);
+                return;
+            case 'ring-dot': // airport delays: the ring grows with the delay
+            {
+                const ring = variant === 'major' ? 20 : variant === 'moderate' ? 16 : 12;
+                ctx.beginPath();
+                ctx.arc(0, 0, ring, 0, Math.PI * 2);
+                glyphHollow(ctx);
+                ctx.beginPath();
+                ctx.arc(0, 0, 6, 0, Math.PI * 2);
+                glyphSolid(ctx, GLYPH_EDGE, 2.5);
+                return;
+            }
+            case 'lens': // cameras: a lens square; live video adds the camcorder tab; hollow = not working
+            {
+                const parts = variant.split('-');
+                const video = parts.indexOf('video') >= 0, hollow = parts.indexOf('hollow') >= 0;
+                const selected = parts.indexOf('selected') >= 0, alert = parts.indexOf('alert') >= 0;
+                const edge = selected ? '#b8ffd6' : GLYPH_EDGE;
+                const left = video ? -19 : -16, right = video ? 9 : 16;
+                if (alert) { // camera alert: a ring around the camera
+                    ctx.beginPath();
+                    ctx.arc(0, 0, 22, 0, Math.PI * 2);
+                    glyphHollow(ctx);
+                }
+                ctx.beginPath();
+                ctx.roundRect(left, -14, right - left, 28, 5);
+                if (video) { ctx.moveTo(right, -2); ctx.lineTo(19, -9); ctx.lineTo(19, 9); ctx.lineTo(right, 2); ctx.closePath(); }
+                if (hollow) glyphHollow(ctx, edge); else glyphSolid(ctx, edge, selected ? 4 : 3);
+                ctx.beginPath();
+                ctx.arc((left + right) / 2, 0, 7, 0, Math.PI * 2);
+                ctx.lineWidth = 3;
+                ctx.strokeStyle = hollow ? '#ffffff' : GLYPH_EDGE;
+                ctx.stroke();
+                return;
+            }
+            case 'cone': // camera coverage: a view cone from the camera
+                ctx.beginPath();
+                ctx.moveTo(0, 18);
+                ctx.arc(0, 18, 36, -Math.PI / 2 - 0.62, -Math.PI / 2 + 0.62);
+                ctx.closePath();
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.55)';
+                ctx.fill();
+                glyphHollow(ctx);
+                ctx.beginPath();
+                ctx.arc(0, 18, 4, 0, Math.PI * 2);
+                glyphSolid(ctx, GLYPH_EDGE, 2);
+                return;
+            case 'wedge': // traffic incidents: a small warning wedge
+                polygonPath(ctx, [[0, -19], [19, 16], [-19, 16]]);
+                glyphSolid(ctx);
+                glyphText(ctx, '!', 20, 5);
+                return;
+            case 'snowflake': // road weather station where ice is likely
+                ctx.beginPath();
+                for (let i = 0; i < 3; i++) {
+                    const a = i * Math.PI / 3;
+                    ctx.moveTo(Math.cos(a) * 19, Math.sin(a) * 19);
+                    ctx.lineTo(-Math.cos(a) * 19, -Math.sin(a) * 19);
+                }
+                glyphHollow(ctx);
+                return;
+            case 'plate': // message signs: a sign plate on its post
+                ctx.beginPath();
+                ctx.rect(-3, 6, 6, 15);
+                glyphSolid(ctx, GLYPH_EDGE, 2.5);
+                ctx.beginPath();
+                ctx.roundRect(-20, -17, 40, 24, 3);
+                glyphSolid(ctx);
+                ctx.fillStyle = GLYPH_EDGE;
+                ctx.fillRect(-13, -11, 26, 3.5);
+                ctx.fillRect(-13, -3, 18, 3.5);
+                return;
+            case 'viewer': // street view: where the viewer stands, with the arc it faces
+                ctx.beginPath();
+                ctx.moveTo(0, 0);
+                ctx.arc(0, 0, 22, -Math.PI / 2 - 0.7, -Math.PI / 2 + 0.7);
+                ctx.closePath();
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+                ctx.fill();
+                glyphHollow(ctx);
+                ctx.beginPath();
+                ctx.arc(0, 0, 8, 0, Math.PI * 2);
+                glyphSolid(ctx);
+                return;
+            case 'outline': // weather warnings: an outlined area
+                ctx.beginPath();
+                ctx.roundRect(-17, -17, 34, 34, 4);
+                glyphHollow(ctx);
+                glyphText(ctx, '!', 18, 2);
+                ctx.fillStyle = '#ffffff';
+                ctx.font = 'bold 14px "IBM Plex Mono", ui-monospace, monospace';
+                ctx.fillText('!', 0, 2);
+                return;
+            case 'heat': // fire hotspots: a heat dot
+            {
+                const glow = ctx.createRadialGradient(0, 0, 2, 0, 0, 16);
+                glow.addColorStop(0, 'rgba(255, 255, 255, 1)');
+                glow.addColorStop(0.5, 'rgba(255, 255, 255, 0.75)');
+                glow.addColorStop(1, 'rgba(255, 255, 255, 0)');
+                ctx.beginPath();
+                ctx.arc(0, 0, 16, 0, Math.PI * 2);
+                ctx.fillStyle = glow;
+                ctx.fill();
+                ctx.beginPath();
+                ctx.arc(0, 0, 7, 0, Math.PI * 2);
+                glyphSolid(ctx, GLYPH_EDGE, 2.5);
+                return;
+            }
+            case 'triangle': // hazards: a triangle with the kind's letter; major has a double edge
+            {
+                const parts = variant.split(':');
+                if (parts[1] === 'major') {
+                    polygonPath(ctx, [[0, -23], [23, 19], [-23, 19]]);
+                    ctx.lineWidth = 2.5;
+                    ctx.strokeStyle = '#ffffff';
+                    ctx.stroke();
+                }
+                polygonPath(ctx, [[0, -18], [18, 15], [-18, 15]]);
+                glyphSolid(ctx);
+                glyphText(ctx, parts[0] || '!', 15, 6);
+                return;
+            }
+            case 'aqi': // air quality: a disc in the AQI colour
+                ctx.beginPath();
+                ctx.arc(0, 0, 20, 0, Math.PI * 2);
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
+                ctx.fill();
+                glyphHollow(ctx);
+                return;
+            case 'hexagon': // World News
+            {
+                const points = [];
+                for (let i = 0; i < 6; i++) points.push([Math.cos(Math.PI / 6 + i * Math.PI / 3) * 21, Math.sin(Math.PI / 6 + i * Math.PI / 3) * 21]);
+                polygonPath(ctx, points);
+                glyphSolid(ctx);
+                return;
+            }
+            case 'rings': // signals converging: concentric rings
+                [20, 13].forEach(function (r) { ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); glyphHollow(ctx); });
+                ctx.beginPath();
+                ctx.arc(0, 0, 6, 0, Math.PI * 2);
+                glyphSolid(ctx, GLYPH_EDGE, 2.5);
+                return;
+            case 'crossed': // conflict: a crossed marker
+                ctx.beginPath();
+                ctx.moveTo(-15, -15); ctx.lineTo(15, 15);
+                ctx.moveTo(15, -15); ctx.lineTo(-15, 15);
+                ctx.lineCap = 'round';
+                ctx.lineWidth = 12;
+                ctx.strokeStyle = GLYPH_EDGE;
+                ctx.stroke();
+                ctx.lineWidth = 6;
+                ctx.strokeStyle = '#ffffff';
+                ctx.stroke();
+                return;
+            case 'cross-circle': // humanitarian: a cross in a circle
+                ctx.beginPath();
+                ctx.arc(0, 0, 20, 0, Math.PI * 2);
+                glyphSolid(ctx);
+                ctx.fillStyle = GLYPH_EDGE;
+                ctx.fillRect(-3.5, -12, 7, 24);
+                ctx.fillRect(-12, -3.5, 24, 7);
+                return;
+            case 'diamond-outline': // chokepoints
+                polygonPath(ctx, [[0, -20], [20, 0], [0, 20], [-20, 0]]);
+                glyphHollow(ctx);
+                ctx.beginPath();
+                ctx.arc(0, 0, 4, 0, Math.PI * 2);
+                glyphSolid(ctx, GLYPH_EDGE, 2);
+                return;
+            case 'shield': // travel advice: a shield with the level
+                ctx.beginPath();
+                ctx.moveTo(-17, -19); ctx.lineTo(17, -19); ctx.lineTo(17, 0);
+                ctx.quadraticCurveTo(17, 14, 0, 21); ctx.quadraticCurveTo(-17, 14, -17, 0);
+                ctx.closePath();
+                glyphSolid(ctx);
+                glyphText(ctx, variant || '!', 20, 0);
+                return;
+            case 'bolt': // power outages
+                polygonPath(ctx, [[5, -22], [-13, 3], [-1, 3], [-6, 22], [13, -5], [1, -5]]);
+                glyphSolid(ctx);
+                return;
+            case 'arcs': // internet outages: broken signal arcs
+                ctx.beginPath();
+                [8, 15, 22].forEach(function (r) {
+                    ctx.moveTo(Math.cos(-Math.PI * 0.75) * r, 12 + Math.sin(-Math.PI * 0.75) * r);
+                    ctx.arc(0, 12, r, -Math.PI * 0.75, -Math.PI * 0.56);
+                    ctx.moveTo(Math.cos(-Math.PI * 0.44) * r, 12 + Math.sin(-Math.PI * 0.44) * r);
+                    ctx.arc(0, 12, r, -Math.PI * 0.44, -Math.PI * 0.25);
+                });
+                glyphHollow(ctx);
+                ctx.beginPath();
+                ctx.arc(0, 12, 4, 0, Math.PI * 2);
+                glyphSolid(ctx, GLYPH_EDGE, 2);
+                return;
+            default:
+                ctx.beginPath();
+                ctx.arc(0, 0, 12, 0, Math.PI * 2);
+                glyphSolid(ctx);
+        }
+    }
+
+    // Target brackets (Night Ops phase 4): four green corners around the selected item.
+    let bracketImage = null;
+    function targetBracketImage() {
+        if (bracketImage) return bracketImage;
+        const size = 64, arm = 16, inset = 3;
+        const canvas = document.createElement('canvas');
+        canvas.width = canvas.height = size;
+        const ctx = canvas.getContext('2d');
+        const corners = function () {
+            ctx.beginPath();
+            [[inset, inset, 1, 1], [size - inset, inset, -1, 1], [inset, size - inset, 1, -1], [size - inset, size - inset, -1, -1]].forEach(function (c) {
+                ctx.moveTo(c[0] + c[2] * arm, c[1]);
+                ctx.lineTo(c[0], c[1]);
+                ctx.lineTo(c[0], c[1] + c[3] * arm);
+            });
+        };
+        corners();
+        ctx.lineCap = 'square';
+        ctx.lineWidth = 6;
+        ctx.strokeStyle = 'rgba(2, 12, 7, 0.85)';
+        ctx.stroke();
+        corners();
+        ctx.lineWidth = 2.5;
+        ctx.strokeStyle = HOLO.green;
+        ctx.stroke();
+        bracketImage = canvas.toDataURL();
+        return bracketImage;
+    }
+
     let nativeRendererFailureReported = false;
     let latestNativeFragmentShaderSource = '';
 
@@ -1161,6 +1463,7 @@ window.tacticalGlobe = (function () {
                     candidate._tacticalGlobeRoad || candidate._tacticalGlobeNote));
             };
             let entity = pickIdentifier(picked);
+            if (entity && entity._tgBracket) entity = null;
             if (!isActionable(entity)) {
                 // Labels, route geometry, and dense layers can sit over an actionable billboard.
                 // Examine every object at the pixel instead of letting the top decorative
@@ -1217,6 +1520,14 @@ window.tacticalGlobe = (function () {
                 const noteEntry = viewers.get(containerId);
                 if (noteEntry) noteEntry.dotNetRef.invokeMethodAsync('OnMapNoteClicked', entity._tacticalGlobeNote);
             }
+            // Target brackets on whatever was picked (after its window opened, which clears the last).
+            const target = !Array.isArray(entity) && isActionable(entity) ? bracketTargetFor(viewer, entity) : null;
+            const selecting = viewers.get(containerId);
+            if (target && !(selecting && selecting.selectMode && entity._tacticalGlobeCamera)) {
+                setTargetBrackets(containerId, target.position, target.size, target.extra, target.aircraftId);
+            } else if (!entity) {
+                clearTargetBrackets(containerId);
+            }
         }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
 
         viewers.set(containerId, {
@@ -1226,6 +1537,11 @@ window.tacticalGlobe = (function () {
             ionToken: options && typeof options.ionToken === 'string' && options.ionToken.length > 0 ? options.ionToken : null, threeD: null,
             renderTimer, pulseTimer: null, onRenderError
         });
+
+        // Night Ops quality: the remembered level now, the battery's default once it answers.
+        const qualityShell = container.closest('.tg-shell');
+        if (qualityShell) qualityShell.dataset.owQuality = currentQuality();
+        getQuality().catch(function () { /* keep the level in force */ });
 
         // Fire once for the initial view so cameras appear without requiring a drag/zoom first.
         setTimeout(function () {
@@ -1826,7 +2142,7 @@ window.tacticalGlobe = (function () {
                 existing._tacticalGlobeCamera = pin;
                 // Its health or stream can change the pin's shape (cached images; Cesium only
                 // reloads when the image differs).
-                const image = cameraPinImage(pin, entry.selectedCameras.has(pin.id));
+                const image = cameraPinImage(pin, entry.selectedCameras.has(pin.id), existing._tacticalGlobeAlertSeverity);
                 if (existing.billboard && existing.billboard.image && existing.billboard.image.getValue() !== image) {
                     existing.billboard.image = image;
                 }
@@ -1894,9 +2210,9 @@ window.tacticalGlobe = (function () {
         clearStreetViewMarker(containerId);
         entry.streetViewEntity = entry.viewer.entities.add({
             position: Cesium.Cartesian3.fromDegrees(Number(lon), Number(lat)),
-            point: { pixelSize: 15, color: Cesium.Color.fromCssColorString('#ffd166'), outlineColor: Cesium.Color.BLACK, outlineWidth: 2,
+            billboard: { image: markerGlyph('viewer'), width: 24, height: 24, color: Cesium.Color.fromCssColorString('#66e0c8'),
                 disableDepthTestDistance: 0 },
-            label: { text: 'STREET VIEW', font: 'bold 11px monospace', fillColor: Cesium.Color.fromCssColorString('#ffd166'),
+            label: { text: 'STREET VIEW', font: 'bold 11px monospace', fillColor: Cesium.Color.fromCssColorString('#66e0c8'),
                 outlineColor: Cesium.Color.BLACK, outlineWidth: 3, style: Cesium.LabelStyle.FILL_AND_OUTLINE,
                 pixelOffset: new Cesium.Cartesian2(0, -18), disableDepthTestDistance: 0 }
         });
@@ -1983,22 +2299,8 @@ window.tacticalGlobe = (function () {
 
     // Live aircraft (OpenSky): a small plane arrow turned to its heading, with callsign and
     // altitude shown when zoomed in. aircraft: [{ id, callsign, lat, lon, altitudeFeet, speedKnots, heading }].
-    const aircraftIcon = (function () {
-        const canvas = document.createElement('canvas');
-        canvas.width = canvas.height = 32;
-        const ctx = canvas.getContext('2d');
-        ctx.translate(16, 16);
-        ctx.beginPath();
-        ctx.moveTo(0, -14); ctx.lineTo(4, -2); ctx.lineTo(14, 4); ctx.lineTo(14, 7); ctx.lineTo(3, 4);
-        ctx.lineTo(2, 11); ctx.lineTo(6, 14); ctx.lineTo(-6, 14); ctx.lineTo(-2, 11); ctx.lineTo(-3, 4);
-        ctx.lineTo(-14, 7); ctx.lineTo(-14, 4); ctx.lineTo(-4, -2); ctx.closePath();
-        ctx.fillStyle = '#ffffff';
-        ctx.fill();
-        ctx.lineWidth = 1.5;
-        ctx.strokeStyle = '#05080a';
-        ctx.stroke();
-        return canvas.toDataURL();
-    })();
+    // Night Ops kit: an aircraft is a chevron pointing along its heading.
+    const aircraftIcon = markerGlyph('chevron');
 
     // Drawn as a BillboardCollection + LabelCollection rather than entities. Labels are the real
     // cost (400 of them measured +50 ms/frame in software rendering, even when hidden by
@@ -2009,14 +2311,20 @@ window.tacticalGlobe = (function () {
         if (!entry) return;
         if (!entry.aircraftPrimitives) {
             entry.aircraftPrimitives = {
+                // Thermal tint (engine glow) under the chevrons; shown from the regional stage down.
+                thermal: entry.viewer.scene.primitives.add(new Cesium.BillboardCollection()),
                 billboards: entry.viewer.scene.primitives.add(new Cesium.BillboardCollection()),
                 labels: entry.viewer.scene.primitives.add(new Cesium.LabelCollection())
             };
         }
         const billboards = entry.aircraftPrimitives.billboards;
         const labels = entry.aircraftPrimitives.labels;
+        const thermal = entry.aircraftPrimitives.thermal;
         billboards.removeAll();
         labels.removeAll();
+        thermal.removeAll();
+        thermal.show = thermalOn();
+        const thermalColour = Cesium.Color.WHITE.withAlpha(entry.thermalShown === false ? 0 : 1);
         const nearOnly = new Cesium.DistanceDisplayCondition(0, 120000);
         const withLabels = entry.viewer.camera.positionCartographic.height < 150000;
         const selectedId = entry.aircraftPath && entry.aircraftPath.id;
@@ -2033,6 +2341,12 @@ window.tacticalGlobe = (function () {
                 rotation: -Cesium.Math.toRadians(Number(plane.heading) || 0), alignedAxis: Cesium.Cartesian3.ZERO,
                 disableDepthTestDistance: 0
             });
+            thermal.add({
+                position: position, image: markerGlyph('engines'), width: selected ? 26 : 20, height: selected ? 26 : 20, color: thermalColour,
+                rotation: -Cesium.Math.toRadians(Number(plane.heading) || 0), alignedAxis: Cesium.Cartesian3.ZERO,
+                disableDepthTestDistance: 0
+            });
+            if (entry.bracketAircraftId !== null && entry.bracketAircraftId === plane.id) entry.bracketPosition = position;
             if (selected) updateSelectedAircraft(entry, plane);
             if (!withLabels && !plane.emergency) return;
             labels.add({
@@ -2353,6 +2667,7 @@ window.tacticalGlobe = (function () {
 
     function closeAircraftPanel() {
         aircraftRequestToken++;
+        clearTargetBrackets();
         if (aircraftPanel && aircraftPanel.parentNode) aircraftPanel.parentNode.removeChild(aircraftPanel);
         aircraftPanel = null;
         if (nativeEntry && nativeEntry.aircraftPath) {
@@ -2370,20 +2685,8 @@ window.tacticalGlobe = (function () {
     // Live ships (aisstream.io AIS): a hull marker turned to its heading (or course), with name,
     // speed and type shown when zoomed in. ships: [{ id, name, lat, lon, speedKnots, heading, type, destination }].
     // Same primitive-collection approach as aircraft, for the same per-frame cost reason.
-    const shipIcon = (function () {
-        const canvas = document.createElement('canvas');
-        canvas.width = canvas.height = 32;
-        const ctx = canvas.getContext('2d');
-        ctx.translate(16, 16);
-        ctx.beginPath();
-        ctx.moveTo(0, -14); ctx.lineTo(6, -4); ctx.lineTo(6, 13); ctx.lineTo(-6, 13); ctx.lineTo(-6, -4); ctx.closePath();
-        ctx.fillStyle = '#ffffff';
-        ctx.fill();
-        ctx.lineWidth = 1.5;
-        ctx.strokeStyle = '#05080a';
-        ctx.stroke();
-        return canvas.toDataURL();
-    })();
+    // Night Ops kit: a ship is a diamond, its long axis along the heading.
+    const shipIcon = markerGlyph('diamond');
 
     const SHIP_COLOURS = { Tanker: '#ff5252', Cargo: '#69f0ae', Passenger: '#448aff', Fishing: '#ffd740', Military: '#e040fb' };
 
@@ -2407,7 +2710,7 @@ window.tacticalGlobe = (function () {
             const colour = Cesium.Color.fromCssColorString(SHIP_COLOURS[ship.type] || '#ffab40');
             const hasHeading = Number.isFinite(ship.heading);
             billboards.add({
-                position: position, image: shipIcon, width: 14, height: 18, color: colour,
+                position: position, image: shipIcon, width: 16, height: 16, color: colour,
                 rotation: hasHeading ? -Cesium.Math.toRadians(Number(ship.heading)) : 0, alignedAxis: Cesium.Cartesian3.ZERO,
                 disableDepthTestDistance: 0
             });
@@ -2437,7 +2740,7 @@ window.tacticalGlobe = (function () {
             const colour = Cesium.Color.fromCssColorString(AQI_COLOURS.find(function (band) { return aqi <= band[0]; })[1]);
             return entry.viewer.entities.add({
                 position: Cesium.Cartesian3.fromDegrees(Number(reading.lon), Number(reading.lat)),
-                point: { pixelSize: 22, color: colour.withAlpha(0.55), outlineColor: colour, outlineWidth: 2, disableDepthTestDistance: 0 },
+                billboard: { image: markerGlyph('aqi'), width: 24, height: 24, color: colour, disableDepthTestDistance: 0 },
                 label: {
                     text: 'AQI ' + aqi, font: 'bold 10px monospace', fillColor: Cesium.Color.WHITE, outlineColor: Cesium.Color.BLACK, outlineWidth: 3,
                     style: Cesium.LabelStyle.FILL_AND_OUTLINE, pixelOffset: new Cesium.Cartesian2(0, -20), disableDepthTestDistance: 0
@@ -2471,7 +2774,9 @@ window.tacticalGlobe = (function () {
             });
             added.push(entry.viewer.entities.add({
                 position: Cesium.Cartesian3.fromDegrees(Number(area.lon), Number(area.lat)),
+                billboard: { image: markerGlyph('bolt'), width: 18, height: 18, color: colour, disableDepthTestDistance: 0 },
                 label: {
+                    pixelOffset: new Cesium.Cartesian2(0, 24),
                     text: area.name + '\n' + Number(area.customersOut).toLocaleString('en-US') + ' OUT',
                     font: 'bold 10px monospace', fillColor: colour, outlineColor: Cesium.Color.BLACK, outlineWidth: 3,
                     style: Cesium.LabelStyle.FILL_AND_OUTLINE, horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
@@ -2682,7 +2987,7 @@ window.tacticalGlobe = (function () {
         (notes || []).forEach(function (note) {
             const points = (note.points || []).filter(function (p) { return p && p.length === 2; });
             if (points.length === 0) return;
-            const colour = Cesium.Color.fromCssColorString(note.color || '#b8ffd6');
+            const colour = Cesium.Color.fromCssColorString(note.color || '#d4ffd9');
             if (note.kind === 'area' && points.length >= 3) {
                 const ring = Cesium.Cartesian3.fromDegreesArray(points.flatMap(function (p) { return [Number(p[1]), Number(p[0])]; }));
                 const area = entry.viewer.entities.add({
@@ -2699,7 +3004,7 @@ window.tacticalGlobe = (function () {
             }
             const pin = entry.viewer.entities.add({
                 position: Cesium.Cartesian3.fromDegrees(Number(points[0][1]), Number(points[0][0])),
-                point: { pixelSize: 13, color: colour, outlineColor: Cesium.Color.BLACK, outlineWidth: 2, disableDepthTestDistance: 0 },
+                billboard: { image: markerGlyph('dot'), width: 15, height: 15, color: colour, disableDepthTestDistance: 0 },
                 label: label(note.title, colour)
             });
             pin._tacticalGlobeNote = note.id;
@@ -2783,6 +3088,370 @@ window.tacticalGlobe = (function () {
         });
     }
 
+    // ---- Night Ops quality, thermal tint, target brackets and line of sight (phases 4-5, 20-11-26) ----
+
+    // Quality Off / Standard / High, remembered per browser. Off: no grain, no terrain shading, no
+    // buildings. Standard: grain and terrain shading. High: everything, with buildings and line of
+    // sight. High by default, Standard on a discharging battery (High is never the battery default).
+    const QUALITY_KEY = 'gws-overwatch-quality';
+    const QUALITY_LEVELS = ['off', 'standard', 'high'];
+    let quality = null;
+    let qualityChosen = false;
+
+    function readStoredQuality() {
+        try {
+            const stored = window.localStorage.getItem(QUALITY_KEY);
+            return QUALITY_LEVELS.indexOf(stored) >= 0 ? stored : null;
+        } catch (err) {
+            return null;
+        }
+    }
+
+    function currentQuality() {
+        if (quality) return quality;
+        const stored = readStoredQuality();
+        qualityChosen = !!stored;
+        quality = stored || 'high';
+        return quality;
+    }
+
+    // Resolves to the level in force once the battery has answered (when nothing was chosen yet).
+    async function getQuality() {
+        const level = currentQuality();
+        if (qualityChosen || !navigator.getBattery) return level;
+        try {
+            const battery = await navigator.getBattery();
+            if (!qualityChosen && battery && battery.charging === false) applyQuality('standard', false);
+        } catch (err) {
+            /* no battery reading: keep the default */
+        }
+        return quality;
+    }
+
+    function setQuality(containerId, level) {
+        if (QUALITY_LEVELS.indexOf(level) < 0) return currentQuality();
+        return applyQuality(level, true, containerId);
+    }
+
+    function applyQuality(level, chosen, containerId) {
+        quality = level;
+        if (chosen) {
+            qualityChosen = true;
+            try { window.localStorage.setItem(QUALITY_KEY, level); } catch (err) { /* private window: this visit only */ }
+        }
+        viewers.forEach(function (entry, id) {
+            if (containerId && id !== containerId) return;
+            const shell = shellFor(entry);
+            if (shell) shell.dataset.owQuality = level;
+            if (level === 'off' && entry.viewer.scene.globe.material) {
+                entry.viewer.scene.globe.material = undefined;
+                entry.terrainShading = 'off';
+            }
+            if (entry.threeD && entry.threeD.buildings) entry.threeD.buildings.show = entry.threeDOn && level === 'high';
+            if (level !== 'high') clearLineOfSight(id);
+            refreshThermal(entry);
+            entry.viewer.scene.requestRender();
+        });
+        return level;
+    }
+
+    // Thermal tint: fire hotspots and aircraft engines glow warm from the regional stage down (not
+    // from orbit), unless quality is Off. It fades in once when it comes on; under
+    // prefers-reduced-motion it simply appears. No idle animation.
+    let currentStage = 'orbit';
+    function thermalOn() {
+        return currentQuality() !== 'off' && currentStage !== 'orbit';
+    }
+
+    function reducedMotion() {
+        return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+    }
+
+    function addThermalHalo(dataSource, position, size) {
+        const halo = dataSource.entities.add({
+            position: position,
+            show: thermalOn(),
+            billboard: { image: markerGlyph('heat-halo'), width: size * 2.6, height: size * 2.6, color: Cesium.Color.WHITE, disableDepthTestDistance: 0 }
+        });
+        halo._tgThermal = true;
+        return halo;
+    }
+
+    function setThermalAlpha(entry, alpha) {
+        const colour = Cesium.Color.WHITE.withAlpha(alpha);
+        if (entry.fireDataSource) {
+            entry.fireDataSource.entities.values.forEach(function (e) {
+                if (e._tgThermal && !e._tgUndim) e.billboard.color = colour;
+            });
+        }
+        const thermal = entry.aircraftPrimitives && entry.aircraftPrimitives.thermal;
+        if (thermal) for (let i = 0; i < thermal.length; i++) thermal.get(i).color = colour;
+    }
+
+    function refreshThermal(entry) {
+        if (!entry || entry.viewer.isDestroyed()) return;
+        const on = thermalOn();
+        const was = !!entry.thermalShown;
+        entry.thermalShown = on;
+        if (entry.fireDataSource) {
+            entry.fireDataSource.entities.values.forEach(function (e) { if (e._tgThermal) e.show = on; });
+        }
+        const thermal = entry.aircraftPrimitives && entry.aircraftPrimitives.thermal;
+        if (thermal) thermal.show = on;
+        if (on && !was && !reducedMotion()) {
+            const started = performance.now();
+            const step = function () {
+                if (entry.viewer.isDestroyed() || !entry.thermalShown) return;
+                const t = Math.min(1, (performance.now() - started) / 600);
+                setThermalAlpha(entry, t);
+                entry.viewer.scene.requestRender();
+                if (t < 1) requestAnimationFrame(step);
+            };
+            setThermalAlpha(entry, 0);
+            requestAnimationFrame(step);
+        } else if (on) {
+            setThermalAlpha(entry, 1);
+        }
+    }
+
+    function onStageChanged(stage) {
+        if (stage === currentStage) return;
+        currentStage = stage;
+        viewers.forEach(refreshThermal);
+    }
+
+    // Target brackets: four green corners around the selected item, with its range from the camera
+    // (and an aircraft's altitude). Gone when its window closes or the click finds nothing.
+    function formatRange(metres) {
+        return metres >= 10000 ? (metres / 1000).toFixed(0) + ' KM' : metres >= 1000 ? (metres / 1000).toFixed(1) + ' KM' : Math.round(metres) + ' M';
+    }
+
+    function setTargetBrackets(containerId, position, sizePx, extra, aircraftId) {
+        const entry = viewers.get(containerId || 'tg-viewport');
+        if (!entry || !position) return;
+        clearTargetBrackets(containerId);
+        const size = Math.max(30, (Number(sizePx) || 16) + 20);
+        entry.bracketPosition = position;
+        entry.bracketAircraftId = aircraftId || null;
+        const viewer = entry.viewer;
+        entry.bracketEntity = viewer.entities.add({
+            position: new Cesium.CallbackProperty(function () { return entry.bracketPosition; }, false),
+            billboard: { image: targetBracketImage(), width: size, height: size, disableDepthTestDistance: Number.POSITIVE_INFINITY },
+            label: {
+                text: new Cesium.CallbackProperty(function () {
+                    const range = Cesium.Cartesian3.distance(viewer.camera.positionWC, entry.bracketPosition);
+                    return 'RNG ' + formatRange(range) + (extra ? ' · ' + extra : '');
+                }, false),
+                font: '600 10px "IBM Plex Mono", ui-monospace, monospace',
+                fillColor: Cesium.Color.fromCssColorString(HOLO.green),
+                showBackground: true,
+                backgroundColor: Cesium.Color.fromCssColorString('#020c07').withAlpha(0.85),
+                backgroundPadding: new Cesium.Cartesian2(5, 3),
+                verticalOrigin: Cesium.VerticalOrigin.TOP,
+                pixelOffset: new Cesium.Cartesian2(0, size / 2 + 4),
+                disableDepthTestDistance: Number.POSITIVE_INFINITY
+            }
+        });
+        entry.bracketEntity._tgBracket = true;
+        viewer.scene.requestRender();
+    }
+
+    function clearTargetBrackets(containerId) {
+        viewers.forEach(function (entry, id) {
+            if (containerId && id !== containerId) return;
+            if (entry.bracketEntity && !entry.viewer.isDestroyed()) {
+                entry.viewer.entities.remove(entry.bracketEntity);
+                entry.viewer.scene.requestRender();
+            }
+            entry.bracketEntity = null;
+            entry.bracketAircraftId = null;
+        });
+    }
+
+    // Where a clicked item is and how big its marker is, for the brackets.
+    function bracketTargetFor(viewer, picked) {
+        if (!picked) return null;
+        if (picked._tacticalGlobeAircraft) {
+            const plane = picked._tacticalGlobeAircraft;
+            const altitude = Number.isFinite(plane.altitudeFeet) ? 'ALT ' + (Math.round(plane.altitudeFeet / 100) * 100).toLocaleString('en-US') + ' FT' : null;
+            return { position: Cesium.Cartesian3.fromDegrees(Number(plane.lon), Number(plane.lat)), size: 26, extra: altitude, aircraftId: plane.id };
+        }
+        if (!(picked instanceof Cesium.Entity) || !picked.position) return null;
+        const position = picked.position.getValue(viewer.clock.currentTime);
+        if (!position) return null;
+        const width = picked.billboard && picked.billboard.width ? picked.billboard.width.getValue(viewer.clock.currentTime) : 16;
+        return { position: position, size: width };
+    }
+
+    // Line of sight from a camera (web only, 3D terrain on, quality High): terrain heights on a
+    // 40 x 40 grid within 3 km, and every cell the camera can't see darkened on the ground.
+    const LINE_OF_SIGHT = { cells: 40, radiusMetres: 3000, mastMetres: 8, targetMetres: 2, shadeAlpha: 0.55 };
+
+    function lineOfSightAvailable(entry) {
+        return !!(entry && entry.threeDOn && currentQuality() === 'high');
+    }
+
+    async function sampleHeights(provider, cartographics) {
+        try {
+            return await Cesium.sampleTerrainMostDetailed(provider, cartographics);
+        } catch (err) {
+            // Terrain without tile availability (the key-less tiles) samples at a fixed level.
+            return await Cesium.sampleTerrain(provider, 13, cartographics);
+        }
+    }
+
+    // heights: n x n (row = latitude index). Is cell (i, j) hidden from a viewer at grid point
+    // (ci, cj), standing eye metres up? Walks the straight line between them over the grid.
+    function cellHidden(heights, n, ci, cj, eye, i, j, targetUp) {
+        const target = heights[i * n + j] + targetUp;
+        const span = Math.max(Math.abs(i - ci), Math.abs(j - cj));
+        const steps = Math.max(2, Math.ceil(span * 2));
+        for (let k = 1; k < steps; k++) {
+            const t = k / steps;
+            const y = Math.round(ci + (i - ci) * t), x = Math.round(cj + (j - cj) * t);
+            if (y < 0 || x < 0 || y >= n || x >= n || (y === i && x === j)) continue;
+            if (heights[y * n + x] > eye + (target - eye) * t) return true;
+        }
+        return false;
+    }
+
+    // Per cell of an n x n height grid with the viewer at its centre, eye metres above sea level:
+    // 0 seen, 1 hidden, 2 outside the circle.
+    function lineOfSightMask(heights, n, eye, targetUp) {
+        const centre = n / 2 - 0.5;
+        const mask = new Uint8Array(n * n);
+        for (let i = 0; i < n; i++) {
+            for (let j = 0; j < n; j++) {
+                const dy = (i - centre) / (n / 2), dx = (j - centre) / (n / 2);
+                mask[i * n + j] = dx * dx + dy * dy > 1 ? 2 : cellHidden(heights, n, centre, centre, eye, i, j, targetUp) ? 1 : 0;
+            }
+        }
+        return mask;
+    }
+
+    async function runLineOfSight(containerId, lat, lon) {
+        const entry = viewers.get(containerId || 'tg-viewport');
+        if (!entry) return 'failed: no globe';
+        if (!lineOfSightAvailable(entry)) return 'failed: needs 3D terrain and quality High';
+        lat = Number(lat); lon = Number(lon);
+        if (!Number.isFinite(lat) || !Number.isFinite(lon)) return 'failed: the camera has no position';
+        const n = LINE_OF_SIGHT.cells;
+        const dLat = LINE_OF_SIGHT.radiusMetres / 111320;
+        const dLon = LINE_OF_SIGHT.radiusMetres / (111320 * Math.max(0.05, Math.cos(lat * Math.PI / 180)));
+        const south = lat - dLat, west = lon - dLon, cellLat = 2 * dLat / n, cellLon = 2 * dLon / n;
+        const cartographics = [];
+        for (let i = 0; i < n; i++) {
+            for (let j = 0; j < n; j++) cartographics.push(Cesium.Cartographic.fromDegrees(west + (j + 0.5) * cellLon, south + (i + 0.5) * cellLat));
+        }
+        cartographics.push(Cesium.Cartographic.fromDegrees(lon, lat));
+        let sampled;
+        try {
+            sampled = await sampleHeights(entry.viewer.terrainProvider, cartographics);
+        } catch (error) {
+            return 'failed: terrain heights unavailable';
+        }
+        if (entry.viewer.isDestroyed()) return 'failed: no globe';
+        const heights = new Float64Array(n * n);
+        for (let k = 0; k < n * n; k++) heights[k] = Number.isFinite(sampled[k].height) ? sampled[k].height : 0;
+        const cameraGround = Number.isFinite(sampled[n * n].height) ? sampled[n * n].height : 0;
+        const mask = lineOfSightMask(heights, n, cameraGround + LINE_OF_SIGHT.mastMetres, LINE_OF_SIGHT.targetMetres);
+        clearLineOfSight(containerId);
+        if (!entry.losSource) {
+            entry.losSource = new Cesium.CustomDataSource('tg-line-of-sight');
+            await entry.viewer.dataSources.add(entry.losSource);
+        }
+        const entities = entry.losSource.entities;
+        const shade = Cesium.Color.fromCssColorString('#020604').withAlpha(LINE_OF_SIGHT.shadeAlpha);
+        let hidden = 0, cells = 0;
+        entities.suspendEvents();
+        for (let i = 0; i < n; i++) {
+            let runStart = -1;
+            for (let j = 0; j <= n; j++) {
+                const cell = j < n ? mask[i * n + j] : 2;
+                if (cell !== 2) cells++;
+                if (cell === 1) { hidden++; if (runStart < 0) runStart = j; continue; }
+                if (runStart >= 0) {
+                    entities.add({ rectangle: {
+                        coordinates: Cesium.Rectangle.fromDegrees(west + runStart * cellLon, south + i * cellLat, west + j * cellLon, south + (i + 1) * cellLat),
+                        material: shade
+                    } });
+                    runStart = -1;
+                }
+            }
+        }
+        const ring = [];
+        for (let a = 0; a <= 64; a++) {
+            const angle = a / 64 * Math.PI * 2;
+            ring.push(lon + Math.cos(angle) * dLon, lat + Math.sin(angle) * dLat);
+        }
+        entities.add({ polyline: { positions: Cesium.Cartesian3.fromDegreesArray(ring), width: 2, clampToGround: true,
+            material: Cesium.Color.fromCssColorString(HOLO.green).withAlpha(0.8) } });
+        entities.resumeEvents();
+        entry.lineOfSight = { lat: lat, lon: lon, hidden: hidden };
+        showLineOfSightClear(entry);
+        entry.viewer.scene.requestRender();
+        return 'done: ' + Math.round(100 * hidden / Math.max(1, cells)) + '% hidden';
+    }
+
+    function showLineOfSightClear(entry) {
+        const shell = shellFor(entry);
+        if (!shell || shell.querySelector('.tg-los-clear')) return;
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'tg-los-clear';
+        button.setAttribute('aria-label', 'Clear the line of sight');
+        button.innerHTML = '<span class="tg-los-clear-label">LINE OF SIGHT</span> <span aria-hidden="true">CLEAR &times;</span>';
+        button.addEventListener('click', function () { clearLineOfSight(entry.containerId); });
+        shell.appendChild(button);
+    }
+
+    function clearLineOfSight(containerId) {
+        viewers.forEach(function (entry, id) {
+            if (containerId && id !== containerId) return;
+            if (entry.losSource) entry.losSource.entities.removeAll();
+            entry.lineOfSight = null;
+            const shell = shellFor(entry);
+            const button = shell && shell.querySelector('.tg-los-clear');
+            if (button) button.remove();
+            if (!entry.viewer.isDestroyed()) entry.viewer.scene.requestRender();
+        });
+    }
+
+    // Read-only Night Ops state (Cesium draws in WebGL, not the DOM), for tests and devtools.
+    function nightOpsState(containerId) {
+        const entry = viewers.get(containerId || 'tg-viewport');
+        return {
+            quality: currentQuality(),
+            stage: currentStage,
+            thermal: !!(entry && entry.thermalShown),
+            brackets: !!(entry && entry.bracketEntity),
+            bracketLabel: entry && entry.bracketEntity ? entry.bracketEntity.label.text.getValue(Cesium.JulianDate.now()) : null,
+            lineOfSight: entry && entry.lineOfSight ? { hidden: entry.lineOfSight.hidden, shapes: entry.losSource.entities.values.length } : null,
+            buildings: !!(entry && entry.threeD && entry.threeD.buildings && entry.threeD.buildings.show)
+        };
+    }
+
+    // The LINE OF SIGHT action in a camera's window, when it's available.
+    function addLineOfSightAction(panel, camera) {
+        const entry = viewers.get('tg-viewport');
+        if (!lineOfSightAvailable(entry) || !Number.isFinite(Number(camera.lat)) || !Number.isFinite(Number(camera.lon))) return;
+        const row = document.createElement('div');
+        row.className = 'tg-los-row';
+        row.innerHTML = '<button type="button" class="tg-los-button">LINE OF SIGHT</button><span class="tg-los-status" role="status"></span>';
+        const status = row.querySelector('.tg-los-status');
+        const button = row.querySelector('.tg-los-button');
+        button.addEventListener('click', function () {
+            button.disabled = true;
+            status.textContent = 'SAMPLING TERRAIN...';
+            runLineOfSight('tg-viewport', camera.lat, camera.lon).then(function (result) {
+                button.disabled = false;
+                status.textContent = result.indexOf('done: ') === 0 ? result.slice(6).toUpperCase() + ' WITHIN 3 KM' : result.replace('failed: ', '').toUpperCase();
+            });
+        });
+        const body = panel.querySelector('.tg-stream-panel-body');
+        panel.insertBefore(row, body);
+    }
+
     // Night Ops terrain shading (20-11-26): contour lines every 20 m (bold every 100 m) or slope
     // shading, on the 3D terrain only. Cesium's own ElevationContour and SlopeRamp globe materials;
     // onRenderError removes them if a browser can't compile them. Returns 'off', 'contours',
@@ -2814,6 +3483,8 @@ window.tacticalGlobe = (function () {
                 entry.terrainShading = 'off';
             } else if (!entry.threeDOn) {
                 return 'failed: turn on 3D terrain first';
+            } else if (currentQuality() === 'off') {
+                return 'failed: quality is Off';
             } else if (entry.terrainShadingFailed) {
                 return 'failed: this browser can\'t draw terrain shading';
             } else if (mode === 'contours') {
@@ -2847,6 +3518,7 @@ window.tacticalGlobe = (function () {
                 entry.terrainShading = 'off';
                 viewer.terrainProvider = new Cesium.EllipsoidTerrainProvider();
                 if (entry.threeD && entry.threeD.buildings) entry.threeD.buildings.show = false;
+                clearLineOfSight(containerId || 'tg-viewport');
                 return 'off';
             }
             if (!entry.threeD && !entry.ionToken) {
@@ -2865,7 +3537,8 @@ window.tacticalGlobe = (function () {
                 entry.threeD = { terrain: terrain, buildings: buildings };
             }
             viewer.terrainProvider = entry.threeD.terrain;
-            if (entry.threeD.buildings) entry.threeD.buildings.show = true;
+            // Buildings only at quality High (Night Ops quality setting).
+            if (entry.threeD.buildings) entry.threeD.buildings.show = currentQuality() === 'high';
             entry.threeDOn = true;
             return 'on';
         } catch (error) {
@@ -3330,18 +4003,52 @@ window.tacticalGlobe = (function () {
             alert.rings.forEach(function (ring, ringIndex) {
                 const flat = [];
                 ring.forEach(function (point) { flat.push(point[0], point[1]); });
+                const colour = severityColor(alert.severity);
                 const entity = entry.viewer.entities.add({
                     polygon: {
                         hierarchy: Cesium.Cartesian3.fromDegreesArray(flat),
-                        material: severityColor(alert.severity).withAlpha(0.35),
+                        material: colour.withAlpha(0.16),
                         outline: true,
-                        outlineColor: severityColor(alert.severity),
+                        outlineColor: colour,
                         height: 0
                     }
                 });
                 entry.alertEntities.set(alert.id + ':' + ringIndex, entity);
+                // Night Ops kit: a weather alert is a hatched area. Plain diagonal lines clipped to the
+                // ring (no pattern material: WebKit can't be trusted with new material shaders).
+                hatchLines(ring).forEach(function (segment, i) {
+                    entry.alertEntities.set(alert.id + ':' + ringIndex + ':h' + i, entry.viewer.entities.add({
+                        polyline: { positions: Cesium.Cartesian3.fromDegreesArray(segment), width: 1.2, arcType: Cesium.ArcType.RHUMB, material: colour.withAlpha(0.7) }
+                    }));
+                });
             });
         });
+    }
+
+    // Diagonal hatch segments inside a ring of [lon, lat] points: lines of constant lon + lat, at most
+    // about 24 across the ring, each cut where it crosses the ring's edges.
+    function hatchLines(ring) {
+        if (!ring || ring.length < 3) return [];
+        let min = Infinity, max = -Infinity;
+        ring.forEach(function (p) { const u = Number(p[0]) + Number(p[1]); if (u < min) min = u; if (u > max) max = u; });
+        if (!isFinite(min) || max - min <= 0) return [];
+        const step = Math.max((max - min) / 24, 0.01);
+        const segments = [];
+        for (let u = min + step / 2; u < max; u += step) {
+            const hits = [];
+            for (let i = 0; i < ring.length; i++) {
+                const a = ring[i], b = ring[(i + 1) % ring.length];
+                const ua = Number(a[0]) + Number(a[1]), ub = Number(b[0]) + Number(b[1]);
+                if ((ua - u) * (ub - u) >= 0 || ua === ub) continue;
+                const t = (u - ua) / (ub - ua);
+                hits.push(Number(a[0]) + t * (Number(b[0]) - Number(a[0])));
+            }
+            hits.sort(function (x, y) { return x - y; });
+            for (let k = 0; k + 1 < hits.length && segments.length < 200; k += 2) {
+                segments.push([hits[k], u - hits[k], hits[k + 1], u - hits[k + 1]]);
+            }
+        }
+        return segments;
     }
 
     function clearWeatherAlerts(containerId) {
@@ -3376,9 +4083,16 @@ window.tacticalGlobe = (function () {
     function applyAlertHighlight(entity, severity) {
         if (!entity || !entity.billboard) return;
         entity.billboard.color = severity ? severityColor(severity) : Cesium.Color.fromCssColorString('#59f07a');
-        entity.billboard.width = severity ? 18 : 14;
-        entity.billboard.height = severity ? 18 : 14;
+        entity.billboard.width = severity ? 22 : 14;
+        entity.billboard.height = severity ? 22 : 14;
         entity._tacticalGlobeAlertSeverity = severity || null;
+        // The kit's camera alert: a ring around the camera, so it isn't colour alone.
+        const owner = entity._tacticalGlobeCamera;
+        if (owner) {
+            let selected = false;
+            viewers.forEach(function (e) { if (e.selectedCameras && e.selectedCameras.has(owner.id)) selected = true; });
+            entity.billboard.image = cameraPinImage(owner, selected, entity._tacticalGlobeAlertSeverity);
+        }
     }
 
     // Read-only accessor for the alert-highlight state applied above - Cesium's entity styling
@@ -3399,9 +4113,9 @@ window.tacticalGlobe = (function () {
 
     function severityColor(severity) {
         switch (severity) {
-            case 'Extreme': return Cesium.Color.fromCssColorString('#ff3b3b');
+            case 'Extreme': return Cesium.Color.fromCssColorString('#ff453a');
             case 'Severe': return Cesium.Color.fromCssColorString('#ff9d3b');
-            case 'Moderate': return Cesium.Color.fromCssColorString('#ffb000');
+            case 'Moderate': return Cesium.Color.fromCssColorString('#ffd60a');
             default: return Cesium.Color.fromCssColorString('#59f07a');
         }
     }
@@ -3430,9 +4144,9 @@ window.tacticalGlobe = (function () {
             const entity = entry.incidentDataSource.entities.add({
                 position: Cesium.Cartesian3.fromDegrees(incident.lon, incident.lat),
                 billboard: {
-                    image: pinBillboardImage,
-                    width: 14,
-                    height: 14,
+                    image: markerGlyph('wedge'),
+                    width: 16,
+                    height: 16,
                     color: incidentTypeColor(incident.category || incident.eventType),
                     disableDepthTestDistance: 0
                 }
@@ -3474,7 +4188,7 @@ window.tacticalGlobe = (function () {
             const size = iconsReady && signal.icon ? Math.max(18, outletSize) : outletSize;
             const color = Cesium.Color.fromCssColorString('#59f07a').withAlpha(signal.active === false ? 0.45 : 1);
             const billboard = {
-                image: iconsReady ? iconPinImage(signal.icon) : pinBillboardImage,
+                image: iconsReady ? iconPinImage(signal.icon) : markerGlyph('hexagon'),
                 width: size,
                 height: size,
                 color: color,
@@ -3918,10 +4632,10 @@ window.tacticalGlobe = (function () {
     function incidentTypeColor(categoryOrEventType) {
         switch (categoryOrEventType) {
             case 'crash':
-            case 'accidentsAndIncidents': return Cesium.Color.fromCssColorString('#ff3b3b');
+            case 'accidentsAndIncidents': return Cesium.Color.fromCssColorString('#ff453a');
             case 'closure':
             case 'closures': return Cesium.Color.fromCssColorString('#ff9d3b');
-            case 'roadwork': return Cesium.Color.fromCssColorString('#ffb000');
+            case 'roadwork': return Cesium.Color.fromCssColorString('#ffd60a');
             case 'hazard': return Cesium.Color.fromCssColorString('#59f07a');
             case 'event': return Cesium.Color.fromCssColorString('#59f07a');
             default: return Cesium.Color.fromCssColorString('#59f07a');
@@ -4156,7 +4870,7 @@ window.tacticalGlobe = (function () {
             const color = Cesium.Color.fromCssColorString(satelliteColors[sat.group] || '#d9e4ff');
             const dot = entities.add({
                 position: Cesium.Cartesian3.fromDegrees(sat.lon, sat.lat, sat.altitudeKm * 1000),
-                point: { pixelSize: station ? 9 : 7, color: color, outlineColor: Cesium.Color.BLACK, outlineWidth: 1, disableDepthTestDistance: 0 },
+                billboard: { image: markerGlyph('dot'), width: station ? 11 : 9, height: station ? 11 : 9, color: color, disableDepthTestDistance: 0 },
                 label: {
                     text: String(sat.name || '').toUpperCase(), font: '600 10px monospace', fillColor: color, outlineColor: Cesium.Color.BLACK,
                     outlineWidth: 3, style: Cesium.LabelStyle.FILL_AND_OUTLINE, pixelOffset: new Cesium.Cartesian2(0, -14),
@@ -4265,11 +4979,11 @@ window.tacticalGlobe = (function () {
             entities.add({ polyline: {
                 positions: Cesium.Cartesian3.fromDegreesArray([].concat.apply([], line.map(function (p) { return [p[1], p[0]]; }))),
                 width: index === 0 ? 3 : 1.5, clampToGround: false,
-                material: index === 0 ? Cesium.Color.fromCssColorString('#ffe14d') : new Cesium.PolylineDashMaterialProperty({ color: Cesium.Color.fromCssColorString('#7ae0ff'), dashLength: 14 })
+                material: index === 0 ? Cesium.Color.fromCssColorString('#e8ff4d') : new Cesium.PolylineDashMaterialProperty({ color: Cesium.Color.fromCssColorString('#66e0c8'), dashLength: 14 })
             } });
         });
         ((spec && spec.points) || []).forEach(function (p) {
-            entities.add({ position: Cesium.Cartesian3.fromDegrees(p[1], p[0]), point: { pixelSize: 8, color: Cesium.Color.fromCssColorString('#ffe14d'), outlineColor: Cesium.Color.BLACK, outlineWidth: 1, disableDepthTestDistance: Number.POSITIVE_INFINITY } });
+            entities.add({ position: Cesium.Cartesian3.fromDegrees(p[1], p[0]), billboard: { image: markerGlyph('dot'), width: 10, height: 10, color: Cesium.Color.fromCssColorString('#e8ff4d'), disableDepthTestDistance: Number.POSITIVE_INFINITY } });
         });
         entry.viewer.scene.requestRender();
     }
@@ -4362,24 +5076,52 @@ window.tacticalGlobe = (function () {
         incidentPanel = panel;
     }
 
+    // Night Ops kit glyph per layer for the hazard-style pins, by the layer's data source.
+    function hazardGlyph(layer, hazard) {
+        switch (layer) {
+            case 'tg-internet': return markerGlyph('arcs');
+            case 'tg-airports': return markerGlyph('ring-dot', hazard.severity);
+            case 'tg-chokepoints': return markerGlyph('diamond-outline');
+            case 'tg-weather-warnings': return markerGlyph('outline');
+            case 'tg-travel': {
+                const level = /level\s*(\d)/i.exec(String(hazard.detail || '') + ' ' + String(hazard.title || ''));
+                return markerGlyph('shield', level ? level[1] : hazard.severity === 'major' ? '4' : hazard.severity === 'moderate' ? '3' : '2');
+            }
+            case 'tg-fires': return markerGlyph('heat');
+            case 'tg-conflict': return markerGlyph('crossed');
+            case 'tg-humanitarian': return markerGlyph('cross-circle');
+            default: return markerGlyph('triangle', (hazardKindLetters[hazard.kind] || '!') + (hazard.severity === 'major' ? ':major' : ''));
+        }
+    }
+
+    // Severity in Apple's system colours (warning #ffd60a, critical #ff453a), always with the glyph's
+    // size, and for hazards a double edge, so colour is never the only cue.
+    function hazardColour(severity, fire) {
+        if (severity === 'major') return '#ff453a';
+        if (severity === 'moderate') return fire ? '#ffb000' : '#ffd60a';
+        return fire ? '#ffb000' : '#59f07a';
+    }
+
     function drawHazardPins(dataSource, hazards) {
+        const layer = dataSource.name || '';
+        const fire = layer === 'tg-fires';
         dataSource.entities.suspendEvents();
         dataSource.entities.removeAll();
         (hazards || []).forEach(function (hazard) {
-            const size = hazardSizes[hazard.severity] || 11;
+            const size = (hazardSizes[hazard.severity] || 11) + 5;
+            const position = Cesium.Cartesian3.fromDegrees(hazard.lon, hazard.lat);
+            if (fire) addThermalHalo(dataSource, position, size);
             const entity = dataSource.entities.add({
-                position: Cesium.Cartesian3.fromDegrees(hazard.lon, hazard.lat),
+                position: position,
                 billboard: {
-                    image: pinBillboardImage,
+                    image: hazardGlyph(layer, hazard),
                     width: size,
                     height: size,
-                    // Holo Wireframe (19-11-26): green, amber when moderate, red when major; the kind
-                    // shows in the window and the pin's size.
-                    color: Cesium.Color.fromCssColorString(hazard.severity === 'major' ? '#ff3b3b' : hazard.severity === 'moderate' ? '#ffb000' : '#59f07a'),
+                    color: Cesium.Color.fromCssColorString(hazardColour(hazard.severity, fire)),
                     disableDepthTestDistance: 0
                 },
                 // One of the three callouts in view (OverwatchCallouts), in its severity colour.
-                label: hazard.callout ? calloutLabel(hazard.callout, hazard.severity === 'major' ? '#ff3b3b' : hazard.severity === 'moderate' ? '#ffb000' : '#b8ffd6') : undefined
+                label: hazard.callout ? calloutLabel(hazard.callout, hazard.severity === 'major' ? '#ff453a' : hazard.severity === 'moderate' ? '#ffd60a' : '#b8ffd6') : undefined
             });
             entity._tacticalGlobeHazard = hazard;
         });
@@ -4388,7 +5130,7 @@ window.tacticalGlobe = (function () {
 
     // cells: [{ south, west, north, east, lat, lon, label, kinds: [..], score, severity,
     //           signals: [{ kind, title, url, countryWide }] }]
-    const convergenceColors = { major: '#ff3b30', moderate: '#ffb020' };
+    const convergenceColors = { major: '#ff453a', moderate: '#ffd60a' };
 
     function setConvergence(cells, containerId) {
         const entry = viewers.get(containerId || 'tg-viewport');
@@ -4412,9 +5154,9 @@ window.tacticalGlobe = (function () {
             const marker = entities.add({
                 position: Cesium.Cartesian3.fromDegrees(cell.lon, cell.lat),
                 billboard: {
-                    image: pinBillboardImage,
-                    width: 18,
-                    height: 18,
+                    image: markerGlyph('rings'),
+                    width: 24,
+                    height: 24,
                     color: color,
                     disableDepthTestDistance: 0
                 },
@@ -4452,7 +5194,7 @@ window.tacticalGlobe = (function () {
         perimeter._tacticalGlobeConvergence = cell;
         const marker = entities.add({
             position: Cesium.Cartesian3.fromDegrees(cell.lon, cell.lat),
-            billboard: { image: pinBillboardImage, width: 16, height: 16, color: color, disableDepthTestDistance: 0 },
+            billboard: { image: markerGlyph('rings'), width: 20, height: 20, color: color, disableDepthTestDistance: 0 },
             label: {
                 text: 'NO REPORTING',
                 font: '600 11px monospace',
@@ -4488,10 +5230,10 @@ window.tacticalGlobe = (function () {
             const entity = entry.signDataSource.entities.add({
                 position: Cesium.Cartesian3.fromDegrees(Number(sign.lon), Number(sign.lat)),
                 billboard: {
-                    image: pinBillboardImage,
-                    width: 12,
-                    height: 12,
-                    color: Cesium.Color.fromCssColorString('#ffb000'),
+                    image: markerGlyph('plate'),
+                    width: 16,
+                    height: 16,
+                    color: Cesium.Color.fromCssColorString('#ffd60a'),
                     disableDepthTestDistance: 0
                 }
             });
@@ -4505,7 +5247,7 @@ window.tacticalGlobe = (function () {
         if (entry) entry.signDataSource.entities.removeAll();
     }
 
-    const roadRiskColors = { 'ice-likely': '#ff3b3b', 'near-freezing': '#ffb000', 'clear': '#59f07a' };
+    const roadRiskColors = { 'ice-likely': '#ff453a', 'near-freezing': '#ffd60a', 'clear': '#59f07a' };
     const roadRiskLabels = { 'ice-likely': 'ICE LIKELY', 'near-freezing': 'NEAR FREEZING', 'clear': 'NO ICE RISK' };
 
     // stations: [{ id, name, lat, lon, pavementF, airF, dewpointF, precipitation, observedAt, risk,
@@ -4519,9 +5261,10 @@ window.tacticalGlobe = (function () {
             const entity = entry.roadWeatherDataSource.entities.add({
                 position: Cesium.Cartesian3.fromDegrees(Number(station.lon), Number(station.lat)),
                 billboard: {
-                    image: pinBillboardImage,
-                    width: station.risk === 'clear' ? 9 : 14,
-                    height: station.risk === 'clear' ? 9 : 14,
+                    // A station dot; a snowflake where ice is likely.
+                    image: markerGlyph(station.risk === 'ice-likely' ? 'snowflake' : 'dot'),
+                    width: station.risk === 'clear' ? 10 : 16,
+                    height: station.risk === 'clear' ? 10 : 16,
                     color: Cesium.Color.fromCssColorString(roadRiskColors[station.risk] || '#ffffff'),
                     disableDepthTestDistance: 0
                 }
@@ -4711,7 +5454,7 @@ window.tacticalGlobe = (function () {
             const text = i === 0 ? 'S' : i === all.length - 1 ? 'F' : String(i);
             return entry.viewer.entities.add({
                 position: Cesium.Cartesian3.fromDegrees(Number(stop.lon), Number(stop.lat)),
-                point: { pixelSize: 16, color: Cesium.Color.fromCssColorString('#59f07a'), outlineColor: Cesium.Color.BLACK, outlineWidth: 2,
+                billboard: { image: markerGlyph('dot'), width: 18, height: 18, color: Cesium.Color.fromCssColorString('#59f07a'),
                     disableDepthTestDistance: 0 },
                 label: { text: text, font: 'bold 11px monospace', fillColor: Cesium.Color.BLACK, disableDepthTestDistance: 0 }
             });
@@ -4751,7 +5494,7 @@ window.tacticalGlobe = (function () {
                     polyline: {
                         positions: Cesium.Cartesian3.fromDegreesArray(flat),
                         width: 8,
-                        material: Cesium.Color.fromCssColorString(h.kind === 'Dark' ? '#8b5cf6' : '#ffb000').withAlpha(0.9),
+                        material: Cesium.Color.fromCssColorString(h.kind === 'Dark' ? '#66e0c8' : '#ffd60a').withAlpha(0.9),
                         clampToGround: true
                     }
                 });
@@ -4760,7 +5503,7 @@ window.tacticalGlobe = (function () {
 
     // points: [{ lat, lon, level: 'bad'|'caution'|'ok'|'unknown' }] - "ask the cameras" results
     // as colored dots along the route; replaced on every call.
-    const conditionColors = { bad: '#ff3b3b', caution: '#ffb000', ok: '#59f07a', unknown: '#8a8a8a' };
+    const conditionColors = { bad: '#ff453a', caution: '#ffd60a', ok: '#59f07a', unknown: '#5f9a68' };
     function setRouteConditions(containerId, points) {
         const entry = viewers.get(containerId || 'tg-viewport');
         if (!entry) return;
@@ -4768,8 +5511,8 @@ window.tacticalGlobe = (function () {
         entry.routeConditionEntities = (points || []).map(function (point) {
             return entry.viewer.entities.add({
                 position: Cesium.Cartesian3.fromDegrees(Number(point.lon), Number(point.lat)),
-                point: { pixelSize: 14, color: Cesium.Color.fromCssColorString(conditionColors[point.level] || '#8a8a8a'),
-                    outlineColor: Cesium.Color.BLACK, outlineWidth: 2, disableDepthTestDistance: 0 }
+                billboard: { image: markerGlyph(point.level === 'bad' || point.level === 'caution' ? 'wedge' : 'dot'), width: 16, height: 16,
+                    color: Cesium.Color.fromCssColorString(conditionColors[point.level] || '#5f9a68'), disableDepthTestDistance: 0 }
             });
         });
     }
@@ -4857,7 +5600,7 @@ window.tacticalGlobe = (function () {
             const color = Cesium.Color.fromCssColorString(region.ok ? '#59f07a' : '#3f8f62');
             return entry.viewer.entities.add({
                 position: Cesium.Cartesian3.fromDegrees(Number(region.lon), Number(region.lat)),
-                point: { pixelSize: 9, color: color.withAlpha(0.85), outlineColor: Cesium.Color.BLACK, outlineWidth: 1 },
+                billboard: { image: markerGlyph('cone'), width: 16, height: 16, color: color.withAlpha(0.9) },
                 label: {
                     text: region.label,
                     font: '11px monospace',
@@ -4978,6 +5721,7 @@ window.tacticalGlobe = (function () {
     }
 
     function closeIncidentPanel() {
+        clearTargetBrackets();
         if (incidentPanel && incidentPanel._tgBackdrop && incidentPanel._tgBackdrop.parentNode) {
             incidentPanel._tgBackdrop.parentNode.removeChild(incidentPanel._tgBackdrop);
         }
@@ -5140,6 +5884,7 @@ window.tacticalGlobe = (function () {
             (camera.modeLabel ? '<div class="tg-stream-panel-availability">' + escapeHtml((camera.modeLabel + ' · ' + camera.stateLabel +
                 ' · ' + (camera.sourceName || '')).toUpperCase()) + '</div>' : '') +
             '<div class="tg-stream-panel-body"></div>';
+        addLineOfSightAction(panel, camera);
 
         const favoriteButton = panel.querySelector('.tg-stream-panel-favorite');
         if (dotNetRef) {
@@ -5346,6 +6091,7 @@ window.tacticalGlobe = (function () {
     }
 
     function closeStreamPanel() {
+        clearTargetBrackets();
         if (streamPanel) {
             if (streamPanel._tgStreamDispose) streamPanel._tgStreamDispose();
             if (streamPanel._tgBackdrop && streamPanel._tgBackdrop.parentNode) {
@@ -5466,7 +6212,7 @@ window.tacticalGlobe = (function () {
         // stays reserved for alert-severity tinting (see applyAlertHighlight) - a pin can be
         // selected and alert-highlighted at the same time without either clobbering the other,
         // exactly as before.
-        entity.billboard.image = cameraPinImage(entity._tacticalGlobeCamera, selected);
+        entity.billboard.image = cameraPinImage(entity._tacticalGlobeCamera, selected, entity._tacticalGlobeAlertSeverity);
     }
 
     function updateSelectionIndicator(entry) {
@@ -5540,6 +6286,7 @@ window.tacticalGlobe = (function () {
         const entry = viewers.get(containerId || 'tg-viewport');
         if (!entry) return;
         stopDrive(containerId);
+        clearLineOfSight(containerId || 'tg-viewport');
         entry.clickHandler.destroy();
         stopRadarPlayback(entry.radar);
         if (entry.radar.bar) entry.radar.bar.remove();
@@ -5592,6 +6339,13 @@ window.tacticalGlobe = (function () {
         setTrafficFlow: setTrafficFlow,
         setThreeD: setThreeD,
         setTerrainShading: setTerrainShading,
+        setQuality: setQuality,
+        getQuality: getQuality,
+        runLineOfSight: runLineOfSight,
+        clearLineOfSight: clearLineOfSight,
+        markerGlyph: markerGlyph,
+        nightOpsState: nightOpsState,
+        lineOfSightMask: lineOfSightMask,
         flyToStreetLevel: flyToStreetLevel,
         stopDrive: stopDrive,
         setDriveFollow: setDriveFollow,
@@ -5863,7 +6617,7 @@ window.tacticalGlobe = (function () {
 
         const nativeOperations = new Set([
             'flyTo', 'flyToBounds', 'flyToStreetLevel', 'zoom', 'home', 'dispose',
-            'setTimeMachine', 'clearTimeMachine', 'setMapNotes', 'setThreeD', 'setTerrainShading', 'setNightLights', 'setSatelliteScene', 'clearSatelliteScene', 'setMeasure', 'clearMeasure', 'setAircraft', 'setShips',
+            'setTimeMachine', 'clearTimeMachine', 'setMapNotes', 'setThreeD', 'setTerrainShading', 'setQuality', 'setNightLights', 'setSatelliteScene', 'clearSatelliteScene', 'setMeasure', 'clearMeasure', 'setAircraft', 'setShips',
             'setAirQuality', 'setPowerOutages', 'setRoadTraffic', 'setTrafficFlow', 'setDriveFollow',
             'setStreetViewMarker', 'clearStreetViewMarker', 'setCameraPins', 'setSelectModeEnabled',
             'setRadarVisible', 'setRadarTimeline', 'setHourlyForecast', 'setWeatherAlerts',

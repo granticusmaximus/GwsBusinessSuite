@@ -105,3 +105,20 @@ web only unless the separate AppKit map window is built.
   C. Apple structure: sidebar/inspector/toolbar layout, floating glass panels with cut corners, Look switch.
   D. Phase 4 target brackets; phase 5 line of sight, thermal tint, quality setting.
   E. Phase 6 Mac (camera height to the page, MapKit realistic elevation, green blend, overlays).
+- 20-11-26: running in parallel (Grant asked to work async), each in its own git worktree, uncommitted:
+  stream 1 = Mac phase 6 (camera reports to the page for stage/readout/night, native night dimming via
+  OverwatchMapLook values, MapKit realistic elevation for 3D); stream 2 = web map features (31-layer kit
+  marker shapes, target brackets, thermal tint, line of sight, quality setting). Coordinator merges each into
+  the main tree one at a time and runs verify-release after each merge. Stream 3 (Apple layout: sidebar,
+  inspector, glass panels, Look switch, responsive) starts after stream 2's markers merge.
+- 21-11-26: Grant asked for ONE worker at a time. Order: web stream (worktree agent-a2dc9ef1ea2f5a0cf, running)
+  -> Apple layout (worktree agent-a020c99fa2f0fae99, paused mid-way, uncommitted) -> Mac phase 6 (worktree
+  agent-a4cbe5f4d01ff3844, paused while making screenshot contact sheets, uncommitted). Each is merged, gated
+  and visually checked before the next resumes.
+- 21-11-26: WEB STREAM merged into main, gate PASS, visual check done (real app on a DB copy, Chromium + WebKit at
+  1440/820/390): 31 kit marker glyphs (one cached set, tacticalGlobe.markerGlyph), target brackets on selection,
+  thermal tint, line of sight (camera window action, 3D + High only, web only), quality Off/Standard/High
+  (setQuality in the Mac contract as a no-op). Visual check found the stage chip/readout covered (weather card on
+  desktop, Explore panel on phones): moved under the toolbar (top-right wide, top-left below 720 px). Test fixes:
+  OverwatchNightOpsBrowserTests ignore harness "Failed to load resource" (no server behind the page);
+  ClickingAnAircraft expects 5 entities (brackets). Next: Apple layout stream (worktree agent-a020c99fa2f0fae99).

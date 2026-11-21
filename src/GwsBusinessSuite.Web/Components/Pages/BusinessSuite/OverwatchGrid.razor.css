@@ -64,9 +64,8 @@
 
 .tg-stage {
     position: absolute;
-    left: 50%;
-    bottom: 0.6rem;
-    transform: translateX(-50%);
+    right: 1rem;
+    top: 4.6rem;
     z-index: 6;
     pointer-events: none;
     font-family: var(--ow-mono, "IBM Plex Mono", ui-monospace, Menlo, monospace);
@@ -1068,12 +1067,12 @@
     display: none;
 }
 
-/* Night Ops HUD readout (phase 4, 20-11-26): one line above the stage chip. */
+/* Night Ops HUD readout (phase 4, 20-11-26): one line at the top of the map, the stage chip below it. */
 .tg-readout {
     position: absolute;
-    left: 50%;
-    bottom: 2.3rem;
-    transform: translateX(-50%);
+    right: 1rem;
+    top: 3.3rem;
+    text-align: right;
     z-index: 6;
     pointer-events: none;
     max-width: calc(100% - 2rem);
@@ -1114,18 +1113,45 @@
 }
 
 /* Night Ops on narrow screens (responsive pass, 20-11-26; Grant: fully responsive on web, PWA and the
-   Mac app's window). Below 720 px the stage chip and the HUD readout move to the bottom-left so they
-   never sit under the bottom-right controls, and the readout gives way to them (truncates). */
+   Mac app's window). The stage chip and readout sit at the top of the map, under the toolbar (21-11-26
+   visual check: at the bottom the weather card covered them on desktop and the Explore panel on phones);
+   top-right on wide screens, top-left below 720 px where the zoom buttons run down the right edge. */
 @container gws-main (max-width: 720px) {
+    /* The top bar wraps to two rows here and the zoom buttons run down the right edge. */
     .tg-stage {
+        right: auto;
         left: 0.75rem;
-        transform: none;
+        top: 7.3rem;
     }
 
     .tg-readout {
+        right: auto;
         left: 0.75rem;
-        transform: none;
-        max-width: calc(100% - 9rem);
+        top: 6rem;
+        text-align: left;
+        max-width: calc(100% - 4.5rem);
         letter-spacing: 0.03em;
     }
+}
+
+/* Night Ops quality (20-11-26): Off drops the grain (tactical-globe.js sets data-ow-quality). The
+   three choices share the row and truncate rather than overflow. */
+.tg-shell[data-ow-quality="off"] .tg-grain { display: none; }
+
+.tg-quality-options {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.35rem;
+}
+
+.tg-quality-options .tg-toggle {
+    min-width: 0;
+    min-height: 32px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+@media (pointer: coarse) {
+    .tg-quality-options .tg-toggle { min-height: 44px; }
 }

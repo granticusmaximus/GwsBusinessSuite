@@ -249,6 +249,8 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
             case "setThreeD": SetThreeD(arguments); return;
             // Apple's map has no terrain shading; contours and slope are web only (Night Ops, 20-11-26).
             case NativeOverwatchOperations.SetTerrainShading: return;
+            // The Night Ops quality setting drives the web globe's grain, shading, buildings and line of sight; nothing to draw here.
+            case NativeOverwatchOperations.SetQuality: return;
             case "setNightLights": SetNightLights(arguments); return;
             case "setSatelliteScene": SetSatelliteScene(arguments); return;
             case NativeOverwatchOperations.FocusLayer: SetFocus(arguments); return;

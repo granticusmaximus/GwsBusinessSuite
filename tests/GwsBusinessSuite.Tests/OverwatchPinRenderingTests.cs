@@ -15,7 +15,7 @@ public sealed class OverwatchPinRenderingTests
             RepoRoot, "src/GwsBusinessSuite.Web/wwwroot/js/tactical-globe.js"));
 
         source.Should().Contain("function iconPinImage(name)")
-            .And.Contain("image: iconsReady ? iconPinImage(signal.icon) : pinBillboardImage",
+            .And.Contain("image: iconsReady ? iconPinImage(signal.icon) : markerGlyph('hexagon')",
                 "World News pins draw the story's Bootstrap icon once the icon font has loaded")
             .And.Contain("whenIconFontReady(",
                 "pins drawn before the icon font loads must be redrawn with their icons");

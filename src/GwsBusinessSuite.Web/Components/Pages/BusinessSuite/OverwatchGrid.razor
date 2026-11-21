@@ -151,6 +151,18 @@
                 }
             </select>
         </div>
+        @* Night Ops quality (20-11-26): Off (no grain, shading or buildings), Standard (grain and terrain
+           shading), High (everything, with 3D buildings and line of sight). Kept per browser. *@
+        <div class="tg-layer-group tg-quality">
+            <div class="tg-layer-group-title" id="tg-quality-title">QUALITY</div>
+            <div class="tg-quality-options" role="radiogroup" aria-labelledby="tg-quality-title">
+                @foreach (var (level, label, hint) in QualityLevels)
+                {
+                    <button type="button" role="radio" aria-checked="@(_quality == level ? "true" : "false")" data-tg-quality="@level"
+                            class="tg-toggle @(_quality == level ? "tg-toggle-on" : "")" title="@hint" @onclick="() => SetQualityAsync(level)">@label</button>
+                }
+            </div>
+        </div>
         <div class="tg-layer-group">
             <div class="tg-layer-group-title">WEATHER</div>
             <div class="tg-layer-buttons">
@@ -1763,6 +1775,7 @@
         }
         _globeStartedMs = _opening!.ElapsedMilliseconds;
         _ = MarkBootCompleteAsync();
+        await LoadQualityAsync();
 
         if (IonToken is not null)
         {
@@ -3923,6 +3936,38 @@
     }
 
     private Task ToggleThreeDAsync() => SetThreeDAsync(!_threeDOn);
+
+    // Night Ops quality: "off", "standard" or "high" (tactical-globe.js keeps it in localStorage and
+    // picks Standard on a discharging battery when nothing was chosen).
+    private static readonly (string Level, string Label, string Hint)[] QualityLevels =
+    [
+        ("off", "OFF", "No grain, no terrain shading, no 3D buildings"),
+        ("standard", "STANDARD", "Grain and terrain shading"),
+        ("high", "HIGH", "Everything, with 3D buildings and line of sight from a camera"),
+    ];
+
+    private string _quality = "high";
+
+    private async Task LoadQualityAsync()
+    {
+        try
+        {
+            _quality = NormalizeQuality(await JS.InvokeAsync<string?>("tacticalGlobe.getQuality"));
+        }
+        catch (JSException ex)
+        {
+            Logger.LogWarning(ex, "Overwatch quality could not be read");
+        }
+    }
+
+    private async Task SetQualityAsync(string level)
+    {
+        // The Mac app's Apple map forwards it and answers nothing; keep the choice shown.
+        _quality = NormalizeQuality(await JS.InvokeAsync<string?>("tacticalGlobe.setQuality", "tg-viewport", level) ?? level);
+        if (_quality == "off") _terrainShading = "off";
+    }
+
+    private static string NormalizeQuality(string? level) => level is "off" or "standard" or "high" ? level : "high";
 
     // Night Ops terrain shading (20-11-26): "off", "contours" or "slope".
     private string _terrainShading = "off";

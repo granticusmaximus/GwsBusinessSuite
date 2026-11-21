@@ -35,7 +35,7 @@ public static class NativeShapes
     // Ops with their own handler in the bridge (tiles, settings, grids), not points and paths.
     public static readonly IReadOnlySet<string> Handled = new HashSet<string>(StringComparer.Ordinal)
     {
-        "setThreeD", "setTerrainShading", "setNightLights", "setSatelliteScene", "clearSatelliteScene", "setMeasure", "clearMeasure",
+        "setThreeD", "setTerrainShading", "setQuality", "setNightLights", "setSatelliteScene", "clearSatelliteScene", "setMeasure", "clearMeasure",
         "setRadarTimeline", "setRadarVisible", "setTimeMachine", "clearTimeMachine", "setAurora", "setTrafficFlow",
         "splitSatelliteScene",
     };

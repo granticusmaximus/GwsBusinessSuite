@@ -90,6 +90,9 @@ public static class NativeOverwatchOperations
     // Contours or slope on the 3D terrain (Night Ops, 20-11-26). Apple's map can't shade terrain, so
     // the Mac accepts it and draws nothing (NativeShapes.Handled).
     public const string SetTerrainShading = "setTerrainShading";
+    // Night Ops quality Off / Standard / High (grain, terrain shading, buildings, line of sight;
+    // 20-11-26). Web globe only: the Mac accepts it and draws nothing (NativeShapes.Handled).
+    public const string SetQuality = "setQuality";
     public const string SetNightLights = "setNightLights";
     public const string SetSatelliteScene = "setSatelliteScene";
     public const string ClearSatelliteScene = "clearSatelliteScene";
@@ -152,7 +155,7 @@ public static class NativeOverwatchOperations
         SetCameraPins, SetWeatherSnapshot, SetRadarVisible, SetRadarTimeline, SetHourlyForecast,
         SetWeatherAlerts, ClearWeatherAlerts, SetCameraAlertHighlights, SetTrafficIncidents,
         ClearTrafficIncidents, SetWorldNews, ClearWorldNews, SetNewsShading, ClearNewsShading,
-        SetMapNotes, SetThreeD, SetTerrainShading, SetNightLights, SetSatelliteScene, ClearSatelliteScene, SetMeasure, ClearMeasure, SetDriveFollow, SetSelectModeEnabled, SetTimeMachine, ClearTimeMachine, SetRoadWeather, ClearRoadWeather,
+        SetMapNotes, SetThreeD, SetTerrainShading, SetQuality, SetNightLights, SetSatelliteScene, ClearSatelliteScene, SetMeasure, ClearMeasure, SetDriveFollow, SetSelectModeEnabled, SetTimeMachine, ClearTimeMachine, SetRoadWeather, ClearRoadWeather,
         SetMessageSigns, ClearMessageSigns, SetRoadTraffic, SetTrafficFlow, SetAircraft,
         SetAirQuality, SetPowerOutages, SetInternetOutages, ClearInternetOutages, SetConvergence,
         ClearConvergence, SetAirportStatus, ClearAirportStatus, SetChokepoints, ClearChokepoints, SetWeatherWarnings, ClearWeatherWarnings, SetAurora, ClearAurora,
