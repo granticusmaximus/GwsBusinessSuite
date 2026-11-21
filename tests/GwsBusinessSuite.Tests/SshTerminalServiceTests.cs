@@ -169,6 +169,9 @@ public sealed class SshTerminalServiceTests
 
         public Task<DigitalOceanActionResult> CreateSnapshotAsync(string snapshotName, string performedBy, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
+
+        public Task<ActiveDropletsImagesResult> ListActiveDropletsWithImagesAsync(CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
     }
 
     // Used when a code path should short-circuit before ever needing droplet info at
@@ -197,6 +200,9 @@ public sealed class SshTerminalServiceTests
             throw new InvalidOperationException("Should not be called.");
 
         public Task<DigitalOceanActionResult> CreateSnapshotAsync(string snapshotName, string performedBy, CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException("Should not be called.");
+
+        public Task<ActiveDropletsImagesResult> ListActiveDropletsWithImagesAsync(CancellationToken cancellationToken = default) =>
             throw new InvalidOperationException("Should not be called.");
     }
 }
