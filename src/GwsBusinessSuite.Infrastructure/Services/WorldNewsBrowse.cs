@@ -24,7 +24,8 @@ public sealed record WorldNewsBrowseState(
     string Language = "",
     string Outlet = "",
     string? EventId = null,
-    string? SituationId = null);
+    string? SituationId = null,
+    bool Watching = false);
 
 // The World News page's presentation rules, kept out of the component so they can be tested.
 public static class WorldNewsBrowse
@@ -97,6 +98,7 @@ public static class WorldNewsBrowse
         Add("outlet", state.Outlet);
         Add("event", state.EventId);
         Add("situation", state.SituationId);
+        if (state.Watching && state.Tab == WorldNewsTab.Developing) Add("watching", "1");
         return parts.Count == 0 ? "admin/world-news" : "admin/world-news?" + string.Join('&', parts);
     }
 

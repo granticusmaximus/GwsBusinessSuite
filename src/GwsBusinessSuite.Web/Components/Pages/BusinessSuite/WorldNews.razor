@@ -421,6 +421,11 @@ else if (_view == WorldNewsTab.Developing)
                             @onclick="ToggleWatchlistAsync">
                         <i class="bi bi-binoculars me-1" aria-hidden="true"></i>Watchlist@(_watchlist.Count > 0 ? $" ({_watchlist.Count})" : "")
                     </button>
+                    <button type="button" class="world-news-surge @(_watchingOnly ? "is-on" : "")" aria-pressed="@(_watchingOnly ? "true" : "false")"
+                            title="Show only the stories you watch, wherever they are in the list"
+                            @onclick="ToggleWatchingOnlyAsync">
+                        <i class="bi @(_watchingOnly ? "bi-bell-fill" : "bi-bell") me-1" aria-hidden="true"></i>Watching (@_watchedIds.Count)
+                    </button>
                 </div>
                 @if (_watchlistOpen)
                 {
@@ -451,7 +456,15 @@ else if (_view == WorldNewsTab.Developing)
                 }
                 @if (VisibleSituations.Count == 0)
                 {
-                    <EmptyState Icon="bi-search" Message="No developing stories match those filters." />
+                    @if (_watchingOnly && _watchedIds.Count == 0)
+                    {
+                        <EmptyState Icon="bi-bell" Title="You're not watching any stories yet"
+                                    Message="Open a story here and press Watch story. Every story you watch is listed here, and the bell tells you when one moves." />
+                    }
+                    else
+                    {
+                        <EmptyState Icon="bi-search" Message="No developing stories match those filters." />
+                    }
                 }
                 @{ var busiestSituation = VisibleSituations.Count == 0 ? 0 : VisibleSituations.Max(s => s.OutletCount); }
                 @foreach (var situation in VisibleSituations.Take(_shown))
@@ -460,7 +473,8 @@ else if (_view == WorldNewsTab.Developing)
                     @Row(SituationHref(situation.Id), situation.Title, FactsFor(situation),
                         $"{WorldNewsBrowse.Count(situation.EventCount, "event")} · {WorldNewsBrowse.Seen(situation.OutletCount, situation.Languages.Count)}",
                         Time(situation.LastSeen), WorldNewsBrowse.ReachPercent(situation.OutletCount, busiestSituation),
-                        situation.Id == _situation?.Id, () => SelectSituationAsync(situation), latest, StateLabel(situation), Tone(situation))
+                        situation.Id == _situation?.Id, () => SelectSituationAsync(situation), latest, StateLabel(situation), Tone(situation),
+                        watched: _watchedIds.Contains(situation.Id))
                 }
                 @if (VisibleSituations.Count > _shown)
                 {
@@ -814,6 +828,9 @@ else
     private int _shown = PageSize;
     private string _username = string.Empty;
     private bool _watching;
+    private bool _watchingOnly;
+    private HashSet<string> _watchedIds = new(StringComparer.Ordinal);
+    private List<SituationOverview> _watchedExtra = [];
     private bool _placing;
     private bool _surgeAlerts;
     private bool _filtersOpen;
@@ -839,6 +856,7 @@ else
     [SupplyParameterFromQuery(Name = "country")] public string? CountryQuery { get; set; }
     [SupplyParameterFromQuery(Name = "language")] public string? LanguageQuery { get; set; }
     [SupplyParameterFromQuery(Name = "outlet")] public string? OutletQuery { get; set; }
+    [SupplyParameterFromQuery(Name = "watching")] public string? WatchingQuery { get; set; }
 
     [SupplyParameterFromQuery(Name = "situation")]
     public string? SituationId { get; set; }
@@ -852,7 +870,7 @@ else
     public string? ReadQuery { get; set; }
 
     private WorldNewsBrowseState State => new(_view, _filter, _rangeHours, _kind, _where, _reportCountry, _reportLanguage, _reportOutlet,
-        _view == WorldNewsTab.Latest ? _selected?.Id : null, _view == WorldNewsTab.Developing ? _situation?.Id : null);
+        _view == WorldNewsTab.Latest ? _selected?.Id : null, _view == WorldNewsTab.Developing ? _situation?.Id : null, _watchingOnly);
 
     private string EventHref(EventOverview e) => WorldNewsBrowse.Url(State with { Tab = WorldNewsTab.Latest, EventId = e.Id, SituationId = null,
         RangeHours = _view == WorldNewsTab.Latest ? _rangeHours : WorldNewsBrowse.DefaultRangeHours });
@@ -881,7 +899,11 @@ else
     private IReadOnlyList<EventOverview> VisibleEvents => (_events ?? [])
         .Where(e => WorldNewsBrowse.Matches(e.Title, e.Headline, FactsFor(e), e.Countries, e.Languages, State)).ToList();
 
-    private IReadOnlyList<SituationOverview> VisibleSituations => (_situations ?? [])
+    // Watching (21-11-26): only the stories you watch, newest news first, including ones older than
+    // the range picker's window (loaded one by one into _watchedExtra).
+    private IReadOnlyList<SituationOverview> VisibleSituations => (_watchingOnly
+            ? (_situations ?? []).Concat(_watchedExtra).Where(s => _watchedIds.Contains(s.Id)).DistinctBy(s => s.Id).OrderByDescending(s => s.LastSeen)
+            : (_situations ?? []).AsEnumerable())
         .Where(s => WorldNewsBrowse.Matches(s.Title, s.Latest, FactsFor(s), s.Countries, s.Languages, State)).ToList();
 
     private IReadOnlyList<WorldStory> TodayStories => TodayPins.Lead((_world?.BiggestStories ?? [])
@@ -956,7 +978,7 @@ else
     // One list row: kind and place, the headline, how widely it's covered, and when. A real link,
     // so right-click Copy link and Open in new tab work; a plain click opens it in place.
     private RenderFragment Row(string href, string title, WorldNewsRowFacts facts, string seen, string time, int reach, bool selected,
-        Func<Task> open, string? extra = null, string? state = null, StatusTone tone = StatusTone.Neutral) =>
+        Func<Task> open, string? extra = null, string? state = null, StatusTone tone = StatusTone.Neutral, bool watched = false) =>
         @<a class="world-news-event @(selected ? "is-selected" : "")" href="@href" aria-current="@(selected ? "true" : "false")"
             title="@title" @onclick="open" @onclick:preventDefault>
             <span class="world-news-row-top">
@@ -968,6 +990,10 @@ else
                 @if (facts.Place is not null)
                 {
                     <span class="world-news-place"><i class="bi bi-geo-alt" aria-hidden="true"></i>@facts.Place</span>
+                }
+                @if (watched)
+                {
+                    <i class="bi bi-bell-fill world-news-watched" role="img" aria-label="You're watching this story" title="You're watching this story"></i>
                 }
                 <time class="world-news-time">@time</time>
             </span>
@@ -1002,6 +1028,7 @@ else
         News.Changed += OnNewsChanged;
         _username = await CurrentUserAccessor.GetCurrentUsernameAsync();
         _surgeAlerts = !string.IsNullOrWhiteSpace(_username) && await Task.Run(() => News.Store.IsWatchingSurges(_username));
+        await LoadWatchedAsync();
         if (!string.IsNullOrWhiteSpace(_username)) _pins = await Task.Run(() => News.Store.TodayPinsFor(_username));
         if (!string.IsNullOrWhiteSpace(_username)) _briefing = await Task.Run(() => News.Store.WantsBriefing(_username));
         _silences = await Task.Run(() => News.Store.Silences(DateTimeOffset.UtcNow));
@@ -1039,6 +1066,7 @@ else
         _reportCountry = CountryQuery?.Trim() ?? string.Empty;
         _reportLanguage = LanguageQuery?.Trim() ?? string.Empty;
         _reportOutlet = OutletQuery?.Trim() ?? string.Empty;
+        _watchingOnly = _view == WorldNewsTab.Developing && WatchingQuery == "1";
         _filtersOpen = SourceFilterCount > 0;
     }
 
@@ -1305,6 +1333,27 @@ else
         if (_watching) await Task.Run(() => News.Store.Unwatch(_username, _situation.Id));
         else await Task.Run(() => News.Store.Watch(_username, _situation.Id, DateTimeOffset.UtcNow));
         _watching = !_watching;
+        if (_watching) _watchedIds.Add(_situation.Id); else _watchedIds.Remove(_situation.Id);
+    }
+
+    private async Task LoadWatchedAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_username)) return;
+        var ids = await Task.Run(() => News.Store.WatchedSituationIds(_username));
+        _watchedIds = new HashSet<string>(ids, StringComparer.Ordinal);
+        var loaded = (_situations ?? []).Select(s => s.Id).ToHashSet(StringComparer.Ordinal);
+        var missing = ids.Where(id => !loaded.Contains(id)).ToList();
+        _watchedExtra = missing.Count == 0 ? [] : await Task.Run(() => missing.Select(id => News.Store.Situation(id)).OfType<SituationOverview>().ToList());
+    }
+
+    private async Task ToggleWatchingOnlyAsync()
+    {
+        _watchingOnly = !_watchingOnly;
+        _shown = PageSize;
+        if (!_watchingOnly) return;
+        await LoadWatchedAsync();
+        // A story left open that you don't watch would sit beside a list that doesn't hold it.
+        if (_situation is not null && !_watchedIds.Contains(_situation.Id)) _situation = null;
     }
 
     // A story from Today, a situation's timeline or a country card opens in Latest, with all its reports.

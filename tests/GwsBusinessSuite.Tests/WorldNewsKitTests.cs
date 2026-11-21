@@ -686,8 +686,12 @@ public sealed class WorldNewsKitTests : IDisposable
         store.Alerts("GRANT").Should().ContainSingle(a => !a.IsRead);
         store.MarkAlertRead("grant", alert.Id);
         store.Alerts("grant").Should().ContainSingle(a => a.IsRead);
+        store.Watch("grant", "second-story", Now.AddHours(3));
+        store.Watch("someone-else", "third-story", Now.AddHours(4));
+        store.WatchedSituationIds("GRANT").Should().Equal(["second-story", situation.Id], "the Watching list is per person, newest watch first");
         store.Unwatch("grant", situation.Id);
         store.IsWatching("grant", situation.Id).Should().BeFalse();
+        store.WatchedSituationIds("grant").Should().Equal(["second-story"]);
     }
 
     [Fact]

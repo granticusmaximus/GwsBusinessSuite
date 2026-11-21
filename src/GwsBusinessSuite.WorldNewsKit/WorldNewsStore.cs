@@ -1431,6 +1431,20 @@ public sealed partial class WorldNewsStore
         command.ExecuteNonQuery();
     }
 
+    // Every story this person watches, the most recently watched first (21-11-26: the Watching list
+    // on the Developing tab; before it, a watch could only be seen by reopening each story).
+    public IReadOnlyList<string> WatchedSituationIds(string username)
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT situation_id FROM situation_watches WHERE username = $username ORDER BY created_at DESC, situation_id";
+        command.Parameters.AddWithValue("$username", NormalizeUsername(username));
+        using var reader = command.ExecuteReader();
+        var ids = new List<string>();
+        while (reader.Read()) ids.Add(reader.GetString(0));
+        return ids;
+    }
+
     public void Unwatch(string username, string situationId)
     {
         using var connection = Open();

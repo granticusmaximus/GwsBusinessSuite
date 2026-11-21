@@ -26,6 +26,9 @@ public sealed class WorldNewsBrowseTests
     public void Url_ShouldHoldOnlyWhatDiffersFromTheDefaults_AndRoundTrip()
     {
         WorldNewsBrowse.Url(new WorldNewsBrowseState()).Should().Be("admin/world-news");
+        WorldNewsBrowse.Url(new WorldNewsBrowseState(WorldNewsTab.Developing, Watching: true)).Should().Be("admin/world-news?view=developing&watching=1",
+            "the Watching list keeps its own address");
+        WorldNewsBrowse.Url(new WorldNewsBrowseState(Watching: true)).Should().Be("admin/world-news", "Watching belongs to the Developing tab only");
         WorldNewsBrowse.Url(new WorldNewsBrowseState(RangeHours: 3)).Should().Be("admin/world-news", "3 hours is Today's default");
         WorldNewsBrowse.Url(new WorldNewsBrowseState(WorldNewsTab.Latest, RangeHours: 24, EventId: "abc")).Should().Be("admin/world-news?view=latest&event=abc");
 

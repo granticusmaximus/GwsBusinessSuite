@@ -1032,3 +1032,7 @@ a.world-news-search-all { text-decoration: none; color: var(--gws-text-soft); }
     padding: 0 .25rem;
     vertical-align: baseline;
 }
+
+/* A story you watch carries a bell beside its time (21-11-26, the Watching list). */
+.world-news-watched { margin-left: auto; color: var(--gws-sidebar-accent, #f59e0b); font-size: var(--gws-type-xs); }
+.world-news-watched + .world-news-time { margin-left: .4rem; }
