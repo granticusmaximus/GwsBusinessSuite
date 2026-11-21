@@ -152,3 +152,10 @@ web only unless the separate AppKit map window is built.
   outside -500..9000 m are left out. Visual check: Chromium + WebKit at 1280/820/390, orbit and city, look
   remembered across reload, switching back restores the holo globe.
   Next: user guide (docs/OVERWATCH_USER_GUIDE.md) and the PDF guide Grant asked for (Overwatch + World News).
+- 21-11-26 Guide and fixes. PDF field guide, second edition (Overwatch + World News, 27 pages, real
+  screenshots): docs/Overwatch-and-World-News-Field-Guide.pdf, source docs/field-guide/guide.html (first
+  edition kept as *-14-11-26). Fixes found while shooting it: the time machine bar covered the weather card
+  (card hidden while the bar is open); World News English processing failed whole batches forever on one bad
+  item (HeadlineTranslator.ParseReports now keeps each usable report and reads broken JSON object by
+  object); the Coverage tab's How it spread shared .story-spread with a 9rem sparkline box (own class now).
+  Night Ops plan: all phases done.

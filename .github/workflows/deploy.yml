@@ -168,11 +168,18 @@ jobs:
           # reading every secret at once instead got the deploy held by GitHub for approval, as a
           # possibly malicious workflow (it does that on public repos).
           # Overwatch's worldwide webcams (Windy Webcams API, free key from api.windy.com/keys):
-          # CAMERA_INTEL_WINDY_API_KEY: ${{ secrets.CAMERA_INTEL_WINDY_API_KEY }}
+          CAMERA_INTEL_WINDY_API_KEY: ${{ secrets.CAMERA_INTEL_WINDY_API_KEY }}
+          # Public-data keys (set 21-11-26). One api.data.gov key serves congress.gov (lifting its
+          # DEMO_KEY limit), FEC, regulations.gov, GovInfo and the FBI crime data.
+          DATA_GOV_API_KEY: ${{ secrets.DATA_GOV_API_KEY }}
+          COURTLISTENER_API_TOKEN: ${{ secrets.COURTLISTENER_API_TOKEN }}
+          OPENSTATES_API_KEY: ${{ secrets.OPENSTATES_API_KEY }}
+          AIRNOW_API_KEY: ${{ secrets.AIRNOW_API_KEY }}
+          EIA_API_KEY: ${{ secrets.EIA_API_KEY }}
         with:
           host: ${{ secrets.DO_HOST }}
           # Secrets the script writes into the droplet's .env (see sync_env_secret below).
-          envs: OVERWATCH_TOMTOM_API_KEY,CAMERA_INTEL_WINDY_API_KEY
+          envs: OVERWATCH_TOMTOM_API_KEY,CAMERA_INTEL_WINDY_API_KEY,DATA_GOV_API_KEY,COURTLISTENER_API_TOKEN,OPENSTATES_API_KEY,AIRNOW_API_KEY,EIA_API_KEY
           username: root
           # appleboy/ssh-action's command_timeout defaults to 10m, which the remote script now
           # exceeds on a cold/no-cache Docker build alone (dotnet publish ~8m, plus apt-get and
@@ -224,6 +231,13 @@ jobs:
             }
             sync_env_secret OVERWATCH_TOMTOM_API_KEY "${OVERWATCH_TOMTOM_API_KEY:-}"
             sync_env_secret CAMERA_INTEL_WINDY_API_KEY "${CAMERA_INTEL_WINDY_API_KEY:-}"
+            # Written under the app's own setting names (.env is the container's env_file).
+            sync_env_secret CongressApi__ApiKey "${DATA_GOV_API_KEY:-}"
+            sync_env_secret DataGov__ApiKey "${DATA_GOV_API_KEY:-}"
+            sync_env_secret CourtListener__ApiToken "${COURTLISTENER_API_TOKEN:-}"
+            sync_env_secret OpenStates__ApiKey "${OPENSTATES_API_KEY:-}"
+            sync_env_secret AirNow__ApiKey "${AIRNOW_API_KEY:-}"
+            sync_env_secret Eia__ApiKey "${EIA_API_KEY:-}"
 
             PREVIOUS_COMMIT=$(git rev-parse HEAD)
 
