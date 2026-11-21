@@ -335,6 +335,9 @@ public static class DependencyInjection
         services.AddScoped<IMailboxBackend, GmailMailboxBackend>();
         services.AddScoped<IMailboxBackend, ImapMailboxBackend>();
         services.AddScoped<GwsBusinessSuite.Application.Mail.IMailService, MailService>();
+        services.AddSingleton<MailInboxCache>();
+        services.AddScoped<MailTabAiService>();
+        services.AddHostedService<MailTabAiBackgroundService>();
         services.AddSingleton<MailUnreadCounter>();
         services.AddScoped<GwsBusinessSuite.Application.Operations.IMailServerSettingsService, MailServerSettingsService>();
         services.AddSingleton<IMailTransport, MailTransport>();

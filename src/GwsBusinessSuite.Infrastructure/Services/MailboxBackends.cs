@@ -39,6 +39,22 @@ public interface IMailboxBackend
     Task<int> UnreadCountAsync(MailAccount account, CancellationToken cancellationToken);
     // The provider's own folders and labels (MailFolders.LabelPrefix / FolderPrefix keys).
     Task<IReadOnlyList<MailFolderView>> ListFoldersAsync(MailAccount account, CancellationToken cancellationToken);
+    // Folders (Mail phase 5, 21-11-26): IMAP folders, or Gmail labels through Google's API. Keys are
+    // MailFolders.FolderPrefix / LabelPrefix keys, as ListFoldersAsync gives them.
+    Task<MailFolderView> CreateFolderAsync(MailAccount account, string name, CancellationToken cancellationToken) =>
+        throw new MailException("This mailbox can't make folders.");
+    Task RenameFolderAsync(MailAccount account, string folderKey, string name, CancellationToken cancellationToken) =>
+        throw new MailException("This mailbox can't rename folders.");
+    Task DeleteFolderAsync(MailAccount account, string folderKey, CancellationToken cancellationToken) =>
+        throw new MailException("This mailbox can't delete folders.");
+    // Moves messages (all from one folder) into a folder; returns how to put them back, if it can.
+    Task<MailUndo?> MoveToFolderAsync(MailAccount account, IReadOnlyList<string> ids, string folderKey, CancellationToken cancellationToken) =>
+        throw new MailException("This mailbox can't move messages to folders.");
+
+    // The newest inbox messages with the headers MailSorter reads (MailSortHeaders), newest first,
+    // for GWS's inbox tabs (21-11-26).
+    Task<IReadOnlyList<MailInboxItem>> InboxForSortingAsync(MailAccount account, int max, CancellationToken cancellationToken) =>
+        Task.FromResult<IReadOnlyList<MailInboxItem>>([]);
     // Puts the message in Drafts, replacing the draft replacesDraftId; returns the new draft's id.
     Task<string> SaveDraftAsync(MailAccount account, MimeMessage message, string? replacesDraftId, string? threadId, CancellationToken cancellationToken);
     Task DeleteDraftAsync(MailAccount account, string draftId, CancellationToken cancellationToken);
@@ -180,6 +196,8 @@ public sealed class GmailMailboxBackend(
             await EachAsync(undo.Ids, id => CallAsync(account, HttpMethod.Post, $"messages/{Uri.EscapeDataString(id)}/untrash", new JsonObject(), cancellationToken), cancellationToken);
         else if (undo.Action == MailActions.Archive)
             await BatchModifyAsync(account, undo.Ids, ["INBOX"], [], cancellationToken);
+        else if (undo.Action.StartsWith(MoveUndoAction, StringComparison.Ordinal))
+            await BatchModifyAsync(account, undo.Ids, ["INBOX"], [undo.Action[MoveUndoAction.Length..]], cancellationToken);
     }
 
     private async Task BatchModifyAsync(MailAccount account, IReadOnlyList<string> ids, string[] add, string[] remove, CancellationToken cancellationToken)
@@ -194,6 +212,36 @@ public sealed class GmailMailboxBackend(
             }, cancellationToken);
         }
     }
+
+    // Folders are Gmail labels (phase 5, 21-11-26). Moving to one adds the label and takes the message
+    // out of the Inbox, as Gmail's "Move to" does; Undo reverses both.
+    public async Task<MailFolderView> CreateFolderAsync(MailAccount account, string name, CancellationToken cancellationToken)
+    {
+        var created = await CallAsync(account, HttpMethod.Post, "labels", new JsonObject
+        {
+            ["name"] = name, ["labelListVisibility"] = "labelShow", ["messageListVisibility"] = "show"
+        }, cancellationToken) ?? throw new MailException("Gmail didn't make the label.");
+        return new MailFolderView(MailFolders.LabelPrefix + created["id"]!.GetValue<string>(), created["name"]?.GetValue<string>() ?? name);
+    }
+
+    public Task RenameFolderAsync(MailAccount account, string folderKey, string name, CancellationToken cancellationToken) =>
+        CallAsync(account, HttpMethod.Patch, $"labels/{Uri.EscapeDataString(LabelId(folderKey))}", new JsonObject { ["name"] = name }, cancellationToken);
+
+    public Task DeleteFolderAsync(MailAccount account, string folderKey, CancellationToken cancellationToken) =>
+        CallAsync(account, HttpMethod.Delete, $"labels/{Uri.EscapeDataString(LabelId(folderKey))}", null, cancellationToken);
+
+    public async Task<MailUndo?> MoveToFolderAsync(MailAccount account, IReadOnlyList<string> ids, string folderKey, CancellationToken cancellationToken)
+    {
+        var label = LabelId(folderKey);
+        await BatchModifyAsync(account, ids, [label], ["INBOX"], cancellationToken);
+        return new MailUndo(MoveUndoAction + label, ids, MailFolders.Inbox);
+    }
+
+    internal const string MoveUndoAction = "move:";
+
+    private static string LabelId(string folderKey) => folderKey.StartsWith(MailFolders.LabelPrefix, StringComparison.Ordinal)
+        ? folderKey[MailFolders.LabelPrefix.Length..]
+        : throw new MailException("That isn't one of this mailbox's labels.");
 
     private static JsonArray Ids(IEnumerable<string> ids) => new(ids.Select(id => (JsonNode)id).ToArray());
 
@@ -223,7 +271,8 @@ public sealed class GmailMailboxBackend(
         var labels = await CallAsync(account, HttpMethod.Get, "labels", null, cancellationToken);
         return labels?["labels"]?.AsArray()
             .Where(label => label?["type"]?.GetValue<string>() == "user")
-            .Select(label => new MailFolderView(MailFolders.LabelPrefix + label!["id"]!.GetValue<string>(), label["name"]?.GetValue<string>() ?? "Label"))
+            .Select(label => new MailFolderView(MailFolders.LabelPrefix + label!["id"]!.GetValue<string>(), label["name"]?.GetValue<string>() ?? "Label",
+                label["color"]?["backgroundColor"]?.GetValue<string>()))
             .OrderBy(label => label.Label, StringComparer.OrdinalIgnoreCase)
             .ToList() ?? [];
     }
@@ -268,6 +317,48 @@ public sealed class GmailMailboxBackend(
             ["addLabelIds"] = new JsonArray(add.Select(label => (JsonNode)label).ToArray()),
             ["removeLabelIds"] = new JsonArray(remove.Select(label => (JsonNode)label).ToArray())
         }, cancellationToken);
+
+    // GWS's inbox tabs: the newest inbox messages with the sorting headers (one metadata call each, a
+    // few at a time; Gmail's list gives only ids).
+    public async Task<IReadOnlyList<MailInboxItem>> InboxForSortingAsync(MailAccount account, int max, CancellationToken cancellationToken)
+    {
+        var ids = new List<string>();
+        string? pageToken = null;
+        do
+        {
+            var path = $"messages?labelIds=INBOX&maxResults={Math.Min(500, max - ids.Count)}" + (pageToken is null ? "" : "&pageToken=" + Uri.EscapeDataString(pageToken));
+            var list = await CallAsync(account, HttpMethod.Get, path, null, cancellationToken);
+            ids.AddRange(list?["messages"]?.AsArray().Select(item => item?["id"]?.GetValue<string>()).OfType<string>() ?? []);
+            pageToken = list?["nextPageToken"]?.GetValue<string>();
+        }
+        while (pageToken is not null && ids.Count < max);
+
+        var headerQuery = string.Concat(new[] { "From", "To", "Subject", "Date", "Content-Type", "Message-ID" }.Concat(MailSorter.HeaderNames)
+            .Select(name => "&metadataHeaders=" + Uri.EscapeDataString(name)));
+        using var gate = new SemaphoreSlim(8);
+        var items = await Task.WhenAll(ids.Take(max).Select(async id =>
+        {
+            await gate.WaitAsync(cancellationToken);
+            try
+            {
+                var item = await CallAsync(account, HttpMethod.Get, $"messages/{id}?format=metadata{headerQuery}", null, cancellationToken);
+                if (item is null) return null;
+                var headers = item["payload"]?["headers"]?.AsArray()
+                    .Select(header => (Name: header?["name"]?.GetValue<string>() ?? string.Empty, Value: header?["value"]?.GetValue<string>() ?? string.Empty))
+                    .Where(header => header.Name.Length > 0)
+                    .GroupBy(header => header.Name, StringComparer.OrdinalIgnoreCase)
+                    .ToDictionary(group => group.Key, group => group.First().Value, StringComparer.OrdinalIgnoreCase) ?? [];
+                var summary = Summary(item);
+                var key = headers.TryGetValue("Message-ID", out var messageId) && messageId.Trim().Length > 0 ? messageId.Trim().ToLowerInvariant() : summary.Id;
+                return new MailInboxItem(summary, key, headers);
+            }
+            finally
+            {
+                gate.Release();
+            }
+        }));
+        return items.OfType<MailInboxItem>().OrderByDescending(item => item.Summary.Date).ToList();
+    }
 
     private static MailMessageSummary Summary(JsonNode item)
     {
@@ -474,6 +565,40 @@ public sealed class ImapMailboxBackend(ISecretProtector secretProtector) : IMail
         return new MailPage(summaries, offset + PageSize < uids.Count ? (offset + PageSize).ToString(CultureInfo.InvariantCulture) : null);
     }
 
+    // GWS's inbox tabs: the newest inbox messages with the sorting headers, in one FETCH.
+    public async Task<IReadOnlyList<MailInboxItem>> InboxForSortingAsync(MailAccount account, int max, CancellationToken cancellationToken)
+    {
+        using var client = await ConnectAsync(account, cancellationToken);
+        var inbox = client.Inbox;
+        await inbox.OpenAsync(FolderAccess.ReadOnly, cancellationToken);
+        var uids = (await inbox.SearchAsync(SearchQuery.All, cancellationToken)).OrderByDescending(uid => uid.Id).Take(max).ToList();
+        if (uids.Count == 0) { await client.DisconnectAsync(true, cancellationToken); return []; }
+        var request = new FetchRequest(MessageSummaryItems.UniqueId | MessageSummaryItems.Envelope | MessageSummaryItems.Flags
+            | MessageSummaryItems.InternalDate | MessageSummaryItems.BodyStructure | MessageSummaryItems.PreviewText)
+        {
+            Headers = new HeaderSet(MailSorter.HeaderNames)
+        };
+        var fetched = await inbox.FetchAsync(uids, request, cancellationToken);
+        var items = fetched.OrderByDescending(item => item.UniqueId.Id).Select(item =>
+        {
+            var headers = (item.Headers ?? [])
+                .GroupBy(header => header.Field, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(group => group.Key, group => group.First().Value, StringComparer.OrdinalIgnoreCase);
+            var id = ImapMessageId.Encode(inbox.FullName, inbox.UidValidity, item.UniqueId.Id);
+            var summary = new MailMessageSummary(id, null,
+                MailMessageRenderer.Address(item.Envelope?.From.Mailboxes.FirstOrDefault()),
+                item.Envelope is null ? [] : MailMessageRenderer.Addresses(item.Envelope.To),
+                item.Envelope?.Subject ?? string.Empty, item.PreviewText ?? string.Empty,
+                item.Envelope?.Date ?? item.InternalDate ?? DateTimeOffset.MinValue,
+                item.Flags is { } flags && !flags.HasFlag(MessageFlags.Seen), item.Flags?.HasFlag(MessageFlags.Flagged) == true,
+                item.Attachments?.Any() == true);
+            var key = item.Envelope?.MessageId is { Length: > 0 } messageId ? messageId.Trim().ToLowerInvariant() : id;
+            return new MailInboxItem(summary, key, headers);
+        }).ToList();
+        await client.DisconnectAsync(true, cancellationToken);
+        return items;
+    }
+
     public async Task<MailFetched> GetAsync(MailAccount account, string id, bool markRead, CancellationToken cancellationToken)
     {
         using var client = await ConnectAsync(account, cancellationToken);
@@ -561,7 +686,14 @@ public sealed class ImapMailboxBackend(ISecretProtector secretProtector) : IMail
                 case MailActions.DeleteForever: await DeleteForGoodAsync(client, folder, uids, cancellationToken); break;
                 default:
                     var destination = await FolderAsync(client, action == MailActions.Archive ? MailFolders.Archive : MailFolders.Trash, cancellationToken);
-                    if (destination is not null && destination.FullName != folder.FullName)
+                    if (action == MailActions.Archive && IsGmailAllMail(client, destination))
+                    {
+                        var archived = await GmailArchiveAsync(client, folder, uids, destination!, cancellationToken);
+                        moved.AddRange(archived);
+                        if (archived.Count != uids.Count) undoable = false;
+                        from = folder.FullName;
+                    }
+                    else if (destination is not null && destination.FullName != folder.FullName)
                     {
                         // Each message's new UID, looked up by its old one (a server can report a wider
                         // range than was moved: GreenMail answered 4 pairs for 3 messages on 06-11-26).
@@ -597,7 +729,18 @@ public sealed class ImapMailboxBackend(ISecretProtector secretProtector) : IMail
             var folder = await client.GetFolderAsync(group.Key.Folder, cancellationToken);
             await folder.OpenAsync(FolderAccess.ReadWrite, cancellationToken);
             if (folder.UidValidity != group.Key.UidValidity) throw new MailException("That folder changed on the server, so they can't be put back.");
-            await folder.MoveToAsync(group.Select(id => new UniqueId(id.UidValidity, id.Uid)).ToList(), back, cancellationToken);
+            var uids = group.Select(id => new UniqueId(id.UidValidity, id.Uid)).ToList();
+            // A Gmail archive is undone by putting the label back; a MOVE out of All Mail could
+            // delete the message instead (see GmailArchiveAsync).
+            if (IsGmailAllMail(client, folder))
+            {
+                await folder.StoreAsync(uids, new StoreLabelsRequest(StoreAction.Add, [GmailLabel(client, back)]) { Silent = true }, cancellationToken);
+                // A move into a label is undone by taking that label off again too.
+                if (undo.Action.StartsWith(GmailMailboxBackend.MoveUndoAction, StringComparison.Ordinal))
+                    await folder.StoreAsync(uids, new StoreLabelsRequest(StoreAction.Remove, [undo.Action[GmailMailboxBackend.MoveUndoAction.Length..]]) { Silent = true }, cancellationToken);
+            }
+            else
+                await folder.MoveToAsync(uids, back, cancellationToken);
         }
         await client.DisconnectAsync(true, cancellationToken);
     }
@@ -670,12 +813,103 @@ public sealed class ImapMailboxBackend(ISecretProtector secretProtector) : IMail
         await client.DisconnectAsync(true, cancellationToken);
     }
 
+    // Gmail archive (21-11-26): "The IMAP server replied to the 'MOVE' command with a 'NO' response:
+    // System Error (Failure)". Archive used to MOVE the message into [Gmail]/All Mail, where every
+    // Gmail message already is; in Gmail, archiving means taking a label off (the Inbox's, or the
+    // folder's you're in). So it removes that label (X-GM-LABELS) and finds the message's UID in All
+    // Mail by its Gmail message id, for Undo. Returns the encoded All Mail ids it found.
+    private static bool IsGmailAllMail(ImapClient client, IMailFolder? folder) =>
+        folder is not null && client.Capabilities.HasFlag(ImapCapabilities.GMailExt1) && folder.Attributes.HasFlag(FolderAttributes.All);
+
+    private static string GmailLabel(ImapClient client, IMailFolder folder) =>
+        string.Equals(folder.FullName, client.Inbox.FullName, StringComparison.OrdinalIgnoreCase) ? "\\Inbox" : folder.FullName;
+
+    private static async Task<IReadOnlyList<string>> GmailArchiveAsync(ImapClient client, IMailFolder folder, IList<UniqueId> uids, IMailFolder allMail, CancellationToken cancellationToken)
+    {
+        if (folder.Attributes.HasFlag(FolderAttributes.All)) return [];
+        var summaries = await folder.FetchAsync(uids, new FetchRequest(MessageSummaryItems.UniqueId | MessageSummaryItems.GMailMessageId), cancellationToken);
+        await folder.StoreAsync(uids, new StoreLabelsRequest(StoreAction.Remove, [GmailLabel(client, folder)]) { Silent = true }, cancellationToken);
+        var found = new List<string>();
+        await allMail.OpenAsync(FolderAccess.ReadOnly, cancellationToken);
+        foreach (var gmailId in summaries.Select(summary => summary.GMailMessageId).OfType<ulong>())
+        {
+            var match = await allMail.SearchAsync(SearchQuery.GMailMessageId(gmailId), cancellationToken);
+            if (match.Count == 1) found.Add(ImapMessageId.Encode(allMail.FullName, match[0].Validity, match[0].Id));
+        }
+        return found;
+    }
+
+    // Folders (phase 5, 21-11-26): real IMAP folders under the personal namespace (on Gmail, labels).
+    public async Task<MailFolderView> CreateFolderAsync(MailAccount account, string name, CancellationToken cancellationToken)
+    {
+        using var client = await ConnectAsync(account, cancellationToken);
+        if (client.PersonalNamespaces.Count == 0) throw new MailException("This mailbox doesn't let Mail make folders.");
+        var root = client.GetFolder(client.PersonalNamespaces[0]);
+        var created = await root.CreateAsync(name, true, cancellationToken) ?? throw new MailException("The mailbox didn't make the folder.");
+        await client.DisconnectAsync(true, cancellationToken);
+        return new MailFolderView(MailFolders.FolderPrefix + created.FullName, created.FullName.Replace(created.DirectorySeparator.ToString(), " / "));
+    }
+
+    public async Task RenameFolderAsync(MailAccount account, string folderKey, string name, CancellationToken cancellationToken)
+    {
+        using var client = await ConnectAsync(account, cancellationToken);
+        var folder = await client.GetFolderAsync(FolderPath(folderKey), cancellationToken);
+        var parent = folder.ParentFolder ?? client.GetFolder(client.PersonalNamespaces[0]);
+        await folder.RenameAsync(parent, name, cancellationToken);
+        await client.DisconnectAsync(true, cancellationToken);
+    }
+
+    public async Task DeleteFolderAsync(MailAccount account, string folderKey, CancellationToken cancellationToken)
+    {
+        using var client = await ConnectAsync(account, cancellationToken);
+        var folder = await client.GetFolderAsync(FolderPath(folderKey), cancellationToken);
+        await folder.DeleteAsync(cancellationToken);
+        await client.DisconnectAsync(true, cancellationToken);
+    }
+
+    // Gmail over IMAP: the folder's label goes on and the current folder's comes off (no MOVE; see
+    // GmailArchiveAsync). Other servers: MOVE, whose UID map is the Undo.
+    public async Task<MailUndo?> MoveToFolderAsync(MailAccount account, IReadOnlyList<string> ids, string folderKey, CancellationToken cancellationToken)
+    {
+        var groups = ids.Select(ImapMessageId.Decode).GroupBy(id => (id.Folder, id.UidValidity)).ToList();
+        if (groups.Count != 1) throw new MailException("Move messages from one folder at a time.");
+        using var client = await ConnectAsync(account, cancellationToken);
+        var destination = await client.GetFolderAsync(FolderPath(folderKey), cancellationToken);
+        var group = groups[0];
+        var folder = await client.GetFolderAsync(group.Key.Folder, cancellationToken);
+        await folder.OpenAsync(FolderAccess.ReadWrite, cancellationToken);
+        if (folder.UidValidity != group.Key.UidValidity) throw new MailException("That folder changed on the server - reload the list.");
+        if (folder.FullName == destination.FullName) { await client.DisconnectAsync(true, cancellationToken); return null; }
+        var uids = group.Select(id => new UniqueId(id.UidValidity, id.Uid)).ToList();
+        var moved = new List<string>();
+        if (client.Capabilities.HasFlag(ImapCapabilities.GMailExt1) && client.GetFolder(SpecialFolder.All) is { } allMail)
+        {
+            await folder.StoreAsync(uids, new StoreLabelsRequest(StoreAction.Add, [destination.FullName]) { Silent = true }, cancellationToken);
+            moved.AddRange(await GmailArchiveAsync(client, folder, uids, allMail, cancellationToken));
+            await client.DisconnectAsync(true, cancellationToken);
+            return moved.Count == ids.Count ? new MailUndo(GmailMailboxBackend.MoveUndoAction + destination.FullName, moved, MailFolders.FolderPrefix + folder.FullName) : null;
+        }
+        var map = await folder.MoveToAsync(uids, destination, cancellationToken);
+        foreach (var uid in uids)
+            if (map.TryGetValue(uid, out var now)) moved.Add(ImapMessageId.Encode(destination.FullName, now.Validity, now.Id));
+        await client.DisconnectAsync(true, cancellationToken);
+        return moved.Count == ids.Count ? new MailUndo(GmailMailboxBackend.MoveUndoAction + destination.FullName, moved, MailFolders.FolderPrefix + folder.FullName) : null;
+    }
+
+    private static string FolderPath(string folderKey) => folderKey.StartsWith(MailFolders.FolderPrefix, StringComparison.Ordinal)
+        ? folderKey[MailFolders.FolderPrefix.Length..]
+        : throw new MailException("That isn't one of this mailbox's folders.");
+
     private async Task MoveAsync(MailAccount account, string id, string target, CancellationToken cancellationToken)
     {
         using var client = await ConnectAsync(account, cancellationToken);
         var (folder, uid) = await OpenAsync(client, id, FolderAccess.ReadWrite, cancellationToken);
         var destination = await FolderAsync(client, target, cancellationToken);
-        if (destination is not null && destination.FullName != folder.FullName)
+        if (target == MailFolders.Archive && IsGmailAllMail(client, destination))
+        {
+            await GmailArchiveAsync(client, folder, [uid], destination!, cancellationToken);
+        }
+        else if (destination is not null && destination.FullName != folder.FullName)
         {
             await folder.MoveToAsync(uid, destination, cancellationToken);
         }

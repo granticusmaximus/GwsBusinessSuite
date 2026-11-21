@@ -74,6 +74,8 @@ public interface IAppDbContext : IAsyncDisposable
     DbSet<SentinelMailboxSettings> SentinelMailboxSettings { get; }
     DbSet<MailServerSettings> MailServerSettings { get; }
     DbSet<MailAccount> MailAccounts { get; }
+    DbSet<MailMessageTab> MailMessageTabs { get; }
+    DbSet<MailSenderTab> MailSenderTabs { get; }
     DbSet<SentinelInboundEmail> SentinelInboundEmails { get; }
     DbSet<SupportMailboxSettings> SupportMailboxSettings { get; }
     DbSet<SupportInboundEmail> SupportInboundEmails { get; }

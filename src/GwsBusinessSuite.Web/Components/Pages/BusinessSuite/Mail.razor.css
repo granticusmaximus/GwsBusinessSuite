@@ -541,3 +541,116 @@
     .mail-back { display: inline-block; }
     .mail-body { min-height: 60vh; }
 }
+
+/* Gmail's sidebar, GWS style (21-11-26): menu button, folded icon rail, More, label colours. */
+.mail-folders-top { display: flex; align-items: center; gap: .35rem; margin-bottom: .5rem; }
+.mail-folders-top .mail-account-button { margin-bottom: 0; }
+.mail-rail-toggle {
+    display: inline-grid;
+    place-items: center;
+    flex-shrink: 0;
+    width: 2.25rem;
+    height: 2.25rem;
+    border: 0;
+    border-radius: 50%;
+    background: none;
+    color: inherit;
+    font-size: var(--gws-type-xl);
+}
+.mail-rail-toggle:hover { background: var(--bs-tertiary-bg); }
+.mail-folder-icon { flex-shrink: 0; width: 1.15rem; text-align: center; }
+.mail-folder.has-unread { font-weight: 700; }
+.mail-label-dot { color: var(--bs-secondary-color); }
+.mail-more { color: var(--bs-secondary-color); }
+
+.mail-shell--rail { grid-template-columns: 4.25rem minmax(16rem, 22rem) minmax(0, 1fr); }
+.mail-shell--rail.mail-shell--list { grid-template-columns: 4.25rem minmax(0, 1fr); }
+.mail-shell--rail .mail-folders { align-items: center; padding: .5rem .35rem; }
+.mail-shell--rail .mail-folders-top { flex-direction: column; }
+.mail-shell--rail :is(.mail-folder-name, .mail-account-address, .mail-account-chevron, .mail-folders-heading, .mail-compose-button span) { display: none; }
+.mail-shell--rail .mail-account-button { width: auto; padding: .2rem; border: 0; }
+.mail-shell--rail .mail-compose-button { align-self: center; padding: .85rem; }
+.mail-shell--rail .mail-folder { position: relative; justify-content: center; width: 3rem; padding: .5rem 0; border-radius: var(--gws-radius-lg); }
+.mail-shell--rail .mail-count {
+    position: absolute;
+    top: .1rem;
+    right: .1rem;
+    padding: 0 .3rem;
+    border-radius: var(--gws-radius-pill);
+    background: var(--bs-primary);
+    color: var(--bs-white);
+    line-height: 1.4;
+}
+
+/* Gmail's inbox tabs: an icon, the name, "N new" and the newest senders; the open tab is underlined
+   in its own colour. */
+.mail-tabs {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    border-bottom: 1px solid var(--gws-panel-border, var(--bs-border-color));
+}
+.mail-tab {
+    --mail-tab-tone: var(--bs-primary);
+    display: flex;
+    align-items: flex-start;
+    gap: .6rem;
+    min-width: 0;
+    padding: .65rem .9rem .55rem;
+    border: 0;
+    border-bottom: 3px solid transparent;
+    background: none;
+    color: var(--bs-secondary-color);
+    font-size: var(--gws-type-md);
+    text-align: left;
+}
+.mail-tab[data-tab="promotions"] { --mail-tab-tone: var(--bs-success); }
+.mail-tab[data-tab="social"] { --mail-tab-tone: var(--bs-info); }
+.mail-tab[data-tab="updates"] { --mail-tab-tone: var(--bs-warning); }
+.mail-tab[data-tab="forums"] { --mail-tab-tone: var(--bs-purple, var(--bs-indigo)); }
+.mail-tab > .bi { margin-top: .1rem; font-size: var(--gws-type-lg); }
+.mail-tab:hover { background: var(--bs-tertiary-bg); }
+.mail-tab[aria-selected="true"] { border-bottom-color: var(--mail-tab-tone); color: var(--mail-tab-tone); font-weight: 600; }
+.mail-tab-text { display: flex; flex-direction: column; min-width: 0; }
+.mail-tab-name { display: flex; align-items: center; gap: .4rem; white-space: nowrap; }
+.mail-tab-new {
+    padding: 0 .45rem;
+    border-radius: var(--gws-radius-pill);
+    background: var(--mail-tab-tone);
+    color: var(--bs-white);
+    font-size: var(--gws-type-xs);
+    font-weight: 600;
+}
+.mail-tab-senders { font-size: var(--gws-type-xs); color: var(--bs-secondary-color); }
+
+@container gws-main (max-width: 796px) {
+    .mail-folders-top { margin-bottom: 0; }
+    .mail-rail-toggle, .mail-more { display: none; }
+    .mail-shell--rail, .mail-shell--rail.mail-shell--list { grid-template-columns: minmax(0, 1fr); }
+    .mail-tabs { display: flex; overflow-x: auto; }
+    .mail-tab { flex: 0 0 auto; }
+    .mail-tab-senders { display: none; }
+}
+
+/* Senders sorted into tabs (21-11-26). */
+.mail-sender-tabs li { display: flex; align-items: center; gap: .6rem; padding: .3rem 0; border-bottom: 1px solid var(--gws-panel-border, var(--bs-border-color)); }
+.mail-sender-tabs li > .text-truncate { flex: 1; min-width: 0; }
+.mail-sender-tab { font-size: var(--gws-type-xs); color: var(--bs-secondary-color); }
+
+/* Folders (21-11-26): + beside the heading; rename and delete on each folder, shown on hover or focus. */
+.mail-folders-heading { display: flex; align-items: center; justify-content: space-between; }
+.mail-folder-add, .mail-folder-action {
+    display: inline-grid;
+    place-items: center;
+    width: 1.6rem;
+    height: 1.6rem;
+    border: 0;
+    border-radius: 50%;
+    background: none;
+    color: var(--bs-secondary-color);
+}
+.mail-folder-add:hover, .mail-folder-action:hover { background: var(--bs-tertiary-bg); color: var(--bs-body-color); }
+.mail-folder-row { position: relative; display: flex; align-items: center; }
+.mail-folder-row > .mail-folder { flex: 1; min-width: 0; }
+.mail-folder-actions { position: absolute; right: .25rem; display: none; gap: 2px; }
+.mail-folder-row:is(:hover, :focus-within) .mail-folder-actions { display: inline-flex; }
+.mail-shell--rail :is(.mail-folder-actions, .mail-folder-add) { display: none !important; }

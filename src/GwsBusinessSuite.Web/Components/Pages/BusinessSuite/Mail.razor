@@ -142,46 +142,76 @@ else if (_account is null || _changingAccount)
 }
 else
 {
-    <div class="mail-shell @(Reading ? "mail-shell--reading" : "mail-shell--list")">
+    <div class="mail-shell @(Reading ? "mail-shell--reading" : "mail-shell--list") @(_rail ? "mail-shell--rail" : "")">
+        @* Gmail's sidebar, GWS style (21-11-26): the menu button folds it to an icon rail; Inbox,
+           Starred, Sent and Drafts up top, the rest under More; labels in Gmail's own colours. *@
         <nav class="mail-folders" aria-label="Mail folders">
-            <button type="button" class="mail-account-button" @ref="_accountButton" aria-haspopup="menu" aria-expanded="@(_accountMenuOpen ? "true" : "false")"
-                    title="@_account.Address" @onclick="OpenAccountMenu">
-                <span class="mail-avatar" aria-hidden="true">@Initial(_account)</span>
-                <span class="mail-account-address text-truncate">@_account.Address</span>
-                @if (_accounts.Count > 1 && _unread.Where(pair => pair.Key != _account.Id).Sum(pair => pair.Value) is > 0 and var elsewhere)
-                {
-                    <span class="mail-count" title="Unread in your other mailboxes">@elsewhere</span>
-                }
-                <i class="bi bi-chevron-down" aria-hidden="true"></i>
-                <span class="visually-hidden">Switch or add a mailbox</span>
-            </button>
+            <div class="mail-folders-top">
+                <button type="button" class="mail-rail-toggle" aria-pressed="@(_rail ? "true" : "false")"
+                        title="@(_rail ? "Show folder names" : "Fold the sidebar")" aria-label="@(_rail ? "Show folder names" : "Fold the sidebar")" @onclick="ToggleRailAsync">
+                    <i class="bi bi-list" aria-hidden="true"></i>
+                </button>
+                <button type="button" class="mail-account-button" @ref="_accountButton" aria-haspopup="menu" aria-expanded="@(_accountMenuOpen ? "true" : "false")"
+                        title="@_account.Address" @onclick="OpenAccountMenu">
+                    <span class="mail-avatar" aria-hidden="true">@Initial(_account)</span>
+                    <span class="mail-account-address text-truncate">@_account.Address</span>
+                    @if (_accounts.Count > 1 && _unread.Where(pair => pair.Key != _account.Id).Sum(pair => pair.Value) is > 0 and var elsewhere)
+                    {
+                        <span class="mail-count" title="Unread in your other mailboxes">@elsewhere</span>
+                    }
+                    <i class="bi bi-chevron-down mail-account-chevron" aria-hidden="true"></i>
+                    <span class="visually-hidden">Switch or add a mailbox</span>
+                </button>
+            </div>
             <button type="button" class="mail-compose-button" @onclick="() => StartCompose(ComposeKind.New)" title="Compose (c)">
                 <i class="bi bi-pencil" aria-hidden="true"></i><span>Compose</span>
             </button>
-            @foreach (var (key, label, icon) in MailFolders.All)
+            @foreach (var (key, label, icon) in MailFolders.All.Where(folder => _moreOpen || MainFolders.Contains(folder.Key) || folder.Key == _folder))
             {
-                <button type="button" class="mail-folder @(key == _folder ? "active" : string.Empty)" aria-current="@(key == _folder ? "page" : null)"
-                        @onclick="() => OpenFolderAsync(key)">
-                    <i class="bi @icon" aria-hidden="true"></i><span>@label</span>
-                    @if (key == MailFolders.Inbox && _unread.GetValueOrDefault(_account.Id) is > 0 and var unread)
+                var active = key == MailFolders.Inbox ? MailTabs.IsInbox(_folder) : key == _folder;
+                var inboxUnread = key == MailFolders.Inbox ? _unread.GetValueOrDefault(_account.Id) : 0;
+                <button type="button" class="mail-folder @(active ? "active" : string.Empty) @(inboxUnread > 0 ? "has-unread" : string.Empty)" aria-current="@(active ? "page" : null)"
+                        title="@label" @onclick="() => OpenFolderAsync(key)">
+                    <i class="bi @(active ? icon + "-fill" : icon) mail-folder-icon" aria-hidden="true"></i><span class="mail-folder-name">@label</span>
+                    @if (inboxUnread > 0)
                     {
-                        <span class="mail-count">@unread<span class="visually-hidden"> unread</span></span>
+                        <span class="mail-count">@inboxUnread<span class="visually-hidden"> unread</span></span>
                     }
                 </button>
             }
-            @if (_customFolders.Count > 0)
+            <button type="button" class="mail-folder mail-more" aria-expanded="@(_moreOpen ? "true" : "false")" title="@(_moreOpen ? "Less" : "More")"
+                    @onclick="() => _moreOpen = !_moreOpen">
+                <i class="bi @(_moreOpen ? "bi-chevron-up" : "bi-chevron-down") mail-folder-icon" aria-hidden="true"></i><span class="mail-folder-name">@(_moreOpen ? "Less" : "More")</span>
+            </button>
+            <div class="mail-folders-heading small text-secondary">
+                <span>@FolderWord</span>
+                <button type="button" class="mail-folder-add" title="@($"New {FolderWord.ToLowerInvariant()[..^1]}")" aria-label="@($"New {FolderWord.ToLowerInvariant()[..^1]}")" @onclick="CreateFolderAsync">
+                    <i class="bi bi-plus-lg" aria-hidden="true"></i>
+                </button>
+            </div>
+            @foreach (var folder in _customFolders)
             {
-                <div class="mail-folders-heading small text-secondary">@(_account.Provider == MailProviders.Google ? "Labels" : "Folders")</div>
-                @foreach (var folder in _customFolders)
-                {
+                <div class="mail-folder-row">
                     <button type="button" class="mail-folder @(folder.Key == _folder ? "active" : string.Empty)" aria-current="@(folder.Key == _folder ? "page" : null)"
                             title="@folder.Label" @onclick="() => OpenFolderAsync(folder.Key)">
-                        <i class="bi @(_account.Provider == MailProviders.Google ? "bi-tag" : "bi-folder") " aria-hidden="true"></i><span class="text-truncate">@folder.Label</span>
+                        @if (_account.Provider == MailProviders.Google || folder.Color is not null)
+                        {
+                            <i class="bi bi-tag-fill mail-folder-icon mail-label-dot" style="@LabelStyle(folder.Color)" aria-hidden="true"></i>
+                        }
+                        else
+                        {
+                            <i class="bi bi-folder mail-folder-icon" aria-hidden="true"></i>
+                        }
+                        <span class="mail-folder-name text-truncate">@folder.Label</span>
                     </button>
-                }
+                    <span class="mail-folder-actions">
+                        <button type="button" class="mail-folder-action" title="Rename" aria-label="@($"Rename {folder.Label}")" @onclick="() => RenameFolderAsync(folder)"><i class="bi bi-pencil" aria-hidden="true"></i></button>
+                        <button type="button" class="mail-folder-action" title="Delete" aria-label="@($"Delete {folder.Label}")" @onclick="() => _deleteFolder = folder"><i class="bi bi-trash" aria-hidden="true"></i></button>
+                    </span>
+                </div>
             }
-            <button type="button" class="mail-folder mail-shortcuts-link small" @onclick="() => _showShortcuts = true">
-                <i class="bi bi-keyboard" aria-hidden="true"></i><span>Shortcuts (?)</span>
+            <button type="button" class="mail-folder mail-shortcuts-link small" title="Shortcuts (?)" @onclick="() => _showShortcuts = true">
+                <i class="bi bi-keyboard mail-folder-icon" aria-hidden="true"></i><span class="mail-folder-name">Shortcuts (?)</span>
             </button>
         </nav>
 
@@ -241,6 +271,33 @@ else
                 }
             </div>
             </div>
+            @if (ShowTabs)
+            {
+                @* Gmail's inbox tabs (21-11-26): each one's unread count and newest senders, as Gmail shows them. *@
+                <div class="mail-tabs" role="tablist" aria-label="Inbox categories">
+                    @foreach (var tab in MailTabs.All)
+                    {
+                        var current = tab.Key == _folder;
+                        var info = _tabs.FirstOrDefault(view => view.Key == tab.Key);
+                        <button type="button" role="tab" class="mail-tab" data-tab="@tab.Category" aria-selected="@(current ? "true" : "false")"
+                                @onclick="() => OpenFolderAsync(tab.Key)">
+                            <i class="bi @tab.Icon" aria-hidden="true"></i>
+                            <span class="mail-tab-text">
+                                <span class="mail-tab-name">@tab.Label
+                                    @if (!current && info is { Unread: > 0 })
+                                    {
+                                        <span class="mail-tab-new">@(info.Unread > 99 ? "99+" : info.Unread.ToString(System.Globalization.CultureInfo.InvariantCulture)) new</span>
+                                    }
+                                </span>
+                                @if (!current && info is { Unread: > 0, Senders.Count: > 0 })
+                                {
+                                    <span class="mail-tab-senders text-truncate">@string.Join(", ", info.Senders)</span>
+                                }
+                            </span>
+                        </button>
+                    }
+                </div>
+            }
             @if (_loadingList && _messages.Count == 0)
             {
                 <LoadingIndicator Message="Getting your mail…" />
@@ -508,6 +565,29 @@ else
             {
                 <button type="button" role="menuitem" class="mail-menu-item" @onclick="() => MenuApplyAsync(MailActions.Archive)"><i class="bi bi-archive" aria-hidden="true"></i>Archive</button>
             }
+            @if (_customFolders.Any(folder => folder.Key != _folder))
+            {
+                <div class="mail-menu-separator" role="separator"></div>
+                <div class="mail-menu-heading">Move to @FolderWord.ToLowerInvariant()[..^1]</div>
+                @foreach (var folder in _customFolders.Where(folder => folder.Key != _folder))
+                {
+                    <button type="button" role="menuitem" class="mail-menu-item" @onclick="() => MoveToFolderAsync(menu.Targets, folder)">
+                        <i class="bi @(folder.Color is not null || IsGoogle ? "bi-tag-fill" : "bi-folder")" style="@LabelStyle(folder.Color)" aria-hidden="true"></i><span class="text-truncate">@folder.Label</span>
+                    </button>
+                }
+            }
+            @if (ShowTabs)
+            {
+                <div class="mail-menu-separator" role="separator"></div>
+                <div class="mail-menu-heading">Move to tab</div>
+                @foreach (var tab in MailTabs.All.Where(tab => tab.Key != _folder))
+                {
+                    <button type="button" role="menuitem" class="mail-menu-item" @onclick="() => MoveToTabAsync(menu.Targets, tab.Key)">
+                        <i class="bi @tab.Icon" aria-hidden="true"></i>@tab.Label
+                    </button>
+                }
+                <div class="mail-menu-separator" role="separator"></div>
+            }
             <button type="button" role="menuitem" class="mail-menu-item mail-menu-item--danger" @onclick="() => MenuApplyAsync(MailActions.Trash)">
                 <i class="bi bi-trash" aria-hidden="true"></i>@(InTrash ? "Delete forever" : "Delete")
             </button>
@@ -561,6 +641,7 @@ else
             @if (_account.Provider == MailProviders.Imap)
             {
                 <button type="button" role="menuitem" class="mail-menu-item" @onclick="StartEditAccount"><i class="bi bi-pencil" aria-hidden="true"></i>Edit this mailbox</button>
+                <button type="button" role="menuitem" class="mail-menu-item" @onclick="OpenSenderTabsAsync"><i class="bi bi-person-lines-fill" aria-hidden="true"></i>Senders sorted into tabs</button>
             }
             <button type="button" role="menuitem" class="mail-menu-item mail-menu-item--danger" @onclick="() => { _accountMenuOpen = false; _confirmRemove = true; }">
                 <i class="bi bi-box-arrow-right" aria-hidden="true"></i><span class="text-truncate">Remove @_account.Address</span>
@@ -571,9 +652,46 @@ else
     <ConfirmModal Show="@(_confirmForever is not null)" Title="Delete forever?" ConfirmText="Delete forever"
                   Message="@($"{Count(_confirmForever?.Count ?? 0, "message")} will be deleted for good. This can't be undone.")"
                   OnConfirm="ConfirmForeverAsync" OnCancel="() => _confirmForever = null" />
+    <ConfirmModal Show="@(_deleteFolder is not null)" Title="@($"Delete {_deleteFolder?.Label}?")" ConfirmText="Delete"
+                  Message="@(IsGoogle ? "The label is removed; its messages stay in All Mail and keep their other labels." : "The folder is deleted from the mailbox, with the messages in it.")"
+                  OnConfirm="DeleteFolderAsync" OnCancel="() => _deleteFolder = null" />
     <ConfirmModal Show="_confirmRemove" Title="Remove this mailbox?" ConfirmText="Remove"
                   Message="@($"{_account.Address} leaves Mail. Nothing from it is kept in the app, and you can connect it again any time.")"
                   OnConfirm="DisconnectAsync" OnCancel="() => _confirmRemove = false" />
+
+    @if (_senderTabs is { } senderTabs)
+    {
+        @* The senders you moved to a tab (21-11-26): their mail goes there; Forget puts them back on the rules. *@
+        <div class="modal-backdrop fade show"></div>
+        <div class="modal d-block" tabindex="-1" role="dialog" aria-modal="true" aria-labelledby="mail-senders-title">
+            <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable"><div class="modal-content">
+                <div class="modal-header">
+                    <h2 class="modal-title h5" id="mail-senders-title">Senders sorted into tabs</h2>
+                    <button type="button" class="btn-close" aria-label="Close" @onclick="() => _senderTabs = null"></button>
+                </div>
+                <div class="modal-body">
+                    @if (senderTabs.Count == 0)
+                    {
+                        <p class="small text-secondary mb-0">None yet. Right-click a message and choose a tab under Move to tab: that sender's mail goes there from then on.</p>
+                    }
+                    else
+                    {
+                        <p class="small text-secondary">Mail from these senders goes to the tab beside them. Forget one and GWS sorts their mail by its rules again.</p>
+                        <ul class="list-unstyled mb-0 mail-sender-tabs">
+                            @foreach (var sender in senderTabs)
+                            {
+                                <li>
+                                    <span class="text-truncate">@sender.Sender</span>
+                                    <span class="mail-sender-tab">@(MailTabs.Find(sender.TabKey)?.Label ?? sender.TabKey)</span>
+                                    <button type="button" class="btn btn-sm btn-link" @onclick="() => ForgetSenderAsync(sender.Sender)">Forget</button>
+                                </li>
+                            }
+                        </ul>
+                    }
+                </div>
+            </div></div>
+        </div>
+    }
 
     @if (_showShortcuts)
     {
@@ -608,7 +726,7 @@ else
     {
         <div class="mail-snack">
             <span>@snack.Text</span>
-            @if (snack.Undo is not null)
+            @if (snack.Undo is not null || snack.UndoTab is not null)
             {
                 <button type="button" class="mail-snack-undo" @onclick="UndoAsync">Undo</button>
             }
@@ -791,8 +909,49 @@ else
         }
     }
 
+    // Gmail's sidebar and inbox tabs (21-11-26).
+    private static readonly HashSet<string> MainFolders = [MailFolders.Inbox, MailFolders.Starred, MailFolders.Sent, MailFolders.Drafts];
+    private const string RailStorageKey = "gws.mail.rail";
+    private bool _rail;
+    private bool _moreOpen;
+    private IReadOnlyList<MailTabView> _tabs = [];
+
+    private bool ShowTabs => _account?.HasInboxTabs == true && MailTabs.Find(_folder) is not null && string.IsNullOrWhiteSpace(_search);
+
+    // A Gmail label's own colour (only a #rrggbb value is used, so nothing else reaches the style).
+    private static string LabelStyle(string? color) =>
+        color is { Length: 7 } && color[0] == '#' && color.Skip(1).All(Uri.IsHexDigit) ? $"color: {color}" : string.Empty;
+
+    private async Task ToggleRailAsync()
+    {
+        _rail = !_rail;
+        try
+        {
+            await JS.InvokeVoidAsync("localStorage.setItem", RailStorageKey, _rail ? "1" : "0");
+        }
+        catch (JSException)
+        {
+            // Private windows refuse storage; the sidebar still folds for this visit.
+        }
+    }
+
+    private async Task LoadTabsAsync()
+    {
+        if (_account is not { HasInboxTabs: true } account) { _tabs = []; return; }
+        try
+        {
+            _tabs = await GatedAsync(() => MailService.ListTabsAsync(_username, account.Id));
+        }
+        catch (MailException)
+        {
+            // The tabs still work without their counts.
+        }
+    }
+
     private async Task OpenFolderAsync(string folder)
     {
+        // With tabs, Inbox opens on Primary, as in Gmail.
+        if (folder == MailFolders.Inbox && _account?.HasInboxTabs == true) folder = MailTabs.Primary.Key;
         _folder = folder;
         _search = string.Empty;
         CloseReader();
@@ -816,6 +975,7 @@ else
             var page = await GatedAsync(() => MailService.ListAsync(_username, AccountId, _folder, _search, reset ? null : _nextPage));
             _messages.AddRange(page.Messages.Where(message => _messages.All(existing => existing.Id != message.Id)));
             _nextPage = page.NextPageToken;
+            if (reset && ShowTabs) await LoadTabsAsync();
         }
         catch (MailException ex)
         {
@@ -985,15 +1145,16 @@ else
     // ---- The Undo bar (Gmail's, bottom left, for 8 seconds).
 
     private static readonly TimeSpan SnackFor = TimeSpan.FromSeconds(8);
-    private sealed record Snack(string Text, MailUndo? Undo, Guid AccountId);
+    // UndoTab: puts a "Move to tab" back (GWS's own record, not a mailbox move).
+    private sealed record Snack(string Text, MailUndo? Undo, Guid AccountId, Func<Task>? UndoTab = null);
     private Snack? _snack;
     private CancellationTokenSource? _snackTimer;
 
-    private void ShowSnack(string text, MailUndo? undo, Guid accountId)
+    private void ShowSnack(string text, MailUndo? undo, Guid accountId, Func<Task>? undoTab = null)
     {
         _snackTimer?.Cancel();
         _snackTimer?.Dispose();
-        _snack = new Snack(text, undo, accountId);
+        _snack = new Snack(text, undo, accountId, undoTab);
         var timer = _snackTimer = new CancellationTokenSource();
         _ = HideSnackLaterAsync(timer.Token);
     }
@@ -1023,6 +1184,12 @@ else
 
     private async Task UndoAsync()
     {
+        if (_snack is { UndoTab: { } putBack })
+        {
+            DismissSnack();
+            await putBack();
+            return;
+        }
         if (_snack is not { Undo: { } undo } snack) return;
         DismissSnack();
         try
@@ -1135,6 +1302,149 @@ else
         if (e.Key is "Escape" or "Tab") CloseMenus();
     }
 
+    // Move to tab (21-11-26): the messages go to the tab, and so does their senders' future mail
+    // (Grant's choice). Undo moves them back and forgets the senders.
+    private async Task MoveToTabAsync(IReadOnlyList<MailMessageSummary> targets, string tabKey)
+    {
+        CloseMenus();
+        if (_account is not { } account || MailTabs.Find(tabKey) is not { } tab || MailTabs.Find(_folder) is not { } from) return;
+        try
+        {
+            foreach (var message in targets)
+                await GatedAsync(async () => { await MailService.MoveToTabAsync(_username, account.Id, message.Id, tab.Key, rememberSender: true); return true; });
+            var senders = targets.Select(message => message.From.Address).Where(address => address.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            _messages.RemoveAll(message => targets.Any(target => target.Id == message.Id));
+            _checked.Clear();
+            var who = senders.Count == 1 ? senders[0] : $"{senders.Count} senders";
+            ShowSnack($"Moved to {tab.Label}. Future mail from {who} goes there too.", null, account.Id, async () =>
+            {
+                try
+                {
+                    foreach (var message in targets)
+                        await GatedAsync(async () => { await MailService.MoveToTabAsync(_username, account.Id, message.Id, from.Key, rememberSender: false); return true; });
+                    foreach (var sender in senders)
+                        await GatedAsync(async () => { await MailService.ForgetSenderTabAsync(_username, account.Id, sender); return true; });
+                    ShowSnack($"Back in {from.Label}.", null, account.Id);
+                    await LoadListAsync(reset: true);
+                }
+                catch (MailException ex)
+                {
+                    _error = ex.Message;
+                }
+            });
+            await LoadTabsAsync();
+        }
+        catch (MailException ex)
+        {
+            _error = ex.Message;
+        }
+    }
+
+    // ---- Folders (phase 5, 21-11-26): Gmail calls them labels. ----
+    private MailFolderView? _deleteFolder;
+    private bool IsGoogle => _account?.Provider == MailProviders.Google;
+    private string FolderWord => IsGoogle ? "Labels" : "Folders";
+
+    private async Task ReloadFoldersAsync()
+    {
+        if (_account is not { } account) return;
+        try { _customFolders = await GatedAsync(() => MailService.ListFoldersAsync(_username, account.Id)); }
+        catch (MailException ex) { _error = ex.Message; }
+    }
+
+    private async Task<string?> AskAsync(string message, string value = "")
+    {
+        try { return await JS.InvokeAsync<string?>("gwsPrompt.ask", message, value); }
+        catch (JSException) { return null; }
+    }
+
+    private async Task CreateFolderAsync()
+    {
+        if (_account is not { } account || await AskAsync($"New {FolderWord.ToLowerInvariant()[..^1]} name") is not { Length: > 0 } name) return;
+        try
+        {
+            var created = await GatedAsync(() => MailService.CreateFolderAsync(_username, account.Id, name));
+            await ReloadFoldersAsync();
+            ShowSnack($"Made {created.Label}.", null, account.Id);
+        }
+        catch (MailException ex) { _error = ex.Message; }
+    }
+
+    private async Task RenameFolderAsync(MailFolderView folder)
+    {
+        if (_account is not { } account || await AskAsync("New name", folder.Label) is not { Length: > 0 } name || name == folder.Label) return;
+        try
+        {
+            await GatedAsync(async () => { await MailService.RenameFolderAsync(_username, account.Id, folder.Key, name); return true; });
+            var wasOpen = _folder == folder.Key;
+            await ReloadFoldersAsync();
+            if (wasOpen) await OpenFolderAsync(_customFolders.FirstOrDefault(f => f.Label.EndsWith(name, StringComparison.Ordinal))?.Key ?? MailFolders.Inbox);
+            ShowSnack($"Renamed to {name}.", null, account.Id);
+        }
+        catch (MailException ex) { _error = ex.Message; }
+    }
+
+    private async Task DeleteFolderAsync()
+    {
+        if (_account is not { } account || _deleteFolder is not { } folder) return;
+        _deleteFolder = null;
+        try
+        {
+            await GatedAsync(async () => { await MailService.DeleteFolderAsync(_username, account.Id, folder.Key); return true; });
+            await ReloadFoldersAsync();
+            if (_folder == folder.Key) await OpenFolderAsync(MailFolders.Inbox);
+            ShowSnack($"Deleted {folder.Label}.", null, account.Id);
+        }
+        catch (MailException ex) { _error = ex.Message; }
+    }
+
+    private async Task MoveToFolderAsync(IReadOnlyList<MailMessageSummary> targets, MailFolderView folder)
+    {
+        CloseMenus();
+        if (_account is not { } account) return;
+        try
+        {
+            var result = await GatedAsync(() => MailService.MoveToFolderAsync(_username, account.Id, targets.Select(m => m.Id).ToList(), folder.Key));
+            _messages.RemoveAll(message => targets.Any(target => target.Id == message.Id));
+            _checked.Clear();
+            MailUnread.Invalidate(_username);
+            ShowSnack(targets.Count == 1 ? $"Moved to {folder.Label}." : $"{targets.Count} messages moved to {folder.Label}.", result.Undo, account.Id);
+            if (ShowTabs) await LoadTabsAsync();
+        }
+        catch (MailException ex) { _error = ex.Message; }
+    }
+
+    private IReadOnlyList<MailSenderTabView>? _senderTabs;
+
+    private async Task OpenSenderTabsAsync()
+    {
+        CloseMenus();
+        if (_account is not { } account) return;
+        try
+        {
+            _senderTabs = await GatedAsync(() => MailService.ListSenderTabsAsync(_username, account.Id));
+        }
+        catch (MailException ex)
+        {
+            _error = ex.Message;
+        }
+    }
+
+    private async Task ForgetSenderAsync(string sender)
+    {
+        if (_account is not { } account) return;
+        try
+        {
+            await GatedAsync(async () => { await MailService.ForgetSenderTabAsync(_username, account.Id, sender); return true; });
+            _senderTabs = await GatedAsync(() => MailService.ListSenderTabsAsync(_username, account.Id));
+            if (ShowTabs) await LoadListAsync(reset: true);
+        }
+        catch (MailException ex)
+        {
+            _error = ex.Message;
+        }
+    }
+
     private Task MenuApplyAsync(string action) =>
         _menu is { } menu ? ApplyAsync(menu.Targets, action) : Task.CompletedTask;
 
@@ -1148,7 +1458,7 @@ else
     private async Task FindFromAsync(MailAddress from)
     {
         CloseMenus();
-        _search = _account?.Provider == MailProviders.Google ? $"from:{from.Address}" : from.Address;
+        _search = IsGoogle ? $"from:{from.Address}" : from.Address;
         CloseReader();
         await LoadListAsync(reset: true);
     }
@@ -1419,6 +1729,21 @@ else
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        if (firstRender)
+        {
+            try
+            {
+                if (await JS.InvokeAsync<string?>("localStorage.getItem", RailStorageKey) == "1") { _rail = true; StateHasChanged(); }
+            }
+            catch (JSException)
+            {
+                // No storage: the sidebar starts open.
+            }
+            catch (JSDisconnectedException)
+            {
+                return;
+            }
+        }
         try
         {
             await ListBehaviourAsync();
@@ -1537,7 +1862,9 @@ else
     private async Task SelectAccountAsync(MailAccountView? account)
     {
         _account = account;
-        _folder = MailFolders.Inbox;
+        _folder = account?.HasInboxTabs == true ? MailTabs.Primary.Key : MailFolders.Inbox;
+        _tabs = [];
+        _moreOpen = false;
         _search = string.Empty;
         _customFolders = [];
         _messages.Clear();

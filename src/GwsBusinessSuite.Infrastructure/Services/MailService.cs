@@ -5,6 +5,7 @@ using GwsBusinessSuite.Domain.Entities;
 using MailKit;
 using MailKit.Security;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using MimeKit;
 
 namespace GwsBusinessSuite.Infrastructure.Services;
@@ -17,7 +18,9 @@ public sealed class MailService(
     IAppDbContext db,
     ISecretProtector secretProtector,
     IEnumerable<IMailboxBackend> backends,
-    TimeProvider timeProvider) : GwsBusinessSuite.Application.Mail.IMailService
+    TimeProvider timeProvider,
+    ILogger<MailService>? logger = null,
+    MailInboxCache? inboxCache = null) : GwsBusinessSuite.Application.Mail.IMailService
 {
     private const int MaxSearchLength = 200;
     private const int MaxBodyLength = 1_000_000;
@@ -115,20 +118,215 @@ public sealed class MailService(
     public Task<IReadOnlyList<MailFolderView>> ListFoldersAsync(string username, Guid accountId, CancellationToken cancellationToken = default) =>
         RunAsync(username, accountId, (backend, account) => backend.ListFoldersAsync(account, cancellationToken), cancellationToken);
 
+    // ---- Folders (phase 5, 21-11-26) ----
+    public const int MaxFolderNameLength = 100;
+
+    // A folder name the mailbox will take: trimmed, not empty, no control characters, and not one of
+    // the standard folders' names.
+    public static string FolderName(string? name)
+    {
+        var trimmed = (name ?? string.Empty).Trim();
+        if (trimmed.Length == 0) throw new MailException("Give the folder a name.");
+        if (trimmed.Length > MaxFolderNameLength) throw new MailException($"Folder names can be up to {MaxFolderNameLength} characters.");
+        if (trimmed.Any(char.IsControl)) throw new MailException("That name has characters a mailbox can't use.");
+        if (MailFolders.All.Any(folder => string.Equals(folder.Label, trimmed, StringComparison.OrdinalIgnoreCase)) || trimmed.Equals("INBOX", StringComparison.OrdinalIgnoreCase))
+            throw new MailException($"\"{trimmed}\" is one of the standard folders.");
+        return trimmed;
+    }
+
+    private static string CustomFolderKey(string? folderKey) =>
+        folderKey is { } key && (key.StartsWith(MailFolders.FolderPrefix, StringComparison.Ordinal) || key.StartsWith(MailFolders.LabelPrefix, StringComparison.Ordinal))
+            && key.Length > MailFolders.FolderPrefix.Length
+            ? key
+            : throw new MailException("Pick one of your own folders.");
+
+    public Task<MailFolderView> CreateFolderAsync(string username, Guid accountId, string name, CancellationToken cancellationToken = default)
+    {
+        var clean = FolderName(name);
+        return RunAsync(username, accountId, (backend, account) => backend.CreateFolderAsync(account, clean, cancellationToken), cancellationToken);
+    }
+
+    public Task RenameFolderAsync(string username, Guid accountId, string folderKey, string name, CancellationToken cancellationToken = default)
+    {
+        var key = CustomFolderKey(folderKey);
+        var clean = FolderName(name);
+        return RunAsync(username, accountId, (backend, account) => backend.RenameFolderAsync(account, key, clean, cancellationToken), cancellationToken);
+    }
+
+    public Task DeleteFolderAsync(string username, Guid accountId, string folderKey, CancellationToken cancellationToken = default)
+    {
+        var key = CustomFolderKey(folderKey);
+        return RunAsync(username, accountId, (backend, account) => backend.DeleteFolderAsync(account, key, cancellationToken), cancellationToken);
+    }
+
+    public Task<MailActionResult> MoveToFolderAsync(string username, Guid accountId, IReadOnlyList<string> messageIds, string folderKey, CancellationToken cancellationToken = default)
+    {
+        var key = CustomFolderKey(folderKey);
+        var ids = messageIds.Where(id => !string.IsNullOrWhiteSpace(id)).Distinct(StringComparer.Ordinal).ToList();
+        if (ids.Count == 0) return Task.FromResult(new MailActionResult(0, null));
+        if (ids.Count > MailLimits.MaxBulk) throw new MailException($"Mail can act on up to {MailLimits.MaxBulk} messages at a time.");
+        inboxCache?.Invalidate(accountId);
+        return RunAsync(username, accountId, async (backend, account) =>
+            new MailActionResult(ids.Count, await backend.MoveToFolderAsync(account, ids, key, cancellationToken)), cancellationToken);
+    }
+
+    private Task<T> ChangingResult<T>(Guid accountId, Task<T> work)
+    {
+        inboxCache?.Invalidate(accountId);
+        return work;
+    }
+
+    private Task Changing(Guid accountId, Task work)
+    {
+        inboxCache?.Invalidate(accountId);
+        return work;
+    }
+
+    // ---- GWS's inbox tabs (21-11-26; plan: mail-tabs-folders-rules-2026-11-21.md) ----
+    // Each message's tab: the person's move ("you") or SentinelGPT's decision ("ai") first, then a
+    // sender the person moved, then MailSorter's rules. A message the rules aren't sure of is kept
+    // (MailTabSources.Unclear) for SentinelGPT and sits in the rules' best guess meanwhile.
+    private sealed record Sorted(MailInboxItem Item, string TabKey, string Source, string Reason);
+
+    private async Task<IReadOnlyList<Sorted>> SortInboxAsync(string username, Guid accountId, CancellationToken cancellationToken)
+    {
+        // The owner first, before the cache (21-11-26): a cached inbox must never answer for someone
+        // else's account id. Someone else's mailbox finds nothing, as everywhere in Mail.
+        if (await FindAsync(username, accountId, cancellationToken) is null) throw new MailException("Connect a mailbox first.");
+        if (inboxCache is null || !inboxCache.TryGet(accountId, out var items))
+        {
+            items = await RunAsync(username, accountId, (backend, account) => backend.InboxForSortingAsync(account, MailTabs.SortWindow, cancellationToken), cancellationToken);
+            inboxCache?.Set(accountId, items);
+        }
+        var keys = items.Select(item => item.MessageKey).Distinct().ToList();
+        var stored = (await db.MailMessageTabs.Where(row => row.AccountId == accountId && keys.Contains(row.MessageKey)).ToListAsync(cancellationToken))
+            .ToDictionary(row => row.MessageKey, StringComparer.Ordinal);
+        var senders = (await db.MailSenderTabs.AsNoTracking().Where(row => row.AccountId == accountId).ToListAsync(cancellationToken))
+            .ToDictionary(row => row.Sender, row => row.TabKey, StringComparer.OrdinalIgnoreCase);
+        var now = timeProvider.GetUtcNow();
+        var sorted = new List<Sorted>(items.Count);
+        var added = false;
+        foreach (var item in items)
+        {
+            var sender = item.Summary.From.Address.Trim().ToLowerInvariant();
+            stored.TryGetValue(item.MessageKey, out var row);
+            if (row is { Source: MailTabSources.You or MailTabSources.Ai } && MailTabs.Find(row.TabKey) is not null)
+            {
+                sorted.Add(new Sorted(item, row.TabKey, row.Source, row.Reason));
+                continue;
+            }
+            if (senders.TryGetValue(sender, out var senderTab) && MailTabs.Find(senderTab) is not null)
+            {
+                sorted.Add(new Sorted(item, senderTab, "sender", $"you moved mail from {sender} here"));
+                continue;
+            }
+            var result = MailSorter.Classify(new MailSortInput(item.Summary.From.Address, item.Summary.From.Name, item.Summary.Subject, item.Headers));
+            if (!result.Sure && row is null)
+            {
+                var unclear = new MailMessageTab
+                {
+                    AccountId = accountId, MessageKey = item.MessageKey, TabKey = result.TabKey, Source = MailTabSources.Unclear, Reason = result.Reason,
+                    Sender = sender, Subject = item.Summary.Subject.Length > 300 ? item.Summary.Subject[..300] : item.Summary.Subject,
+                    CreatedAt = now, CreatedBy = username
+                };
+                db.MailMessageTabs.Add(unclear);
+                stored[item.MessageKey] = unclear;
+                added = true;
+            }
+            sorted.Add(new Sorted(item, result.TabKey, result.Sure ? "rules" : MailTabSources.Unclear, result.Reason));
+        }
+        if (added) await db.SaveChangesAsync(cancellationToken);
+        return sorted;
+    }
+
+    private async Task<MailPage> ListTabAsync(string username, Guid accountId, MailTabs.Tab tab, string? pageToken, CancellationToken cancellationToken)
+    {
+        var inTab = (await SortInboxAsync(username, accountId, cancellationToken)).Where(entry => entry.TabKey == tab.Key).Select(entry => entry.Item.Summary).ToList();
+        var offset = int.TryParse(pageToken, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var start) ? Math.Max(0, start) : 0;
+        var page = inTab.Skip(offset).Take(TabPageSize).ToList();
+        return new MailPage(page, offset + TabPageSize < inTab.Count ? (offset + TabPageSize).ToString(System.Globalization.CultureInfo.InvariantCulture) : null);
+    }
+
+    private const int TabPageSize = 50;
+
+    public async Task<IReadOnlyList<MailTabView>> ListTabsAsync(string username, Guid accountId, CancellationToken cancellationToken = default)
+    {
+        var sorted = await SortInboxAsync(username, accountId, cancellationToken);
+        return MailTabs.All.Select(tab =>
+        {
+            var unread = sorted.Where(entry => entry.TabKey == tab.Key && entry.Item.Summary.Unread).ToList();
+            var names = unread.Select(entry => string.IsNullOrWhiteSpace(entry.Item.Summary.From.Name) ? entry.Item.Summary.From.Address : entry.Item.Summary.From.Name)
+                .Distinct(StringComparer.OrdinalIgnoreCase).Take(2).ToList();
+            return new MailTabView(tab.Key, unread.Count, names);
+        }).ToList();
+    }
+
+    // Moves the message to the tab ("you"), and its sender too when asked: their mail goes there from now on.
+    public async Task MoveToTabAsync(string username, Guid accountId, string messageId, string tabKey, bool rememberSender, CancellationToken cancellationToken = default)
+    {
+        if (MailTabs.Find(tabKey) is null) throw new MailException("Unknown tab.");
+        var item = (await SortInboxAsync(username, accountId, cancellationToken)).FirstOrDefault(entry => entry.Item.Summary.Id == messageId)?.Item
+            ?? throw new MailException("That message isn't in the inbox any more.");
+        var now = timeProvider.GetUtcNow();
+        var row = await db.MailMessageTabs.FirstOrDefaultAsync(r => r.AccountId == accountId && r.MessageKey == item.MessageKey, cancellationToken);
+        if (row is null)
+        {
+            row = new MailMessageTab { AccountId = accountId, MessageKey = item.MessageKey, TabKey = tabKey, CreatedAt = now, CreatedBy = username };
+            db.MailMessageTabs.Add(row);
+        }
+        row.TabKey = tabKey;
+        row.Source = MailTabSources.You;
+        row.Reason = "you moved it here";
+        row.UpdatedAt = now;
+        row.UpdatedBy = username;
+        var sender = item.Summary.From.Address.Trim().ToLowerInvariant();
+        if (rememberSender && sender.Length > 0)
+        {
+            var senderRow = await db.MailSenderTabs.FirstOrDefaultAsync(r => r.AccountId == accountId && r.Sender == sender, cancellationToken);
+            if (senderRow is null) db.MailSenderTabs.Add(new MailSenderTab { AccountId = accountId, Sender = sender, TabKey = tabKey, CreatedAt = now, CreatedBy = username });
+            else { senderRow.TabKey = tabKey; senderRow.UpdatedAt = now; senderRow.UpdatedBy = username; }
+        }
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<MailSenderTabView>> ListSenderTabsAsync(string username, Guid accountId, CancellationToken cancellationToken = default)
+    {
+        if (await FindAsync(username, accountId, cancellationToken) is null) return [];
+        return (await db.MailSenderTabs.AsNoTracking().Where(row => row.AccountId == accountId).ToListAsync(cancellationToken))
+            .OrderBy(row => row.Sender, StringComparer.OrdinalIgnoreCase).Select(row => new MailSenderTabView(row.Sender, row.TabKey)).ToList();
+    }
+
+    public async Task ForgetSenderTabAsync(string username, Guid accountId, string sender, CancellationToken cancellationToken = default)
+    {
+        if (await FindAsync(username, accountId, cancellationToken) is null) return;
+        var key = sender.Trim().ToLowerInvariant();
+        if (await db.MailSenderTabs.FirstOrDefaultAsync(row => row.AccountId == accountId && row.Sender == key, cancellationToken) is { } row)
+        {
+            db.MailSenderTabs.Remove(row);
+            await db.SaveChangesAsync(cancellationToken);
+        }
+    }
+
     public Task<MailPage> ListAsync(string username, Guid accountId, string folder, string? search, string? pageToken, CancellationToken cancellationToken = default)
     {
         if (!MailFolders.IsKnown(folder)) throw new MailException("Unknown folder.");
         var query = search?.Trim();
         if (query is { Length: > MaxSearchLength }) query = query[..MaxSearchLength];
+        // A tab is GWS's sorting of the inbox; a search inside a tab searches the whole inbox, as Gmail does.
+        if (MailTabs.Find(folder) is { } tab)
+        {
+            if (string.IsNullOrWhiteSpace(query)) return ListTabAsync(username, accountId, tab, pageToken, cancellationToken);
+            folder = MailFolders.Inbox;
+        }
         return RunAsync(username, accountId, (backend, account) => backend.ListAsync(account, folder, query, pageToken, cancellationToken), cancellationToken);
     }
 
     public Task<MailMessageDetail> GetAsync(string username, Guid accountId, string messageId, bool showRemoteImages, CancellationToken cancellationToken = default) =>
-        RunAsync(username, accountId, async (backend, account) =>
+        ChangingResult(accountId, RunAsync(username, accountId, async (backend, account) =>
         {
             var fetched = await backend.GetAsync(account, messageId, markRead: true, cancellationToken);
             return MailMessageRenderer.Render(messageId, fetched.ThreadId, fetched.Message, fetched.Unread, fetched.Starred, showRemoteImages);
-        }, cancellationToken);
+        }, cancellationToken));
 
     public Task<MailAttachmentContent> GetAttachmentAsync(string username, Guid accountId, string messageId, int index, CancellationToken cancellationToken = default) =>
         RunAsync(username, accountId, async (backend, account) =>
@@ -169,16 +367,16 @@ public sealed class MailService(
         }, cancellationToken);
 
     public Task SetReadAsync(string username, Guid accountId, string messageId, bool read, CancellationToken cancellationToken = default) =>
-        RunAsync(username, accountId, (backend, account) => backend.SetReadAsync(account, messageId, read, cancellationToken), cancellationToken);
+        Changing(accountId, RunAsync(username, accountId, (backend, account) => backend.SetReadAsync(account, messageId, read, cancellationToken), cancellationToken));
 
     public Task SetStarredAsync(string username, Guid accountId, string messageId, bool starred, CancellationToken cancellationToken = default) =>
-        RunAsync(username, accountId, (backend, account) => backend.SetStarredAsync(account, messageId, starred, cancellationToken), cancellationToken);
+        Changing(accountId, RunAsync(username, accountId, (backend, account) => backend.SetStarredAsync(account, messageId, starred, cancellationToken), cancellationToken));
 
     public Task ArchiveAsync(string username, Guid accountId, string messageId, CancellationToken cancellationToken = default) =>
-        RunAsync(username, accountId, (backend, account) => backend.ArchiveAsync(account, messageId, cancellationToken), cancellationToken);
+        Changing(accountId, RunAsync(username, accountId, (backend, account) => backend.ArchiveAsync(account, messageId, cancellationToken), cancellationToken));
 
     public Task TrashAsync(string username, Guid accountId, string messageId, CancellationToken cancellationToken = default) =>
-        RunAsync(username, accountId, (backend, account) => backend.TrashAsync(account, messageId, cancellationToken), cancellationToken);
+        Changing(accountId, RunAsync(username, accountId, (backend, account) => backend.TrashAsync(account, messageId, cancellationToken), cancellationToken));
 
     // Each inbox counted on its own; one that can't be reached is left out rather than failing the rest.
     public Task<MailActionResult> ApplyAsync(string username, Guid accountId, IReadOnlyList<string> messageIds, string action,
@@ -188,16 +386,17 @@ public sealed class MailService(
         var ids = messageIds.Where(id => !string.IsNullOrWhiteSpace(id)).Distinct(StringComparer.Ordinal).ToList();
         if (ids.Count == 0) return Task.FromResult(new MailActionResult(0, null));
         if (ids.Count > MailLimits.MaxBulk) throw new MailException($"Mail can act on up to {MailLimits.MaxBulk} messages at a time.");
+        inboxCache?.Invalidate(accountId);
         return RunAsync(username, accountId, async (backend, account) =>
             new MailActionResult(ids.Count, await backend.ApplyAsync(account, ids, action, cancellationToken)), cancellationToken);
     }
 
     public Task UndoAsync(string username, Guid accountId, MailUndo undo, CancellationToken cancellationToken = default) =>
-        RunAsync(username, accountId, async (backend, account) =>
+        Changing(accountId, RunAsync(username, accountId, async (backend, account) =>
         {
             await backend.UndoAsync(account, undo, cancellationToken);
             return true;
-        }, cancellationToken);
+        }, cancellationToken));
 
     public async Task<IReadOnlyDictionary<Guid, int>> GetUnreadByAccountAsync(string username, CancellationToken cancellationToken = default)
     {
@@ -321,6 +520,9 @@ public sealed class MailService(
                                        or System.Text.Json.JsonException)
         {
             failure = $"The mail server said: {ex.Message}";
+            // Logged (21-11-26): a Gmail MOVE failure reached the screen and left no trace, because
+            // the next good action clears the account's LastError.
+            logger?.LogWarning(ex, "Mail action failed on {Host} ({Provider}): {Message}", account.ImapHost, account.Provider, ex.Message);
             throw new MailException(failure);
         }
         finally
@@ -403,5 +605,5 @@ public sealed class MailService(
     }
 
     private static MailAccountView ToView(MailAccount account) =>
-        new(account.Id, account.Provider, account.Address, account.DisplayName, account.LastError, account.LastUsedAt);
+        new(account.Id, account.Provider, account.Address, account.DisplayName, account.LastError, account.LastUsedAt, HasInboxTabs: true);
 }

@@ -1052,6 +1052,36 @@ public sealed class MailAccount : AuditableEntity
     public string? LastError { get; set; }
 }
 
+// GWS's inbox tab for one message, kept only when it isn't simply the rules' sure answer (Mail tabs,
+// 21-11-26): the rules weren't sure ("unclear", waiting for SentinelGPT, with the sender and subject it
+// reads), SentinelGPT decided ("ai"), or the person moved it ("you"). MessageKey: the Message-ID header,
+// lowercased, or the provider's id when there is none. No bodies.
+public sealed class MailMessageTab : AuditableEntity
+{
+    public Guid AccountId { get; set; }
+    public required string MessageKey { get; set; }
+    public required string TabKey { get; set; }
+    public string Source { get; set; } = MailTabSources.Unclear;
+    public string Reason { get; set; } = string.Empty;
+    public string Sender { get; set; } = string.Empty;
+    public string Subject { get; set; } = string.Empty;
+}
+
+public static class MailTabSources
+{
+    public const string Unclear = "unclear";
+    public const string Ai = "ai";
+    public const string You = "you";
+}
+
+// A sender the person moved to a tab: their mail goes to that tab from then on (Mail tabs, 21-11-26).
+public sealed class MailSenderTab : AuditableEntity
+{
+    public Guid AccountId { get; set; }
+    public required string Sender { get; set; }
+    public required string TabKey { get; set; }
+}
+
 // One row per message the support poller handled (created a ticket, added a reply, or skipped
 // it with a reason); also what stops a message being processed twice.
 public sealed class SupportInboundEmail : AuditableEntity

@@ -31,16 +31,56 @@ public static class MailFolders
     public const string FolderPrefix = "folder:";
 
     public static bool IsKnown(string? folder) =>
-        All.Any(f => f.Key == folder)
+        All.Any(f => f.Key == folder) || MailTabs.Find(folder) is not null
         || folder is { Length: > 6 } && (folder.StartsWith(LabelPrefix, StringComparison.Ordinal) || folder.StartsWith(FolderPrefix, StringComparison.Ordinal));
 }
 
-// One of the provider's own folders or labels.
-public sealed record MailFolderView(string Key, string Label);
+// GWS's inbox tabs (21-11-26, Grant: "the Primary/Promotions/Social/Updates/Forums tabs ... I want a
+// GWS version", sorted by GWS itself on every mailbox). MailSorter's rules place each message; the
+// person's moves and SentinelGPT's decisions for unclear mail override them (MailMessageTab, MailSenderTab).
+public static class MailTabs
+{
+    public sealed record Tab(string Key, string Label, string Icon, string Category);
+
+    public static readonly IReadOnlyList<Tab> All =
+    [
+        new("inbox:primary", "Primary", "bi-inbox", "primary"),
+        new("inbox:promotions", "Promotions", "bi-tag", "promotions"),
+        new("inbox:social", "Social", "bi-people", "social"),
+        new("inbox:updates", "Updates", "bi-info-circle", "updates"),
+        new("inbox:forums", "Forums", "bi-chat-left-text", "forums"),
+    ];
+
+    public static Tab Primary => All[0];
+
+    public static Tab? Find(string? key) => All.FirstOrDefault(tab => tab.Key == key);
+
+    // The inbox itself or one of its tabs (the sidebar's Inbox stays highlighted on every tab).
+    public static bool IsInbox(string? folder) => folder == MailFolders.Inbox || Find(folder) is not null;
+
+    // How many of the newest inbox messages are sorted into tabs.
+    public const int SortWindow = 400;
+}
+
+// An inbox message with what MailSorter needs. MessageKey: its Message-ID header, lowercased, or the
+// provider's id when it has none.
+public sealed record MailInboxItem(MailMessageSummary Summary, string MessageKey, IReadOnlyDictionary<string, string> Headers);
+
+// A tab's unread count and the newest unread senders' names (Gmail's "3 new · Amazon, LinkedIn").
+public sealed record MailTabView(string Key, int Unread, IReadOnlyList<string> Senders);
+
+public sealed record MailSenderTabView(string Sender, string TabKey);
+
+// Where a listed message sits and why (the tab's hover text), for "Move to tab".
+public sealed record MailTabPlacement(string MessageId, string TabKey, string Source, string Reason);
+
+// One of the provider's own folders or labels. Color: Gmail's label colour, where it has one.
+public sealed record MailFolderView(string Key, string Label, string? Color = null);
 
 // Warning: only on the view SaveImapAccountAsync returns - the mailbox connected for reading,
 // but this server can't reach its SMTP port, so sending won't work until the port opens.
-public sealed record MailAccountView(Guid Id, string Provider, string Address, string DisplayName, string? LastError, DateTimeOffset? LastUsedAt, string? Warning = null);
+public sealed record MailAccountView(Guid Id, string Provider, string Address, string DisplayName, string? LastError, DateTimeOffset? LastUsedAt, string? Warning = null,
+    bool HasInboxTabs = false);
 
 // Other providers: the IMAP server mail is read from and the SMTP server it's sent through.
 public sealed record MailImapAccountInput(
@@ -134,6 +174,26 @@ public interface IMailService
 
     // The provider's folders and labels beyond the standard ones.
     Task<IReadOnlyList<MailFolderView>> ListFoldersAsync(string username, Guid accountId, CancellationToken cancellationToken = default);
+    // Each inbox tab's unread count and newest unread senders (MailTabs).
+    Task<IReadOnlyList<MailTabView>> ListTabsAsync(string username, Guid accountId, CancellationToken cancellationToken = default) =>
+        Task.FromResult<IReadOnlyList<MailTabView>>([]);
+    // Moves a message to a tab and remembers its sender for that tab (Undo: MoveToTabAsync back, rememberSender false).
+    Task MoveToTabAsync(string username, Guid accountId, string messageId, string tabKey, bool rememberSender, CancellationToken cancellationToken = default) =>
+        Task.CompletedTask;
+    // Folders (phase 5): make, rename and delete the mailbox's own folders (Gmail: labels), and move
+    // messages into one (Undo: MailActionResult.Undo). Throw MailException.
+    Task<MailFolderView> CreateFolderAsync(string username, Guid accountId, string name, CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException();
+    Task RenameFolderAsync(string username, Guid accountId, string folderKey, string name, CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException();
+    Task DeleteFolderAsync(string username, Guid accountId, string folderKey, CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException();
+    Task<MailActionResult> MoveToFolderAsync(string username, Guid accountId, IReadOnlyList<string> messageIds, string folderKey, CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException();
+    // Senders the person moved to a tab, and forgetting one.
+    Task<IReadOnlyList<MailSenderTabView>> ListSenderTabsAsync(string username, Guid accountId, CancellationToken cancellationToken = default) =>
+        Task.FromResult<IReadOnlyList<MailSenderTabView>>([]);
+    Task ForgetSenderTabAsync(string username, Guid accountId, string sender, CancellationToken cancellationToken = default) => Task.CompletedTask;
     Task<MailPage> ListAsync(string username, Guid accountId, string folder, string? search, string? pageToken, CancellationToken cancellationToken = default);
     // Opening a message marks it read, as mail apps do.
     Task<MailMessageDetail> GetAsync(string username, Guid accountId, string messageId, bool showRemoteImages, CancellationToken cancellationToken = default);

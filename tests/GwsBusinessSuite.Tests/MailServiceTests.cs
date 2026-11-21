@@ -344,6 +344,107 @@ public sealed class MailServiceTests
         calls.Should().Contain("DELETE /gmail/v1/users/me/drafts/r-77");
     }
 
+    // GWS's inbox tabs (21-11-26): GWS sorts the inbox itself, on any mailbox; a message the rules aren't
+    // sure of is kept for SentinelGPT; moving a message moves its sender's mail too, until forgotten.
+    [Fact]
+    public async Task InboxTabs_ShouldSortByGwsRules_KeepUnclearForTheAi_AndRememberMovedSenders()
+    {
+        var f = await CreateAsync();
+        var mailbox = await f.UseImapAsync();
+        mailbox.HasInboxTabs.Should().BeTrue("GWS sorts every mailbox, not only Gmail");
+        static MailInboxItem Item(string id, string from, string subject, bool unread, params (string, string)[] headers) => new(
+            new MailMessageSummary(id, null, new MailAddress(string.Empty, from), [], subject, string.Empty, DateTimeOffset.UnixEpoch, unread, false, false),
+            "<" + id + "@example>", headers.ToDictionary(h => h.Item1, h => h.Item2, StringComparer.OrdinalIgnoreCase));
+        f.Imap.Inbox.AddRange(
+        [
+            Item("m1", "sam@example.com", "Lunch on Friday?", true),
+            Item("m2", "news@store.example", "40% off everything", true, ("List-Unsubscribe", "<x>"), ("X-Mailchimp-Campaign", "1")),
+            Item("m3", "writer@substack.example", "This week in Georgia", false, ("List-Unsubscribe", "<x>")),
+            Item("m4", "news@store.example", "New arrivals", false, ("List-Unsubscribe", "<x>"), ("X-Mailchimp-Campaign", "2")),
+        ]);
+
+        (await f.Service.ListAsync("grant", mailbox.Id, "inbox:primary", null, null)).Messages.Select(m => m.Id).Should().Equal("m1");
+        (await f.Service.ListAsync("grant", mailbox.Id, "inbox:promotions", null, null)).Messages.Select(m => m.Id).Should().Equal("m2", "m3", "m4");
+        var unclear = f.Db.MailMessageTabs.Should().ContainSingle(row => row.Source == MailTabSources.Unclear).Subject;
+        unclear.MessageKey.Should().Be("<m3@example>", "the rules only guessed the newsletter; SentinelGPT decides it");
+        unclear.Subject.Should().Be("This week in Georgia");
+
+        var tabs = await f.Service.ListTabsAsync("grant", mailbox.Id);
+        tabs.Single(t => t.Key == "inbox:promotions").Should().BeEquivalentTo(new MailTabView("inbox:promotions", 1, ["news@store.example"]));
+
+        await f.Service.MoveToTabAsync("grant", mailbox.Id, "m2", "inbox:updates", rememberSender: true);
+        (await f.Service.ListAsync("grant", mailbox.Id, "inbox:updates", null, null)).Messages.Select(m => m.Id).Should().Equal("m2", "m4");
+        (await f.Service.ListSenderTabsAsync("grant", mailbox.Id)).Should().Equal(new MailSenderTabView("news@store.example", "inbox:updates"));
+
+        await f.Service.ForgetSenderTabAsync("grant", mailbox.Id, "News@Store.example");
+        (await f.Service.ListAsync("grant", mailbox.Id, "inbox:updates", null, null)).Messages.Select(m => m.Id).Should().Equal(["m2"], "the moved message stays; the sender's other mail is sorted by the rules again");
+        await f.Service.Invoking(s => s.MoveToTabAsync("grant", mailbox.Id, "gone", "inbox:social", true)).Should().ThrowAsync<MailException>();
+    }
+
+    // 21-11-26: the inbox cache must never answer for someone else's mailbox. Grant's inbox is cached
+    // the moment he opens a tab; Sam asking for it straight after, by its id, gets nothing.
+    [Fact]
+    public async Task InboxTabs_ShouldNeverShowSomeoneElsesCachedInbox()
+    {
+        var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var db = new ApplicationDbContext(new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(connection).Options);
+        await db.Database.EnsureCreatedAsync();
+        var imap = new FakeImap();
+        var protector = new DataProtectionSecretProtector(new EphemeralDataProtectionProvider());
+        var service = new MailService(db, protector, [imap], TimeProvider.System, inboxCache: new MailInboxCache(TimeProvider.System));
+        var mailbox = await service.SaveImapAccountAsync("grant", null, new MailImapAccountInput(
+            "grant@fastmail.test", "Grant", "imap.fastmail.com", 993, "smtp.fastmail.com", 465, MailServerSecurity.SslOnConnect, "", "pw"));
+        imap.Inbox.Add(new MailInboxItem(new MailMessageSummary("m1", null, new MailAddress("Sam", "sam@example.com"), [], "Private", "", DateTimeOffset.UnixEpoch, true, false, false),
+            "<m1@example>", new Dictionary<string, string>()));
+
+        (await service.ListAsync("grant", mailbox.Id, "inbox:primary", null, null)).Messages.Should().ContainSingle("Grant's own inbox, now cached");
+
+        await service.Invoking(s => s.ListAsync("sam", mailbox.Id, "inbox:primary", null, null)).Should().ThrowAsync<MailException>();
+        await service.Invoking(s => s.ListTabsAsync("sam", mailbox.Id)).Should().ThrowAsync<MailException>();
+        await service.Invoking(s => s.MoveToTabAsync("sam", mailbox.Id, "m1", "inbox:social", true)).Should().ThrowAsync<MailException>();
+        (await service.ListSenderTabsAsync("sam", mailbox.Id)).Should().BeEmpty();
+    }
+
+    // Folders (phase 5, 21-11-26): Gmail's are labels; a move adds the label and leaves the Inbox, and
+    // Undo reverses both. Names are checked before the mailbox is asked.
+    [Fact]
+    public async Task Folders_ShouldBeGmailLabels_AndAMoveShouldBeUndoable()
+    {
+        var protector = new DataProtectionSecretProtector(new EphemeralDataProtectionProvider());
+        var calls = new System.Collections.Concurrent.ConcurrentQueue<string>();
+        var handler = new StubHandler(async request =>
+        {
+            var body = request.Content is null ? "" : await request.Content.ReadAsStringAsync();
+            calls.Enqueue($"{request.Method} {request.RequestUri!.AbsolutePath.Replace("/gmail/v1/users/me/", "")} {body}".TrimEnd());
+            return request.Method == HttpMethod.Post && request.RequestUri.AbsolutePath.EndsWith("/labels")
+                ? Json(HttpStatusCode.OK, """{"id":"Label_7","name":"Receipts"}""")
+                : Json(HttpStatusCode.OK, "{}");
+        });
+        var gmail = new GmailMailboxBackend(protector, new Factory(handler),
+            Options.Create(new GoogleOAuthOptions { ClientId = "id", ClientSecret = "secret", RedirectUri = "https://example.test/cb" }));
+        var account = new MailAccount { Username = "grant", Provider = MailProviders.Google, TokenProtected = protector.Protect("""{"accessToken":"t"}""") };
+
+        (await gmail.CreateFolderAsync(account, "Receipts", CancellationToken.None)).Should().Be(new MailFolderView("label:Label_7", "Receipts"));
+        await gmail.RenameFolderAsync(account, "label:Label_7", "Bills", CancellationToken.None);
+        var undo = await gmail.MoveToFolderAsync(account, ["m1", "m2"], "label:Label_7", CancellationToken.None);
+        await gmail.UndoAsync(account, undo!, CancellationToken.None);
+        await gmail.DeleteFolderAsync(account, "label:Label_7", CancellationToken.None);
+
+        calls.Should().Contain("""PATCH labels/Label_7 {"name":"Bills"}""");
+        calls.Should().Contain("""POST messages/batchModify {"ids":["m1","m2"],"addLabelIds":["Label_7"],"removeLabelIds":["INBOX"]}""");
+        calls.Should().Contain("""POST messages/batchModify {"ids":["m1","m2"],"addLabelIds":["INBOX"],"removeLabelIds":["Label_7"]}""", "Undo takes the label off and puts it back in the Inbox");
+        calls.Should().Contain("DELETE labels/Label_7");
+
+        MailService.FolderName("  Receipts  ").Should().Be("Receipts");
+        foreach (var bad in new[] { "", "   ", "Inbox", "trash", new string('x', MailService.MaxFolderNameLength + 1), "bad\u0001name" })
+            ((Action)(() => MailService.FolderName(bad))).Should().Throw<MailException>(bad);
+        var f = await CreateAsync();
+        var mailbox = await f.UseImapAsync();
+        await f.Service.Invoking(s => s.DeleteFolderAsync("grant", mailbox.Id, "inbox")).Should().ThrowAsync<MailException>("only your own folders can be deleted");
+        await f.Service.Invoking(s => s.MoveToFolderAsync("grant", mailbox.Id, ["a"], "trash")).Should().ThrowAsync<MailException>();
+    }
+
     [Fact]
     public async Task ManyMessagesAtOnce_ShouldGoToTheMailboxInOneCall_AndTrashShouldBeUndoable()
     {
@@ -478,6 +579,9 @@ public sealed class MailServiceTests
         public Task ArchiveAsync(MailAccount account, string id, CancellationToken cancellationToken) => Task.CompletedTask;
         public Task TrashAsync(MailAccount account, string id, CancellationToken cancellationToken) => Task.CompletedTask;
         public Task<int> UnreadCountAsync(MailAccount account, CancellationToken cancellationToken) => Task.FromResult(7);
+        public List<MailInboxItem> Inbox { get; } = [];
+        public Task<IReadOnlyList<MailInboxItem>> InboxForSortingAsync(MailAccount account, int max, CancellationToken cancellationToken) =>
+            Task.FromResult<IReadOnlyList<MailInboxItem>>(Inbox.Take(max).ToList());
         public List<(IReadOnlyList<string> Ids, string Action)> Applied { get; } = [];
         public List<MailUndo> Undone { get; } = [];
 
