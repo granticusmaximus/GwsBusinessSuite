@@ -223,7 +223,12 @@ public sealed class NativeOverwatchMacMapBridgeTests
             .And.Contain("_map.AddSubview(_nightShade);")
             .And.Contain("UserInteractionEnabled = false")
             .And.Contain("new MKHybridMapConfiguration(enabled ? MKMapElevationStyle.Realistic : MKMapElevationStyle.Flat)")
-            .And.Contain("case NativeOverwatchOperations.SetTerrainShading: return;");
+            .And.Contain("case NativeOverwatchOperations.SetTerrainShading: return;")
+            // Satellite (21-11-26): Apple's satellite map is always underneath; the look hides the holo overlays.
+            .And.Contain("MapType = MKMapType.HybridFlyover,")
+            .And.Contain("case NativeOverwatchOperations.SetLook: SetLook(arguments); return;")
+            .And.Contain("_holoShown = OverwatchMapLook.ShowsHolo(arguments.LastOrDefault() as string);")
+            .And.Contain("_landRenderer.Alpha = !_holoShown || share >= 0.98 ? 0 : 1;");
 
         script.Should().Contain("camera: function (report) { showNativeCamera(report); },")
             .And.Contain("const stage = zoomStage(report.altitude);")

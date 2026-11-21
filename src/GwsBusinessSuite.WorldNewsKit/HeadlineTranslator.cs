@@ -48,37 +48,74 @@ public static partial class HeadlineTranslator
             if (newline >= 0 && text.EndsWith("```", StringComparison.Ordinal))
                 text = text[(newline + 1)..^3].Trim();
         }
-        using var document = JsonDocument.Parse(text);
-        if (document.RootElement.ValueKind != JsonValueKind.Array)
-            throw new JsonException("Expected an array of English reports.");
-        var found = new Dictionary<int, ReportTranslation>();
-        foreach (var item in document.RootElement.EnumerateArray())
+        // One bad report used to cost the whole batch (21-11-26): a model that left out one description,
+        // or wrote one unescaped quote, failed all eight, and the same eight failed again every retry, so
+        // the English backlog never moved. Now each report stands alone: a usable one is kept, an unusable
+        // one is left out and retried on its own. Broken JSON is read object by object. Only a repeated
+        // number still rejects the answer, because then no report's number can be trusted.
+        var items = ReportObjects(text);
+        var seen = new HashSet<int>();
+        var usable = new List<(int Number, ReportTranslation Report)>();
+        foreach (var item in items)
         {
             if (item.ValueKind != JsonValueKind.Object ||
                 !item.TryGetProperty("number", out var numberValue) || numberValue.ValueKind != JsonValueKind.Number ||
-                !numberValue.TryGetInt32(out var number) ||
-                number < 1 || number > batch.Count || found.ContainsKey(number))
-                throw new JsonException("The English reports contain an invalid or repeated report number.");
+                !numberValue.TryGetInt32(out var number) || number < 1 || number > batch.Count)
+                continue;
+            if (!seen.Add(number))
+                throw new JsonException("The English reports contain a repeated report number.");
             var source = batch[number - 1];
-            var headline = RequiredText(item, "headline", 1, 2000);
-            var summary = RequiredText(item, "summary", 15, 1200);
+            var headline = OptionalText(item, "headline", 1, 2000);
+            var summary = OptionalText(item, "summary", 15, 1200);
             string? description = null;
             if (!string.IsNullOrWhiteSpace(source.Snippet))
-                description = RequiredText(item, "description", 1, 4000);
-            found.Add(number, new ReportTranslation(source.Id, source.Title, source.Snippet, headline, description, summary));
+                description = OptionalText(item, "description", 1, 4000);
+            if (headline is null || summary is null || (!string.IsNullOrWhiteSpace(source.Snippet) && description is null))
+                continue;
+            usable.Add((number, new ReportTranslation(source.Id, source.Title, source.Snippet, headline, description, summary)));
         }
-        if (found.Count == 0 && batch.Count > 0) throw new JsonException("No English reports were returned.");
-        return found.OrderBy(entry => entry.Key).Select(entry => entry.Value).ToList();
+        if (usable.Count == 0 && batch.Count > 0) throw new JsonException("No usable English reports were returned.");
+        return usable.OrderBy(entry => entry.Number).Select(entry => entry.Report).ToList();
     }
 
-    private static string RequiredText(JsonElement item, string name, int min, int max)
+    // The answer's report objects: the whole array when it parses, otherwise each {"number": ...}
+    // object that parses on its own.
+    private static IReadOnlyList<JsonElement> ReportObjects(string text)
     {
-        if (!item.TryGetProperty(name, out var value) || value.ValueKind != JsonValueKind.String)
-            throw new JsonException($"The English report is missing {name}.");
+        try
+        {
+            using var document = JsonDocument.Parse(text);
+            if (document.RootElement.ValueKind != JsonValueKind.Array)
+                throw new JsonException("Expected an array of English reports.");
+            return document.RootElement.EnumerateArray().Select(item => item.Clone()).ToList();
+        }
+        catch (JsonException) when (ReportStart().IsMatch(text))
+        {
+            var starts = ReportStart().Matches(text).Select(match => match.Index).ToList();
+            var items = new List<JsonElement>();
+            for (var i = 0; i < starts.Count; i++)
+            {
+                var end = i + 1 < starts.Count ? starts[i + 1] : text.Length;
+                var piece = text[starts[i]..end].TrimEnd().TrimEnd(']').TrimEnd().TrimEnd(',');
+                try
+                {
+                    using var one = JsonDocument.Parse(piece);
+                    items.Add(one.RootElement.Clone());
+                }
+                catch (JsonException)
+                {
+                    // This report's object is broken; the others still count.
+                }
+            }
+            return items;
+        }
+    }
+
+    private static string? OptionalText(JsonElement item, string name, int min, int max)
+    {
+        if (!item.TryGetProperty(name, out var value) || value.ValueKind != JsonValueKind.String) return null;
         var text = Flat(value.GetString()!);
-        if (text.Length < min || text.Length > max)
-            throw new JsonException($"The English report has an invalid {name} length.");
-        return text;
+        return text.Length < min || text.Length > max ? null : text;
     }
 
     public const string SystemPrompt = """
@@ -132,6 +169,9 @@ public static partial class HeadlineTranslator
 
     [GeneratedRegex(@"^\s*(\d+)\s*[.)]\s*(.+?)\s*$", RegexOptions.Multiline)]
     private static partial Regex Numbered();
+
+    [GeneratedRegex(@"\{\s*""number""\s*:")]
+    private static partial Regex ReportStart();
 
     [GeneratedRegex(@"\s+")]
     private static partial Regex Whitespace();

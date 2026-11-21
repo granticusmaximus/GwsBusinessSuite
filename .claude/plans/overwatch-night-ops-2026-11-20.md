@@ -144,3 +144,11 @@ web only unless the separate AppKit map window is built.
   Not checked: the real Mac app on screen (it reads its server from a saved preference; repointing Grant's
   install at a local server needs his go-ahead).
   Next: Satellite look imagery swap (JS), then the user guide update.
+- 21-11-26 Satellite look: tacticalGlobe.setLook (web: Esri World_Imagery layer just above the base map at
+  every height, holo land/grid/streets/wash hidden; Mac: Apple's HybridFlyover map was always underneath,
+  so the holo overlays go to alpha 0; OverwatchMapLook.Look/ShowsHolo; setLook in all 4 contract places).
+  The razor applies the saved look once the globe has started and on every switch. Also fixed: the HUD
+  readout showed "GND -21443 m" over Atlanta (terrain-skirt hits from globe.getHeight), so ground heights
+  outside -500..9000 m are left out. Visual check: Chromium + WebKit at 1280/820/390, orbit and city, look
+  remembered across reload, switching back restores the holo globe.
+  Next: user guide (docs/OVERWATCH_USER_GUIDE.md) and the PDF guide Grant asked for (Overwatch + World News).

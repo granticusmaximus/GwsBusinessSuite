@@ -1346,6 +1346,33 @@ public sealed class WorldNewsKitTests : IDisposable
         parse.Should().Throw<JsonException>();
     }
 
+    // 21-11-26: one report without its description, or one broken object, used to fail the whole batch,
+    // and the same batch failed on every retry, so the English backlog never moved.
+    [Fact]
+    public void ReportTranslator_ShouldKeepEveryUsableReport_WhenOthersInTheBatchAreMissingOrBroken()
+    {
+        var reports = new[]
+        {
+            Article("a", "Hochwasser in Berlin", "German", Now) with { Snippet = "Schulen bleiben geschlossen." },
+            Article("b", "Inundaciones en Madrid", "Spanish", Now) with { Snippet = "Cierran las escuelas." },
+            Article("c", "Incendie à Lyon", "French", Now),
+            Article("d", "Sciopero a Roma", "Italian", Now),
+        };
+        var missingDescription = HeadlineTranslator.ParseReports("""
+            [{"number":1,"headline":"Flooding in Berlin","description":"Schools remain closed.","summary":"Flooding hits Berlin and schools close."},
+             {"number":2,"headline":"Floods in Madrid","description":null,"summary":"Floods hit Madrid and schools close."},
+             {"number":3,"headline":"Fire in Lyon","summary":"A fire is reported in Lyon, France."}]
+            """, reports);
+        missingDescription.Select(report => report.ArticleId).Should().Equal(["a", "c"], "b left out its description, so only b retries");
+
+        var broken = HeadlineTranslator.ParseReports("""
+            [{"number":1,"headline":"Flooding in Berlin","description":"Schools remain closed.","summary":"Flooding hits Berlin and schools close."},
+             {"number":3,"headline":"Fire in "Lyon" today","summary":"A fire is reported in Lyon, France."},
+             {"number":4,"headline":"Strike in Rome","summary":"Workers strike in Rome, Italy, today."}]
+            """, reports);
+        broken.Select(report => report.ArticleId).Should().Equal(["a", "d"], "the object with the unescaped quotes is the only one lost");
+    }
+
     [Fact]
     public void EnglishBacklog_ShouldIncludeUngroupedEnglishAndArchivedReports_AndPersistRetries()
     {

@@ -104,6 +104,18 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
         _ = SendAsync($"window.gwsNativeOverwatch && window.gwsNativeOverwatch.camera && window.gwsNativeOverwatch.camera({report})");
     }
     private MKOverlayRenderer? _landRenderer;
+    // The veil, grid and coastlines: hidden with the rest of the holo look under Satellite.
+    private readonly List<MKOverlayRenderer> _holoRenderers = [];
+    private bool _holoShown = true;
+
+    // The Look switch (21-11-26): Apple's satellite map (MapType HybridFlyover) is always underneath,
+    // so Satellite just hides the holo overlays over it (OverwatchMapLook.ShowsHolo).
+    private void SetLook(object?[] arguments)
+    {
+        _holoShown = OverwatchMapLook.ShowsHolo(arguments.LastOrDefault() as string);
+        foreach (var renderer in _holoRenderers) { renderer.Alpha = _holoShown ? 1 : 0; renderer.SetNeedsDisplay(); }
+        UpdateHolo();
+    }
 
     // The land the web globe draws, from the same file on the same server.
     private async Task LoadHoloLandAsync()
@@ -129,9 +141,9 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
     // heights as the web globe (OverwatchMapLook.StreetShare).
     internal void UpdateHolo()
     {
-        var share = OverwatchMapLook.StreetShare(_map.Camera.CenterCoordinateDistance);
+        var share = _holoShown ? OverwatchMapLook.StreetShare(_map.Camera.CenterCoordinateDistance) : 0;
         if (_streetRenderer is not null) { _streetRenderer.Alpha = (nfloat)(share * OverwatchMapLook.StreetAlpha); _streetRenderer.SetNeedsDisplay(); }
-        if (_landRenderer is not null) { _landRenderer.Alpha = share >= 0.98 ? 0 : 1; _landRenderer.SetNeedsDisplay(); }
+        if (_landRenderer is not null) { _landRenderer.Alpha = !_holoShown || share >= 0.98 ? 0 : 1; _landRenderer.SetNeedsDisplay(); }
     }
 
     internal MKOverlayRenderer? HoloRenderer(IMKOverlay overlay)
@@ -139,6 +151,7 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
         if (HoloMap.Renderer(overlay) is not { } renderer) return null;
         if (overlay is HoloStreetOverlay) _streetRenderer = renderer;
         if (overlay is MKMultiPolygon { Title: HoloMap.LandTitle }) _landRenderer = renderer;
+        else if (overlay is not HoloStreetOverlay) { _holoRenderers.Add(renderer); renderer.Alpha = _holoShown ? 1 : 0; }
         UpdateHolo();
         return renderer;
     }
@@ -298,6 +311,7 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
             case "zoomBy": ZoomBy(arguments); return;
             case "pan": Pan(arguments); return;
             case "setThreeD": SetThreeD(arguments); return;
+            case NativeOverwatchOperations.SetLook: SetLook(arguments); return;
             // Apple's map has no terrain shading; contours and slope are web only (Night Ops, 20-11-26).
             case NativeOverwatchOperations.SetTerrainShading: return;
             // The Night Ops quality setting drives the web globe's grain, shading, buildings and line of sight; nothing to draw here.

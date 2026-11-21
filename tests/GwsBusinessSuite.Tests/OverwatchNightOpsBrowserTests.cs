@@ -136,6 +136,26 @@ public sealed class OverwatchNightOpsBrowserTests(PlaywrightBrowserFixture fixtu
         ScriptErrors(consoleErrors).Should().BeEmpty();
     }
 
+    // Looks (21-11-26): Satellite lays Esri's real aerial imagery over the globe and hides the holo
+    // land; switching back hides the imagery again, and an unknown look changes nothing.
+    [Fact]
+    public async Task SatelliteLook_ShouldShowAerialImagery_AndHideTheHoloLand_UntilSwitchedBack()
+    {
+        var (page, consoleErrors) = await OpenHarnessAsync(fixture.Browser);
+        await using var pageScope = page;
+        await InitAsync(page);
+        const string Look = "() => JSON.stringify(window.tacticalGlobe.nightOpsState().look)";
+        (await page.EvaluateAsync<string>(Look)).Should().Be("{\"name\":\"night-ops\",\"imagery\":false,\"land\":true}");
+
+        (await page.EvaluateAsync<string>("() => window.tacticalGlobe.setLook('tg-viewport', 'satellite')")).Should().Be("satellite");
+        (await page.EvaluateAsync<string>(Look)).Should().Be("{\"name\":\"satellite\",\"imagery\":true,\"land\":false}");
+
+        (await page.EvaluateAsync<string>("() => window.tacticalGlobe.setLook('tg-viewport', 'nonsense')")).Should().Be("satellite");
+        (await page.EvaluateAsync<string>("() => window.tacticalGlobe.setLook('tg-viewport', 'standard')")).Should().Be("standard");
+        (await page.EvaluateAsync<string>(Look)).Should().Be("{\"name\":\"standard\",\"imagery\":false,\"land\":true}");
+        ScriptErrors(consoleErrors).Should().BeEmpty();
+    }
+
     [Fact]
     public async Task Quality_ShouldBeRemembered_DefaultToStandardOnBattery_AndGateShadingAndBuildings()
     {

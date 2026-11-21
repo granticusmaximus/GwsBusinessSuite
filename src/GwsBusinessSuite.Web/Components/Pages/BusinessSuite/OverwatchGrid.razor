@@ -1801,6 +1801,7 @@
         _globeStartedMs = _opening!.ElapsedMilliseconds;
         _ = MarkBootCompleteAsync();
         await LoadQualityAsync();
+        if (_look != "night-ops") await ApplyLookToGlobeAsync();
 
         if (IonToken is not null)
         {
@@ -2954,8 +2955,9 @@
     private bool _helpOpen;
 
     // Look switch (Night Ops x Apple, 20-11-26): Night Ops is the look the page always had; Standard
-    // drops the grain and scan lines for a calmer palette. Satellite reads as Standard for now: the
-    // imagery swap is a later tactical-globe.js unit (plan: overwatch-night-ops-2026-11-20.md).
+    // drops the grain and scan lines for a calmer palette. Satellite has Standard's chrome over real
+    // aerial imagery (tacticalGlobe.setLook: Esri World_Imagery on the web, Apple's satellite map on
+    // the Mac; OverwatchMapLook).
     private const string LookStorageKey = "gws.overwatch.look";
     private static readonly (string Key, string Label, string Glyph)[] Looks =
         [("standard", "Standard", "◐"), ("night-ops", "Night Ops", "☾"), ("satellite", "Satellite", "◍")];
@@ -2965,6 +2967,7 @@
     {
         if (!Looks.Any(option => option.Key == look)) return;
         _look = look;
+        await ApplyLookToGlobeAsync();
         try
         {
             await JS.InvokeVoidAsync("localStorage.setItem", LookStorageKey, look);
@@ -2972,6 +2975,25 @@
         catch (JSException)
         {
             // Private windows and blocked site data refuse storage; the look still applies until reload.
+        }
+    }
+
+    // Before the globe has started this is a no-op ('failed: no globe'); the start-up sequence calls
+    // it again once tacticalGlobe.init has finished.
+    private async Task ApplyLookToGlobeAsync()
+    {
+        try
+        {
+            var applied = await JS.InvokeAsync<string?>("tacticalGlobe.setLook", "tg-viewport", _look);
+            if (applied == "failed: no imagery")
+            {
+                _look = "night-ops";
+                StateHasChanged();
+            }
+        }
+        catch (JSException ex)
+        {
+            Logger.LogWarning(ex, "Overwatch could not switch the globe to the {Look} look.", _look);
         }
     }
 

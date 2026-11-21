@@ -53,6 +53,12 @@ public sealed class OverwatchNativeCameraBrowserTests(PlaywrightBrowserFixture f
         // 3D on the Apple map answers 'apple': on, but no contours or slope buttons on the page.
         (await page.EvaluateAsync<string>("() => window.tacticalGlobe.setThreeD('tg-viewport', true)")).Should().Be("apple");
         (await page.EvaluateAsync<string>("() => window.tacticalGlobe.setThreeD('tg-viewport', false)")).Should().Be("off");
+
+        // The Look switch reaches the Apple map, and the page keeps the look it asked for.
+        await page.EvaluateAsync("() => { window.__nativeMessages = []; }");
+        (await page.EvaluateAsync<string>("() => window.tacticalGlobe.setLook('tg-viewport', 'satellite')")).Should().Be("satellite");
+        (await page.EvaluateAsync<string>("() => JSON.stringify(window.__nativeMessages.filter(m => m.operation === 'setLook').map(m => Array.from(Object.values(m.arguments))))"))
+            .Should().Be("[[\"tg-viewport\",\"satellite\"]]");
         consoleErrors.Should().BeEmpty();
     }
 }

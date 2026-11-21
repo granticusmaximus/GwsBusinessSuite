@@ -260,6 +260,17 @@ public sealed class NativeShapesTests
         Assert.Contains($"filter: brightness({N(Math.Round(1 - OverwatchMapLook.DuskDim, 2))});", css);
         Assert.Contains($"filter: brightness({N(Math.Round(1 - OverwatchMapLook.NightDim, 2))}) contrast(1.12);", css);
 
+        // Looks (21-11-26): only Satellite hides the holo globe, and anything unknown is Night Ops.
+        Assert.Equal(["standard", "night-ops", "satellite", "night-ops", "night-ops"], new[] { "standard", "night-ops", "satellite", "nonsense", null }.Select(OverwatchMapLook.Look));
+        Assert.Equal([true, true, false, true], new[] { "standard", "night-ops", "satellite", null }.Select(OverwatchMapLook.ShowsHolo));
+        Assert.Contains("const LOOKS = ['standard', 'night-ops', 'satellite'];", js);
+        // The HUD's ground height leaves out terrain-skirt readings (GND -21443 m over Atlanta, 21-11-26).
+        Assert.Contains("const GROUND_MIN = -500, GROUND_MAX = 9000;", js);
+        Assert.Contains("h >= GROUND_MIN && h <= GROUND_MAX) ground = Math.round(h);", js);
+        // The time machine bar covers the weather card's corner, so the card steps aside while it's open.
+        Assert.Contains(".tg-shell:has(.tg-time-machine) .tg-weather-panel { display: none !important; }",
+            File.ReadAllText(Path.Combine(root, "src/GwsBusinessSuite.Web/wwwroot/tactical-globe.css")));
+
         using var land = System.Text.Json.JsonDocument.Parse(File.ReadAllText(Path.Combine(root, "src/GwsBusinessSuite.Web/wwwroot/data/overwatch-land.json")));
         Assert.True(land.RootElement.GetProperty("rings").GetArrayLength() > 200, "both maps draw the land from this one file");
     }

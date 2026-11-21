@@ -57,6 +57,10 @@
 /* The page's docked sidebar and inspector (OverwatchGrid.razor.css sets --tg-inset-l/-r on .tg-shell):
    the floating bits tactical-globe.js builds keep to the free map area between them. */
 .tg-shell .tg-weather-panel { left: calc(var(--tg-inset-l, 0px) + 1.1rem); }
+/* The time machine bar sits along the bottom of the map and shows a past moment, so today's weather
+   card (bottom-left, under the bar) steps aside while it's open (21-11-26: its text showed through).
+   !important because setWeatherSnapshot shows the card with an inline display: block. */
+.tg-shell:has(.tg-time-machine) .tg-weather-panel { display: none !important; }
 .tg-shell .tg-selection-indicator { right: calc(var(--tg-inset-r, 0px) + 4.6rem); }
 
 /* Text never drops below 12px (12-11-26): the HUD had 81 labels under it on a phone. Sizes below

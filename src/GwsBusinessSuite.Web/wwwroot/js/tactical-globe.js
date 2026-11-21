@@ -108,6 +108,7 @@ window.tacticalGlobe = (function () {
     // One HUD line from the camera: heading, tilt, altitude, ground height and place at the centre of
     // the view, and the sun there. At most every 150 ms; called from the holo look's camera handler.
     let lastReadout = 0;
+    const GROUND_MIN = -500, GROUND_MAX = 9000;
     function updateReadout(viewer, height) {
         const now = Date.now();
         if (now - lastReadout < 150) return;
@@ -124,7 +125,10 @@ window.tacticalGlobe = (function () {
             lat = Cesium.Math.toDegrees(place.latitude);
             lon = Cesium.Math.toDegrees(place.longitude);
             const h = viewer.scene.globe.getHeight(place);
-            if (typeof h === 'number' && isFinite(h)) ground = Math.round(h);
+            // While terrain tiles load, getHeight can hit a tile's skirt and answer tens of km below
+            // ground (the readout showed "GND -21443 m" over Atlanta, 21-11-26). No land is below the
+            // Dead Sea (about -430 m) or above Everest, so anything outside that is left out.
+            if (typeof h === 'number' && isFinite(h) && h >= GROUND_MIN && h <= GROUND_MAX) ground = Math.round(h);
         }
         writeReadout(out, heading, tilt, height, ground, lat, lon);
     }
@@ -284,11 +288,16 @@ window.tacticalGlobe = (function () {
                 if (stageName) stageName.textContent = stage.toUpperCase();
             }
             updateReadout(viewer, height);
-            if (streets) streets.alpha = share * HOLO.streetAlpha;
-            if (wash) wash.alpha = share * HOLO.washAlpha;
-            land.show = share < 0.98;
+            // The Satellite look (setLook) shows real aerial imagery at every height, so the
+            // green land, grid, dark streets and wash stay hidden under it.
+            const satellite = holo.look === 'satellite';
+            if (streets) streets.alpha = satellite ? 0 : share * HOLO.streetAlpha;
+            if (wash) wash.alpha = satellite ? 0 : share * HOLO.washAlpha;
+            land.show = !satellite && share < 0.98;
             scene.requestRender();
         };
+        const holo = { look: 'night-ops', imagery: null, fade: fade };
+        viewer._tgHolo = holo;
         viewer.camera.percentageChanged = 0.05;
         viewer.camera.changed.addEventListener(fade);
         fade();
@@ -3134,6 +3143,37 @@ window.tacticalGlobe = (function () {
         return quality;
     }
 
+    // Looks (Night Ops x Apple, 21-11-26): 'satellite' lays Esri's World_Imagery (real aerial
+    // photography, CORS-open, no key) over the dark base at every height, just above the base map
+    // and under the wash, labels and every overlay added later; 'standard' and 'night-ops' keep the
+    // holo globe. The page CSS handles the chrome (.tg-shell[data-ow-look]). Resolves to the look in force.
+    const LOOKS = ['standard', 'night-ops', 'satellite'];
+    async function setLook(containerId, look) {
+        const entry = viewers.get(containerId || 'tg-viewport');
+        const holo = entry && entry.viewer && !entry.viewer.isDestroyed() ? entry.viewer._tgHolo : null;
+        if (!holo) return 'failed: no globe';
+        if (LOOKS.indexOf(look) < 0) return holo.look;
+        holo.look = look;
+        const layers = entry.viewer.imageryLayers;
+        if (look === 'satellite' && !holo.imagery) {
+            try {
+                const layer = new Cesium.ImageryLayer(await Cesium.ArcGisMapServerImageryProvider.fromUrl(
+                    'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer'));
+                if (entry.viewer.isDestroyed()) return 'failed: no globe';
+                layers.add(layer, 1);
+                holo.imagery = layer;
+            } catch (err) {
+                console.warn('Overwatch: the satellite imagery could not be loaded', err);
+                holo.look = 'night-ops';
+                holo.fade();
+                return 'failed: no imagery';
+            }
+        }
+        if (holo.imagery) holo.imagery.show = holo.look === 'satellite';
+        holo.fade();
+        return holo.look;
+    }
+
     function setQuality(containerId, level) {
         if (QUALITY_LEVELS.indexOf(level) < 0) return currentQuality();
         return applyQuality(level, true, containerId);
@@ -3424,6 +3464,13 @@ window.tacticalGlobe = (function () {
     }
 
     // Read-only Night Ops state (Cesium draws in WebGL, not the DOM), for tests and devtools.
+    function holoState(entry) {
+        const holo = entry && entry.viewer && !entry.viewer.isDestroyed() ? entry.viewer._tgHolo : null;
+        if (!holo) return null;
+        const land = entry.viewer.dataSources.getByName('tg-holo-land')[0];
+        return { name: holo.look, imagery: !!(holo.imagery && holo.imagery.show), land: !!(land && land.show) };
+    }
+
     function nightOpsState(containerId) {
         const entry = viewers.get(containerId || 'tg-viewport');
         return {
@@ -3433,7 +3480,8 @@ window.tacticalGlobe = (function () {
             brackets: !!(entry && entry.bracketEntity),
             bracketLabel: entry && entry.bracketEntity ? entry.bracketEntity.label.text.getValue(Cesium.JulianDate.now()) : null,
             lineOfSight: entry && entry.lineOfSight ? { hidden: entry.lineOfSight.hidden, shapes: entry.losSource.entities.values.length } : null,
-            buildings: !!(entry && entry.threeD && entry.threeD.buildings && entry.threeD.buildings.show)
+            buildings: !!(entry && entry.threeD && entry.threeD.buildings && entry.threeD.buildings.show),
+            look: holoState(entry)
         };
     }
 
@@ -6346,6 +6394,7 @@ window.tacticalGlobe = (function () {
         setThreeD: setThreeD,
         setTerrainShading: setTerrainShading,
         setQuality: setQuality,
+        setLook: setLook,
         getQuality: getQuality,
         runLineOfSight: runLineOfSight,
         clearLineOfSight: clearLineOfSight,
@@ -6643,7 +6692,7 @@ window.tacticalGlobe = (function () {
 
         const nativeOperations = new Set([
             'flyTo', 'flyToBounds', 'flyToStreetLevel', 'zoom', 'home', 'dispose',
-            'setTimeMachine', 'clearTimeMachine', 'setMapNotes', 'setThreeD', 'setTerrainShading', 'setQuality', 'setNightLights', 'setSatelliteScene', 'clearSatelliteScene', 'setMeasure', 'clearMeasure', 'setAircraft', 'setShips',
+            'setTimeMachine', 'clearTimeMachine', 'setMapNotes', 'setThreeD', 'setTerrainShading', 'setQuality', 'setLook', 'setNightLights', 'setSatelliteScene', 'clearSatelliteScene', 'setMeasure', 'clearMeasure', 'setAircraft', 'setShips',
             'setAirQuality', 'setPowerOutages', 'setRoadTraffic', 'setTrafficFlow', 'setDriveFollow',
             'setStreetViewMarker', 'clearStreetViewMarker', 'setCameraPins', 'setSelectModeEnabled',
             'setRadarVisible', 'setRadarTimeline', 'setHourlyForecast', 'setWeatherAlerts',
@@ -6906,6 +6955,12 @@ window.tacticalGlobe = (function () {
             if (container) watchNativeLayout(container);
         };
         api.whenDrawn = function () { return Promise.resolve(true); };
+        // The Mac map shows Apple's satellite imagery for Satellite and the holo overlays otherwise
+        // (MacNativeOverwatchBridge.SetLook); the page keeps the look it asked for.
+        api.setLook = function (containerId, look) {
+            postNative('setLook', arguments);
+            return Promise.resolve(LOOKS.indexOf(look) >= 0 ? look : 'night-ops');
+        };
         api.setThreeD = function (containerId, on) {
             postNative('setThreeD', arguments);
             // 'apple': 3D is on (Apple's realistic terrain), but contours and slope are web only,

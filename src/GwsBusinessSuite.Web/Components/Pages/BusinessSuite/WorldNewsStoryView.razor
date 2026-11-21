@@ -550,7 +550,8 @@ else
         {
             var at = Math.Clamp(_spreadAt ?? spread.Count - 1, 0, spread.Count - 1);
             var maxOutlets = Math.Max(1, spread[^1].Outlets);
-            <section class="story-part story-spread" aria-labelledby="story-h-spread">
+            @* Its own class: .story-spread is the coverage head's 9rem sparkline box, which squeezed this section to one letter per line (21-11-26). *@
+            <section class="story-part story-hourly-spread" aria-labelledby="story-h-spread">
                 <h2 id="story-h-spread">How it spread</h2>
                 <label class="story-spread-replay">
                     <span>Replay: by @spread[at].Hour.ToLocalGwsDateTime(), @spread[at].Outlets outlets in @spread[at].Countries countries</span>

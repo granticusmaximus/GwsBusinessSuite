@@ -84,6 +84,17 @@ public sealed class IntelligenceFeaturesTests
         hours[1].NewCountries.Should().Equal("France");
     }
 
+    // 21-11-26: the replay section shared .story-spread with the coverage head's 9rem sparkline box and
+    // rendered one letter per line.
+    [Fact]
+    public void Spread_ShouldHaveItsOwnSection_NotTheSparklineBox()
+    {
+        var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../.."));
+        var view = File.ReadAllText(Path.Combine(root, "src/GwsBusinessSuite.Web/Components/Pages/BusinessSuite/WorldNewsStoryView.razor"));
+        view.Should().Contain("<section class=\"story-part story-hourly-spread\" aria-labelledby=\"story-h-spread\">")
+            .And.NotContain("class=\"story-part story-spread\"");
+    }
+
     [Fact]
     public void CatchUp_ShouldListTheNewReportsInOrder()
     {
