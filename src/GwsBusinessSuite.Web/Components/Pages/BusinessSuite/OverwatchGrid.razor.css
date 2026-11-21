@@ -295,9 +295,6 @@
     cursor: pointer;
 }
 .tg-gap-list button:hover { background: rgb(var(--ow-accent-rgb, 89 240 122) / 0.3); }
-@container gws-main (min-width: 721px) {
-    .tg-shell:has(.tg-side-panel:not(.is-collapsed)) .tg-empty-hint { left: calc(360px + 1.6rem); }
-}
 @media (pointer: coarse) { .tg-gap-list button { min-height: 44px; min-width: 44px; } }
 
 /* Styling for every UI element tactical-globe.js builds via document.createElement (the
@@ -669,24 +666,13 @@
 
 .tg-route-actions { padding: 0.4rem 0.6rem; }
 
-.tg-empty-hint { top: 4.3rem; left: auto; right: 4rem; }
+.tg-empty-hint { top: calc(var(--tg-bar-h) + 0.3rem); left: auto; right: calc(var(--tg-inset-r) + 4rem); }
 
-/* Narrow content area: the side panel becomes a bottom sheet and the top bar stacks. */
+/* Narrow content area: the sidebar and inspector become bottom sheets and the toolbar stacks
+   (see "Apple structure" at the end of this file). */
 @container gws-main (max-width: 720px) {
-    .tg-side-panel {
-        top: auto;
-        left: 0;
-        right: 0;
-        bottom: 0;
-        width: 100%;
-        /* The globe keeps most of a phone's screen (12-11-26: was 55%). */
-        max-height: 40%;
-        border-left: none;
-        border-right: none;
-    }
-    .tg-map-controls { bottom: auto; top: 7.5rem; }
     .tg-topbar .tg-hud-status { display: none; }
-    .tg-floating-panel { top: 7rem; max-height: calc(100% - 8rem); }
+    .tg-floating-panel { top: calc(var(--tg-bar-h) + 0.4rem); max-height: calc(100% - var(--tg-bar-h) - 1.2rem); }
 }
 
 @media (pointer: coarse) {
@@ -910,9 +896,10 @@
 .tg-tm-camera-grid figure { margin: 0; }
 .tg-tm-camera-grid img { display: block; width: 100%; aspect-ratio: 4 / 3; object-fit: cover; background: #000; }
 .tg-tm-camera-grid figcaption { padding-top: 0.15rem; font-size: max(0.68rem, 12px); opacity: 0.85; overflow-wrap: anywhere; }
-.tg-shell:has(.tg-side-panel:not(.is-collapsed)) .tg-time-machine {
-    left: calc((100% + min(360px, 100% - 1.6rem) + 0.8rem) / 2);
-    width: min(720px, calc(100% - min(360px, 100% - 1.6rem) - 6rem));
+/* In the free map area between the Layers sidebar and the inspector (Apple structure, 20-11-26). */
+.tg-time-machine {
+    left: calc(var(--tg-inset-l) + (100% - var(--tg-inset-l) - var(--tg-inset-r)) / 2);
+    width: min(720px, calc(100% - var(--tg-inset-l) - var(--tg-inset-r) - 6rem));
 }
 
 /* Briefing panel ("Brief me" and morning briefings). */
@@ -1154,4 +1141,602 @@
 
 @media (pointer: coarse) {
     .tg-quality-options .tg-toggle { min-height: 44px; }
+}
+
+/* ---- Apple structure (Night Ops x Apple, combined; approved 20-11-26) ----
+   Toolbar on top (Layers button, title, Look switch, search, inspector/info/help), the Layers sidebar
+   docked left, the inspector (the tabbed side panel) docked right, the map between them. Panels are
+   floating glass with a 1 px edge and 12 px cut corners (top-right, bottom-left). Floating bits (stage
+   chip, readout, map controls, time machine, empty hint, and in tactical-globe.css the radar bar,
+   weather panel and selection chip) keep to the free map area through --tg-inset-l/-r. Below 720 px
+   the sidebar and inspector are bottom sheets, one at a time, and --tg-sheet-up lifts the chips. */
+.tg-shell {
+    --tg-gap: 0.75rem;
+    --tg-ctl: 34px;
+    --tg-bar-h: calc(var(--tg-ctl) + 1.25rem);
+    --tg-sidebar-w: clamp(240px, 26cqi, 300px);
+    --tg-inspector-w: clamp(280px, 30cqi, 360px);
+    --tg-inset-l: 0px;
+    --tg-inset-r: 0px;
+    --tg-sheet-h: 42%;
+    --tg-sheet-up: 0px;
+}
+
+@media (pointer: coarse) {
+    .tg-shell { --tg-ctl: 44px; }
+}
+
+.tg-shell:has(.tg-layers-panel:not(.is-hidden)) { --tg-inset-l: calc(var(--tg-sidebar-w) + var(--tg-gap)); }
+.tg-shell:has(.tg-side-panel:not(.is-collapsed)) { --tg-inset-r: calc(var(--tg-inspector-w) + var(--tg-gap)); }
+
+/* Look switch: Standard (and Satellite, for now) drops the scan lines and grain and softens the
+   vignette; the calmer palette itself is in tactical-globe.css (.tg-shell[data-ow-look]). */
+.tg-shell[data-ow-look="standard"],
+.tg-shell[data-ow-look="satellite"] {
+    background: #0b0d0c;
+}
+
+.tg-shell[data-ow-look="standard"] :is(.tg-scanlines, .tg-grain),
+.tg-shell[data-ow-look="satellite"] :is(.tg-scanlines, .tg-grain) {
+    display: none;
+}
+
+.tg-shell[data-ow-look="standard"] .tg-vignette,
+.tg-shell[data-ow-look="satellite"] .tg-vignette {
+    box-shadow: var(--ow-shadow-vignette);
+}
+
+.tg-shell[data-ow-look="standard"] *,
+.tg-shell[data-ow-look="satellite"] * {
+    text-shadow: none;
+}
+
+/* Glass panels: ~50% green-tinted near-black with blur; solid with Reduce Transparency or Increase
+   Contrast. The cut edges are drawn by two background gradients (they stay put while the panel scrolls). */
+.tg-toolbar,
+.tg-floating-panel,
+.tg-side-panel {
+    background-color: var(--ow-glass, rgb(4 14 8 / 0.5));
+    -webkit-backdrop-filter: var(--ow-glass-blur, blur(18px));
+    backdrop-filter: var(--ow-glass-blur, blur(18px));
+}
+
+.tg-floating-panel,
+.tg-side-panel {
+    border: 1px solid var(--ow-edge, rgb(89 240 122 / 0.45));
+    box-shadow: none;
+    color: var(--ow-ink, #d4ffd9);
+    font-family: var(--ow-sans, system-ui, sans-serif);
+    background-image:
+        linear-gradient(45deg, transparent calc(50% - 0.75px), var(--ow-edge, rgb(89 240 122 / 0.45)) calc(50% - 0.75px), var(--ow-edge, rgb(89 240 122 / 0.45)) calc(50% + 0.75px), transparent calc(50% + 0.75px)),
+        linear-gradient(45deg, transparent calc(50% - 0.75px), var(--ow-edge, rgb(89 240 122 / 0.45)) calc(50% - 0.75px), var(--ow-edge, rgb(89 240 122 / 0.45)) calc(50% + 0.75px), transparent calc(50% + 0.75px));
+    background-position: top right, bottom left;
+    background-size: var(--ow-cut, 12px) var(--ow-cut, 12px);
+    background-repeat: no-repeat;
+    clip-path: polygon(0 0, calc(100% - var(--ow-cut, 12px)) 0, 100% var(--ow-cut, 12px), 100% 100%, var(--ow-cut, 12px) 100%, 0 calc(100% - var(--ow-cut, 12px)));
+}
+
+.tg-floating-panel .tg-coverage-panel-header,
+.tg-side-panel .tg-coverage-panel-header {
+    font-family: var(--ow-display, "Chakra Petch", system-ui, sans-serif);
+    color: var(--ow-accent, #59f07a);
+}
+
+@media (prefers-reduced-transparency: reduce) {
+    .tg-toolbar,
+    .tg-floating-panel,
+    .tg-side-panel {
+        background-color: var(--ow-glass-solid, #06110a);
+        -webkit-backdrop-filter: none;
+        backdrop-filter: none;
+    }
+}
+
+@media (prefers-contrast: more) {
+    .tg-toolbar,
+    .tg-floating-panel,
+    .tg-side-panel {
+        background-color: var(--ow-glass-solid, #06110a);
+        -webkit-backdrop-filter: none;
+        backdrop-filter: none;
+        border-color: var(--ow-accent, #59f07a);
+    }
+}
+
+/* Toolbar: one row when there's room, the search on a second row below 900 px. */
+.tg-toolbar {
+    inset: 0 0 auto 0;
+    box-sizing: border-box;
+    height: var(--tg-bar-h);
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-areas: "left center right";
+    align-items: center;
+    gap: 0.4rem 0.75rem;
+    padding: 0 var(--tg-gap);
+    border-bottom: 1px solid var(--ow-edge, rgb(89 240 122 / 0.45));
+    pointer-events: auto;
+    text-shadow: var(--ow-glow, none);
+}
+
+.tg-toolbar .tg-topbar-left { grid-area: left; flex: none; flex-wrap: nowrap; }
+.tg-toolbar .tg-topbar-right { grid-area: right; flex-wrap: nowrap; }
+.tg-toolbar .tg-topbar-center { grid-area: center; position: relative; display: flex; justify-content: center; min-width: 0; }
+.tg-toolbar .tg-search { flex: 1 1 auto; max-width: 34rem; min-width: 0; opacity: 1; }
+.tg-toolbar .tg-search input { min-height: var(--tg-ctl); font-family: var(--ow-sans, system-ui, sans-serif); }
+.tg-toolbar .tg-search button { min-height: var(--tg-ctl); flex: none; }
+.tg-toolbar .tg-icon-btn,
+.tg-toolbar .tg-pill { min-height: var(--tg-ctl); min-width: var(--tg-ctl); }
+
+.tg-toolbar .tg-search-status {
+    position: absolute;
+    top: calc(100% + 0.45rem);
+    left: 0;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    pointer-events: none;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
+}
+
+.tg-toolbar .tg-hud-status {
+    max-width: 16rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-family: var(--ow-figures, ui-monospace, monospace);
+    font-variant-numeric: tabular-nums;
+}
+
+.tg-toolbar-title {
+    font-family: var(--ow-display, "Chakra Petch", system-ui, sans-serif);
+    font-size: var(--gws-type-md);
+    font-weight: 600;
+    letter-spacing: 0.18em;
+    color: var(--ow-accent, #59f07a);
+    white-space: nowrap;
+}
+
+.tg-pill-count {
+    display: inline-block;
+    min-width: 1.15rem;
+    padding: 0 0.3rem;
+    border-radius: 999px;
+    background: var(--ow-accent, #59f07a);
+    color: #04120a;
+    font-family: var(--ow-figures, ui-monospace, monospace);
+    font-size: var(--gws-type-xs);
+    line-height: 1.15rem;
+    text-align: center;
+    text-shadow: none;
+}
+
+/* Look: an Apple segmented control. */
+.tg-look {
+    display: inline-flex;
+    flex: none;
+    border-radius: 9px;
+    background: rgba(0, 0, 0, 0.35);
+    box-shadow: var(--ow-shadow-edge);
+}
+
+.tg-look-option {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.35rem;
+    min-height: var(--tg-ctl);
+    min-width: var(--tg-ctl);
+    padding: 0 0.7rem;
+    border: 0;
+    border-radius: 9px;
+    background: transparent;
+    color: var(--ow-muted, #5f9a68);
+    font-family: var(--ow-sans, system-ui, sans-serif);
+    font-size: var(--gws-type-xs);
+    letter-spacing: 0.06em;
+    white-space: nowrap;
+    cursor: pointer;
+}
+
+.tg-look-option:hover { color: var(--ow-ink, #d4ffd9); }
+.tg-look-option.is-active {
+    background: rgb(var(--ow-accent-rgb, 89 240 122) / 0.22);
+    color: var(--ow-ink, #d4ffd9);
+    box-shadow: var(--ow-shadow-edge-strong);
+}
+.tg-look-option:focus-visible { outline: 2px solid var(--ow-accent, #59f07a); outline-offset: 1px; }
+.tg-look-glyph { font-family: system-ui, sans-serif; font-size: var(--gws-type-sm); }
+
+@container gws-main (max-width: 1279px) {
+    .tg-toolbar .tg-hud-status { display: none; }
+}
+
+@container gws-main (max-width: 900px) {
+    .tg-shell { --tg-bar-h: calc(2 * var(--tg-ctl) + 1.4rem); }
+    .tg-toolbar {
+        grid-template-columns: minmax(0, 1fr) auto;
+        grid-template-areas: "left right" "center center";
+        align-content: center;
+    }
+    .tg-toolbar .tg-topbar-center { justify-content: stretch; }
+    .tg-toolbar .tg-search { max-width: none; }
+}
+
+/* Sidebar (Layers) docked left, inspector docked right, both under the toolbar. */
+.tg-layers-panel {
+    top: calc(var(--tg-bar-h) + var(--tg-gap));
+    bottom: var(--tg-gap);
+    left: var(--tg-gap);
+    right: auto;
+    width: var(--tg-sidebar-w);
+    max-height: none;
+    overscroll-behavior: contain;
+}
+
+.tg-side-panel {
+    top: calc(var(--tg-bar-h) + var(--tg-gap));
+    bottom: var(--tg-gap);
+    left: auto;
+    right: var(--tg-gap);
+    width: var(--tg-inspector-w);
+}
+
+/* Sources, shortcuts, street view and the other floating panels: under the toolbar, clear of the inspector. */
+.tg-floating-panel:not(.tg-layers-panel) {
+    top: calc(var(--tg-bar-h) + var(--tg-gap));
+    right: calc(var(--tg-inset-r) + var(--tg-gap));
+    max-width: calc(100% - var(--tg-inset-r) - 2 * var(--tg-gap));
+}
+
+.tg-drive { top: calc(var(--tg-bar-h) + var(--tg-gap)); max-height: calc(100% - var(--tg-bar-h) - 2 * var(--tg-gap)); }
+
+.tg-sidebar-header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.5rem;
+    padding: 0.55rem 0.75rem 0.3rem;
+    border-bottom: none;
+    font-size: var(--gws-type-md);
+    letter-spacing: 0.14em;
+}
+
+.tg-sidebar-title { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.tg-sidebar-count {
+    margin-left: 0.4rem;
+    font-family: var(--ow-figures, ui-monospace, monospace);
+    font-size: var(--gws-type-xs);
+    font-weight: 400;
+    letter-spacing: 0.06em;
+    color: var(--ow-muted, #5f9a68);
+}
+
+.tg-layers-panel .tg-status-line {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.tg-layers-panel .tg-layer-group-title {
+    font-family: var(--ow-display, "Chakra Petch", system-ui, sans-serif);
+    font-size: var(--gws-type-xs);
+    letter-spacing: 0.12em;
+    color: var(--ow-muted, #5f9a68);
+    opacity: 1;
+}
+
+.tg-layers-panel .tg-layer-buttons { gap: 2px 0.35rem; }
+
+/* Layer rows: glyph, name, live count, and the on/off state as an Apple switch. The ON/OFF word stays
+   in the button for screen readers. */
+.tg-layer-row {
+    position: relative;
+    flex: 1 1 100%;
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    min-width: 0;
+    min-height: 36px;
+    padding: 0.2rem 0.4rem;
+    border: 1px solid transparent;
+    border-radius: var(--gws-radius-sm, 8px);
+    background: transparent;
+    color: var(--ow-ink, #d4ffd9);
+    font-family: var(--ow-sans, system-ui, sans-serif);
+    font-size: var(--gws-type-sm);
+    letter-spacing: 0.03em;
+    text-align: left;
+    text-shadow: none;
+}
+
+.tg-layer-row:hover { background: rgb(var(--ow-accent-rgb, 89 240 122) / 0.08); }
+.tg-layer-row.tg-toggle-on { background: transparent; box-shadow: none; }
+.tg-layer-row.tg-toggle-on:hover { background: rgb(var(--ow-accent-rgb, 89 240 122) / 0.08); }
+.tg-layer-row:focus-visible { outline: 2px solid var(--ow-accent, #59f07a); outline-offset: -2px; }
+
+.tg-layer-row::before {
+    content: "\2022";
+    flex: none;
+    width: 1.4rem;
+    text-align: center;
+    font-family: system-ui, sans-serif;
+    font-size: var(--gws-type-base);
+    line-height: 1;
+    color: var(--ow-muted, #5f9a68);
+}
+
+.tg-layer-row.tg-toggle-on::before { color: var(--ow-accent, #59f07a); }
+
+/* Contours and slope sit under 3D, indented. */
+.tg-layers-panel .tg-layer-buttons > .tg-hud-toggles:has(.tg-layer-row) {
+    flex: 1 1 100%;
+    flex-direction: column;
+    gap: 2px;
+    margin-top: 0;
+    padding-left: 1.4rem;
+}
+
+.tg-row-name {
+    flex: 1 1 auto;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.tg-row-hint,
+.tg-row-count {
+    flex: none;
+    font-family: var(--ow-figures, ui-monospace, monospace);
+    font-size: var(--gws-type-xs);
+    font-variant-numeric: tabular-nums;
+}
+
+.tg-row-hint { color: var(--ow-warn, #e8ff4d); }
+.tg-row-hint:empty { display: none; }
+.tg-row-count { color: var(--ow-muted, #5f9a68); }
+
+.tg-row-state {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+}
+
+.tg-switch {
+    position: relative;
+    flex: none;
+    width: 36px;
+    height: 22px;
+    border-radius: 11px;
+    background: var(--ow-switch-off, rgb(120 140 125 / 0.32));
+    transition: background-color 0.2s ease;
+}
+
+.tg-switch::after {
+    content: "";
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: var(--ow-knob, #d4ffd9);
+    box-shadow: var(--ow-shadow-knob);
+    transition: transform 0.2s ease;
+}
+
+.tg-toggle-on > .tg-switch { background: var(--ow-accent, #59f07a); }
+.tg-toggle-on > .tg-switch::after { transform: translateX(14px); }
+
+@media (pointer: coarse) {
+    .tg-layer-row { min-height: 44px; font-size: var(--gws-type-base); }
+    .tg-switch { width: 51px; height: 31px; border-radius: 16px; }
+    .tg-switch::after { width: 27px; height: 27px; }
+    .tg-toggle-on > .tg-switch::after { transform: translateX(20px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .tg-switch,
+    .tg-switch::after { transition: none; }
+}
+
+@media (prefers-contrast: more) {
+    .tg-switch { box-shadow: var(--ow-shadow-edge-contrast); }
+    .tg-row-count,
+    .tg-sidebar-count,
+    .tg-layers-panel .tg-layer-group-title { color: var(--ow-ink, #d4ffd9); }
+}
+
+/* SF Symbols-style glyphs per layer (the kit's set; text presentation, never emoji). */
+.tg-layer-row[data-tg-toggle="radar"]::before { content: "\25CE"; }
+.tg-layer-row[data-tg-toggle="alerts"]::before { content: "\26C8\FE0E"; }
+.tg-layer-row[data-tg-toggle="threed"]::before { content: "\26F0\FE0E"; }
+.tg-layer-row[data-tg-toggle="contours"]::before { content: "\224B"; }
+.tg-layer-row[data-tg-toggle="slope"]::before { content: "\25E2"; }
+.tg-layer-row[data-tg-toggle="roadtemps"]::before { content: "\2744\FE0E"; }
+.tg-layer-row[data-tg-toggle="incidents"]::before { content: "\26A0\FE0E"; }
+.tg-layer-row[data-tg-toggle="signs"]::before { content: "\25A4"; }
+.tg-layer-row[data-tg-toggle="city-traffic"]::before { content: "\21C4"; }
+.tg-layer-row[data-tg-toggle="live-flow"]::before { content: "\226B"; }
+.tg-layer-row[data-tg-toggle="world-news"]::before { content: "\2B21"; }
+.tg-layer-row[data-tg-toggle="convergence"]::before { content: "\25C9"; }
+.tg-layer-row[data-tg-toggle="conflict"]::before { content: "\2715"; }
+.tg-layer-row[data-tg-toggle="travel"]::before { content: "\2691\FE0E"; }
+.tg-layer-row[data-tg-toggle="humanitarian"]::before { content: "\271A"; }
+.tg-layer-row[data-tg-toggle="hazards"]::before { content: "\25EC"; }
+.tg-layer-row[data-tg-toggle="wmo"]::before { content: "\2602\FE0E"; }
+.tg-layer-row[data-tg-toggle="outages"]::before { content: "\26A1\FE0E"; }
+.tg-layer-row[data-tg-toggle="internet"]::before { content: "\2301"; }
+.tg-layer-row[data-tg-toggle="fires"]::before { content: "\2668\FE0E"; }
+.tg-layer-row[data-tg-toggle="night-lights"]::before { content: "\263E"; }
+.tg-layer-row[data-tg-toggle="aircraft"]::before { content: "\2708\FE0E"; }
+.tg-layer-row[data-tg-toggle="airquality"]::before { content: "\2601\FE0E"; }
+.tg-layer-row[data-tg-toggle="airports"]::before { content: "\2295"; }
+.tg-layer-row[data-tg-toggle="aurora"]::before { content: "\273A"; }
+.tg-layer-row[data-tg-toggle="satellites"]::before { content: "\27E1"; }
+.tg-layer-row[data-tg-toggle="ships"]::before { content: "\2693\FE0E"; }
+.tg-layer-row[data-tg-toggle="chokepoints"]::before { content: "\22C8"; }
+.tg-layer-row[data-tg-toggle="sun-shadow"]::before { content: "\2600\FE0E"; }
+.tg-layer-row[data-tg-toggle="satellite-scenes"]::before { content: "\25A6"; }
+.tg-layer-row[data-tg-toggle="measure"]::before { content: "\27F7"; }
+.tg-layer-row[data-tg-toggle="layer-health"]::before { content: "\2299"; }
+.tg-layer-row[data-tg-toggle="healthy"]::before { content: "\2713"; }
+.tg-layer-row[data-tg-toggle="live-video"]::before { content: "\25B6\FE0E"; }
+.tg-layer-row[data-tg-toggle="select"]::before { content: "\2B1A"; }
+
+/* Floating bits keep to the free map area. Map controls sit bottom-right of it, as in Apple Maps. */
+.tg-stage,
+.tg-readout {
+    left: calc(var(--tg-inset-l) + (100% - var(--tg-inset-l) - var(--tg-inset-r)) / 2);
+}
+
+.tg-readout { max-width: calc(100% - var(--tg-inset-l) - var(--tg-inset-r) - 7rem); }
+
+.tg-map-controls {
+    right: calc(var(--tg-inset-r) + var(--tg-gap));
+    bottom: var(--tg-gap);
+}
+
+/* Below 720 px: the toolbar is two compact rows, the sidebar and inspector are bottom sheets (one at a
+   time; the Layers sheet wins while it's open), the map controls are a two-column grid under the toolbar,
+   and the stage chip and readout sit just above whichever sheet is open. */
+@container gws-main (max-width: 720px) {
+    .tg-shell { --tg-gap: 0.5rem; --tg-bar-h: calc(2 * var(--tg-ctl) + 1.3rem); }
+
+    .tg-shell:has(.tg-layers-panel:not(.is-hidden)),
+    .tg-shell:has(.tg-side-panel:not(.is-collapsed)) {
+        --tg-inset-l: 0px;
+        --tg-inset-r: 0px;
+        --tg-sheet-up: var(--tg-sheet-h);
+    }
+
+    .tg-toolbar {
+        grid-template-columns: minmax(0, 1fr) auto;
+        grid-template-areas: "left right" "center center";
+        gap: 0.4rem;
+        padding: 0 var(--tg-gap);
+    }
+    .tg-toolbar .tg-topbar-left,
+    .tg-toolbar .tg-topbar-right { gap: 0.3rem; }
+    .tg-toolbar-title,
+    .tg-pill-label,
+    .tg-look-label { display: none; }
+    .tg-look-option { padding: 0; }
+    .tg-sidebar-btn { position: relative; padding: 0; }
+    .tg-sidebar-btn .tg-pill-count { position: absolute; top: -5px; right: -5px; }
+
+    .tg-layers-panel,
+    .tg-side-panel {
+        top: auto;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        width: 100%;
+        height: var(--tg-sheet-h);
+        max-height: none;
+        border-left: none;
+        border-right: none;
+        border-bottom: none;
+    }
+
+    .tg-shell:has(.tg-layers-panel:not(.is-hidden)) .tg-side-panel { display: none; }
+
+    .tg-floating-panel:not(.tg-layers-panel) {
+        top: calc(var(--tg-bar-h) + var(--tg-gap));
+        right: var(--tg-gap);
+        max-width: calc(100% - 2 * var(--tg-gap));
+        max-height: calc(100% - var(--tg-bar-h) - var(--tg-sheet-up) - 2 * var(--tg-gap));
+    }
+
+    .tg-map-controls {
+        top: calc(var(--tg-bar-h) + var(--tg-gap));
+        bottom: auto;
+        right: var(--tg-gap);
+        display: grid;
+        grid-template-columns: repeat(2, auto);
+        gap: 0.3rem;
+    }
+
+    .tg-stage {
+        left: 0.75rem;
+        transform: none;
+        bottom: calc(var(--tg-sheet-up) + 0.6rem);
+    }
+
+    .tg-readout {
+        left: 0.75rem;
+        transform: none;
+        bottom: calc(var(--tg-sheet-up) + 2.3rem);
+        max-width: calc(100% - 1.5rem);
+    }
+
+    .tg-time-machine {
+        left: 50%;
+        width: calc(100% - 1.5rem);
+        bottom: calc(var(--tg-sheet-up) + 3.8rem);
+    }
+
+    .tg-empty-hint {
+        top: calc(var(--tg-bar-h) + 0.3rem);
+        left: 0.75rem;
+        right: calc(2 * var(--tg-ctl) + 1.6rem);
+    }
+}
+
+/* Final placement of the stage chip and HUD readout (21-11-26 visual check). They sit at the top of the
+   free map area, under the toolbar: centred between the Layers sidebar and the inspector on wide
+   screens, top-left (clear of the two-column map controls) below 720 px. This block comes last and
+   resets every edge, because earlier rules placed them by top, bottom, left and right in turn and the
+   chip stretched between them. */
+.tg-stage,
+.tg-readout {
+    right: auto;
+    bottom: auto;
+    left: calc(var(--tg-inset-l) + (100% - var(--tg-inset-l) - var(--tg-inset-r)) / 2);
+    transform: translateX(-50%);
+    text-align: center;
+}
+
+.tg-readout {
+    top: calc(var(--tg-bar-h) + 0.45rem);
+    max-width: calc(100% - var(--tg-inset-l) - var(--tg-inset-r) - 2rem);
+}
+
+.tg-stage {
+    top: calc(var(--tg-bar-h) + 1.85rem);
+}
+
+@container gws-main (max-width: 720px) {
+    .tg-stage,
+    .tg-readout {
+        left: 0.75rem;
+        bottom: auto;
+        transform: none;
+        text-align: left;
+    }
+
+    .tg-readout {
+        right: calc(2 * var(--tg-ctl) + 1.6rem);
+        max-width: none;
+    }
+}
+
+/* Contours and slope stack under 3D in the sidebar, so neither switch is cut off. */
+.tg-hud-toggles[aria-label="Terrain shading"] {
+    display: flex;
+    width: 100%;
+    flex: 1 1 100%;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 2px;
+    padding-left: 1.4rem;
+}
+
+.tg-hud-toggles[aria-label="Terrain shading"] > .tg-layer-row {
+    flex: 0 0 auto;
+    width: 100%;
 }

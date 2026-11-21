@@ -83,7 +83,9 @@
 <script src="@Assets["js/tactical-globe.js"]"></script>
 <script src="@Assets["js/street-view.js"]"></script>
 
-<div class="tg-shell">
+@* Night Ops x Apple, combined (approved 20-11-26): data-ow-look picks Standard, Night Ops or Satellite
+   (CSS in OverwatchGrid.razor.css and tactical-globe.css); the choice is kept in this browser. *@
+<div class="tg-shell" data-ow-look="@_look">
     <div class="tg-viewport" id="tg-viewport"></div>
     <div class="tg-scanlines"></div>
     <div class="tg-vignette"></div>
@@ -92,14 +94,28 @@
     <div class="tg-stage" aria-live="off"><span class="tg-stage-label">STAGE</span> <span id="tg-stage-name">ORBIT</span></div>
     <div class="tg-readout" id="tg-readout" aria-label="Heading, tilt, altitude, ground height, position and sun"></div>
 
-    @* Top bar: panel toggle + search on the left, status and the Layers/info/help buttons on the
-       right (Google Maps-style). The search ids are wired up by tactical-globe.js. *@
-    <div class="tg-topbar">
+    @* Toolbar (Apple structure, 20-11-26): the Layers sidebar button, title and Look switch on the left,
+       search in the middle, status and the inspector/info/help buttons on the right. Below 720 px the
+       search drops to a second row and the labels give way to glyphs. The search ids are wired up by
+       tactical-globe.js. *@
+    <div class="tg-topbar tg-toolbar">
         <div class="tg-topbar-left">
-            <button type="button" class="tg-icon-btn" aria-label="@(_panelTab is null ? "Show the side panel" : "Hide the side panel")"
-                    aria-expanded="@(_panelTab is null ? "false" : "true")" title="Side panel" @onclick="ToggleSidePanelAsync">
-                <i class="bi bi-layout-sidebar-inset" aria-hidden="true"></i>
+            <button type="button" class="tg-pill tg-sidebar-btn @(_layersOpen ? "is-active" : "")" aria-expanded="@(_layersOpen ? "true" : "false")"
+                    aria-controls="tg-layers" aria-label="@($"Layers, {ActiveLayerCount} on")" title="Layers" @onclick="ToggleLayersPanel">
+                <i class="bi bi-layout-sidebar" aria-hidden="true"></i><span class="tg-pill-label">LAYERS</span>@if (ActiveLayerCount > 0) { <span class="tg-pill-count">@ActiveLayerCount</span> }
             </button>
+            <span class="tg-toolbar-title">OVERWATCH</span>
+            <div class="tg-look" role="radiogroup" aria-label="Look">
+                @foreach (var (lookKey, lookLabel, lookGlyph) in Looks)
+                {
+                    <button type="button" role="radio" class="tg-look-option @(_look == lookKey ? "is-active" : "")" aria-checked="@(_look == lookKey ? "true" : "false")"
+                            aria-label="@lookLabel" title="@lookLabel look" @onclick="() => SetLookAsync(lookKey)">
+                        <span class="tg-look-glyph" aria-hidden="true">@lookGlyph</span><span class="tg-look-label">@lookLabel.ToUpperInvariant()</span>
+                    </button>
+                }
+            </div>
+        </div>
+        <div class="tg-topbar-center">
             <div class="tg-search">
                 <input type="text" id="tg-search-input" placeholder="SEARCH A PLACE OR ADDRESS..." autocomplete="off" aria-label="Search a place or address" />
                 <button type="button" id="tg-search-button">GO</button>
@@ -124,9 +140,9 @@
                     <span class="tg-hud-thinned" title="Wide views show an even spread of cameras. Zoom in to see every camera.">(SHOWING @_visibleCameras.Count - ZOOM IN FOR ALL)</span>
                 }
             </div>
-            <button type="button" class="tg-pill @(_layersOpen ? "is-active" : "")" aria-expanded="@(_layersOpen ? "true" : "false")"
-                    aria-controls="tg-layers" @onclick="ToggleLayersPanel">
-                <i class="bi bi-layers" aria-hidden="true"></i> LAYERS@(ActiveLayerCount > 0 ? $" ({ActiveLayerCount})" : "")
+            <button type="button" class="tg-icon-btn tg-inspector-btn @(_panelTab is null ? "" : "is-active")" aria-label="@(_panelTab is null ? "Show the inspector" : "Hide the inspector")"
+                    aria-expanded="@(_panelTab is null ? "false" : "true")" title="Inspector" @onclick="ToggleSidePanelAsync">
+                <i class="bi bi-layout-sidebar-inset-reverse" aria-hidden="true"></i>
             </button>
             <button type="button" class="tg-icon-btn @(_infoOpen ? "is-active" : "")" aria-label="Sources and credits" title="Sources and credits"
                     aria-expanded="@(_infoOpen ? "true" : "false")" @onclick="ToggleInfoPanel"><i class="bi bi-info-lg" aria-hidden="true"></i></button>
@@ -138,7 +154,11 @@
     @* Layers: always rendered (hidden when closed) so the keyboard shortcuts, which click these
        buttons by data-tg-toggle, work with the panel closed. *@
     <div class="tg-floating-panel tg-layers-panel @(_layersOpen ? "" : "is-hidden")" id="tg-layers" aria-label="Map layers">
-        <div class="tg-coverage-panel-header"><span>LAYERS</span><button type="button" class="tg-panel-close" aria-label="Close layers" @onclick="ToggleLayersPanel">&times;</button></div>
+        <div class="tg-coverage-panel-header tg-sidebar-header">
+            <span class="tg-sidebar-title">LAYERS <span class="tg-sidebar-count">@LayerTotal · @ActiveLayerCount ON</span></span>
+            <button type="button" class="tg-panel-close" aria-label="Close layers" @onclick="ToggleLayersPanel">&times;</button>
+        </div>
+        <div class="tg-status-line" aria-live="off">MAP ▸ @ActiveLayerCount OF @LayerTotal ON · CAMERAS IN VIEW @_camerasInViewTotal.ToString("N0")</div>
         @* Focus one layer (19-11-26, Holo Wireframe): every other layer dims to a quarter, on the web
            globe and the Mac map alike (OverwatchFocus). *@
         <div class="tg-layer-group tg-focus">
@@ -166,15 +186,15 @@
         <div class="tg-layer-group">
             <div class="tg-layer-group-title">WEATHER</div>
             <div class="tg-layer-buttons">
-                <button type="button" data-tg-toggle="radar" class="tg-toggle @(_radarOn ? "tg-toggle-on" : "")" title="Radar: past hour and future radar (HRRR model), with play/scrub (R)" @onclick="ToggleRadarAsync">
-                    RADAR [@(_radarOn ? "ON" : "OFF")]
+                <button type="button" data-tg-toggle="radar" class="tg-toggle tg-layer-row @(_radarOn ? "tg-toggle-on" : "")" title="Radar: past hour and future radar (HRRR model), with play/scrub (R)" @onclick="ToggleRadarAsync">
+                    <span class="tg-row-name">RADAR</span><span class="tg-row-state">@(_radarOn ? "ON" : "OFF")</span><span class="tg-switch" aria-hidden="true"></span>
                 </button>
-                <button type="button" data-tg-toggle="alerts" class="tg-toggle @(_alertsOn ? "tg-toggle-on" : "")" title="Toggle NWS severe weather alerts (A)" @onclick="ToggleAlertsAsync">
-                    ALERTS [@(_alertsOn ? "ON" : "OFF")]
+                <button type="button" data-tg-toggle="alerts" class="tg-toggle tg-layer-row @(_alertsOn ? "tg-toggle-on" : "")" title="Toggle NWS severe weather alerts (A)" @onclick="ToggleAlertsAsync">
+                    <span class="tg-row-name">ALERTS</span><span class="tg-row-state">@(_alertsOn ? "ON" : "OFF")</span><span class="tg-switch" aria-hidden="true"></span>
                 </button>
-                <button type="button" data-tg-toggle="threed" class="tg-toggle @(_threeDOn ? "tg-toggle-on" : "")"
+                <button type="button" data-tg-toggle="threed" class="tg-toggle tg-layer-row @(_threeDOn ? "tg-toggle-on" : "")"
                         title="@(IonToken is null ? "3D terrain (open elevation tiles, no key)" : "3D buildings and terrain (Cesium ion)")" @onclick="ToggleThreeDAsync">
-                    @(IonToken is null ? "3D TERRAIN" : "3D CITIES") [@(_threeDOn ? "ON" : "OFF")]
+                    <span class="tg-row-name">@(IonToken is null ? "3D TERRAIN" : "3D CITIES")</span><span class="tg-row-state">@(_threeDOn ? "ON" : "OFF")</span><span class="tg-switch" aria-hidden="true"></span>
                 </button>
                 @if (_threeDError is not null)
                 {
@@ -184,13 +204,13 @@
                 {
                     @* Night Ops terrain shading (20-11-26): contour lines or slope, on the 3D terrain only. *@
                     <div class="tg-hud-toggles" role="group" aria-label="Terrain shading">
-                        <button type="button" data-tg-toggle="contours" class="tg-toggle @(_terrainShading == "contours" ? "tg-toggle-on" : "")"
+                        <button type="button" data-tg-toggle="contours" class="tg-toggle tg-layer-row @(_terrainShading == "contours" ? "tg-toggle-on" : "")"
                                 title="Contour lines every 20 m, on the 3D terrain" @onclick='() => SetTerrainShadingAsync(_terrainShading == "contours" ? "off" : "contours")'>
-                            CONTOURS [@(_terrainShading == "contours" ? "ON" : "OFF")]
+                            <span class="tg-row-name">CONTOURS</span><span class="tg-row-state">@(_terrainShading == "contours" ? "ON" : "OFF")</span><span class="tg-switch" aria-hidden="true"></span>
                         </button>
-                        <button type="button" data-tg-toggle="slope" class="tg-toggle @(_terrainShading == "slope" ? "tg-toggle-on" : "")"
+                        <button type="button" data-tg-toggle="slope" class="tg-toggle tg-layer-row @(_terrainShading == "slope" ? "tg-toggle-on" : "")"
                                 title="Steep ground tinted yellow to red" @onclick='() => SetTerrainShadingAsync(_terrainShading == "slope" ? "off" : "slope")'>
-                            SLOPE [@(_terrainShading == "slope" ? "ON" : "OFF")]
+                            <span class="tg-row-name">SLOPE</span><span class="tg-row-state">@(_terrainShading == "slope" ? "ON" : "OFF")</span><span class="tg-switch" aria-hidden="true"></span>
                         </button>
                     </div>
                     @if (_terrainShadingError is not null)
@@ -198,33 +218,33 @@
                         <div class="tg-favorites-empty" role="status">@_terrainShadingError</div>
                     }
                 }
-                <button type="button" data-tg-toggle="roadtemps" class="tg-toggle @(_roadWeatherOn ? "tg-toggle-on" : "")"
+                <button type="button" data-tg-toggle="roadtemps" class="tg-toggle tg-layer-row @(_roadWeatherOn ? "tg-toggle-on" : "")"
                         title="Road surface temperature and ice risk from roadside weather stations (Montana, South Dakota)" @onclick="ToggleRoadWeatherAsync">
-                    ROAD TEMPS [@(_roadWeatherOn ? "ON" : "OFF")]
+                    <span class="tg-row-name">ROAD TEMPS</span><span class="tg-row-state">@(_roadWeatherOn ? "ON" : "OFF")</span><span class="tg-switch" aria-hidden="true"></span>
                 </button>
             </div>
         </div>
         <div class="tg-layer-group">
             <div class="tg-layer-group-title">TRAFFIC</div>
             <div class="tg-layer-buttons">
-                <button type="button" data-tg-toggle="incidents" class="tg-toggle @(_incidentsOn ? "tg-toggle-on" : "")" title="Toggle traffic accidents/roadwork/closures (I)" @onclick="ToggleIncidentsAsync">
-                    INCIDENTS [@(_incidentsOn ? "ON" : "OFF")]
+                <button type="button" data-tg-toggle="incidents" class="tg-toggle tg-layer-row @(_incidentsOn ? "tg-toggle-on" : "")" title="Toggle traffic accidents/roadwork/closures (I)" @onclick="ToggleIncidentsAsync">
+                    <span class="tg-row-name">INCIDENTS</span>@if (_incidentsOn && _lastIncidents.Count > 0) { <span class="tg-row-count">@_lastIncidents.Count.ToString("N0")</span> }<span class="tg-row-state">@(_incidentsOn ? "ON" : "OFF")</span><span class="tg-switch" aria-hidden="true"></span>
                 </button>
-                <button type="button" data-tg-toggle="signs" class="tg-toggle @(_signsOn ? "tg-toggle-on" : "")"
+                <button type="button" data-tg-toggle="signs" class="tg-toggle tg-layer-row @(_signsOn ? "tg-toggle-on" : "")"
                         title="What highway message signs say right now (Caltrans, Montana)" @onclick="ToggleSignsAsync">
-                    SIGNS [@(_signsOn ? "ON" : "OFF")]
+                    <span class="tg-row-name">SIGNS</span><span class="tg-row-state">@(_signsOn ? "ON" : "OFF")</span><span class="tg-switch" aria-hidden="true"></span>
                 </button>
-                <button type="button" data-tg-toggle="city-traffic" class="tg-toggle @(_cityTrafficOn ? "tg-toggle-on" : "")"
+                <button type="button" data-tg-toggle="city-traffic" class="tg-toggle tg-layer-row @(_cityTrafficOn ? "tg-toggle-on" : "")"
                         title="When zoomed in to a city: how many vehicles use each road (every US state) and live speeds where the city publishes them"
                         @onclick="ToggleCityTrafficAsync">
-                    CITY TRAFFIC [@(_cityTrafficOn ? "ON" : "OFF")]@(_cityTrafficOn && _cityTrafficThinned ? " · ZOOM IN" : "")
+                    <span class="tg-row-name">CITY TRAFFIC</span><span class="tg-row-hint">@(_cityTrafficOn && _cityTrafficThinned ? "ZOOM IN" : "")</span><span class="tg-row-state">@(_cityTrafficOn ? "ON" : "OFF")</span><span class="tg-switch" aria-hidden="true"></span>
                 </button>
                 @if (TomTom.IsConfigured)
                 {
-                    <button type="button" data-tg-toggle="live-flow" class="tg-toggle @(_liveFlowOn ? "tg-toggle-on" : "")"
+                    <button type="button" data-tg-toggle="live-flow" class="tg-toggle tg-layer-row @(_liveFlowOn ? "tg-toggle-on" : "")"
                             title="Live congestion on every road TomTom covers, worldwide: green flowing freely, through orange, to red slow"
                             @onclick="ToggleLiveFlowAsync">
-                        LIVE FLOW [@(_liveFlowOn ? "ON" : "OFF")]
+                        <span class="tg-row-name">LIVE FLOW</span><span class="tg-row-state">@(_liveFlowOn ? "ON" : "OFF")</span><span class="tg-switch" aria-hidden="true"></span>
                     </button>
                 }
             </div>
@@ -252,30 +272,30 @@
         <div class="tg-layer-group">
             <div class="tg-layer-group-title">INTELLIGENCE</div>
             <div class="tg-layer-buttons">
-                <button type="button" data-tg-toggle="world-news" class="tg-toggle @(_worldNewsOn ? "tg-toggle-on" : "")"
+                <button type="button" data-tg-toggle="world-news" class="tg-toggle tg-layer-row @(_worldNewsOn ? "tg-toggle-on" : "")"
                         title="Reported World News situations, placed at the country or city their headlines name; not confirmed incidents"
                         @onclick="ToggleWorldNewsAsync">
-                    WORLD NEWS [@(_worldNewsOn ? "ON" : "OFF")]
+                    <span class="tg-row-name">WORLD NEWS</span>@if (_worldNewsOn && _worldNewsCount > 0) { <span class="tg-row-count">@_worldNewsCount.ToString("N0")</span> }<span class="tg-row-state">@(_worldNewsOn ? "ON" : "OFF")</span><span class="tg-switch" aria-hidden="true"></span>
                 </button>
-                <button type="button" data-tg-toggle="convergence" class="tg-toggle @(_convergenceOn ? "tg-toggle-on" : "")"
+                <button type="button" data-tg-toggle="convergence" class="tg-toggle tg-layer-row @(_convergenceOn ? "tg-toggle-on" : "")"
                         title="Places where three or more independent kinds of signal meet in the last day: news placed at a city, earthquakes, fires, floods, storms, volcanoes, severe weather, power and internet outages"
                         @onclick="ToggleConvergenceAsync">
-                    CONVERGENCE [@(_convergenceOn ? "ON" : "OFF")]
+                    <span class="tg-row-name">CONVERGENCE</span><span class="tg-row-state">@(_convergenceOn ? "ON" : "OFF")</span><span class="tg-switch" aria-hidden="true"></span>
                 </button>
-                <button type="button" data-tg-toggle="conflict" class="tg-toggle @(_conflictOn ? "tg-toggle-on" : "")"
+                <button type="button" data-tg-toggle="conflict" class="tg-toggle tg-layer-row @(_conflictOn ? "tg-toggle-on" : "")"
                         title="Conflict: UCDP's human-coded events with deaths (monthly, confirmed) and GDELT's events machine-read from the news in the last day (reported, not confirmed)"
                         @onclick="ToggleConflictAsync">
-                    CONFLICT [@(_conflictOn ? "ON" : "OFF")]
+                    <span class="tg-row-name">CONFLICT</span><span class="tg-row-state">@(_conflictOn ? "ON" : "OFF")</span><span class="tg-switch" aria-hidden="true"></span>
                 </button>
-                <button type="button" data-tg-toggle="travel" class="tg-toggle @(_travelOn ? "tg-toggle-on" : "")"
+                <button type="button" data-tg-toggle="travel" class="tg-toggle tg-layer-row @(_travelOn ? "tg-toggle-on" : "")"
                         title="The US State Department's travel advice: countries at level 2 (increased caution), 3 (reconsider travel) and 4 (do not travel), shaded and pinned"
                         @onclick="ToggleTravelAsync">
-                    TRAVEL ADVICE [@(_travelOn ? "ON" : "OFF")]
+                    <span class="tg-row-name">TRAVEL ADVICE</span><span class="tg-row-state">@(_travelOn ? "ON" : "OFF")</span><span class="tg-switch" aria-hidden="true"></span>
                 </button>
-                <button type="button" data-tg-toggle="humanitarian" class="tg-toggle @(_humanitarianOn ? "tg-toggle-on" : "")"
+                <button type="button" data-tg-toggle="humanitarian" class="tg-toggle tg-layer-row @(_humanitarianOn ? "tg-toggle-on" : "")"
                         title="Humanitarian emergencies: the IFRC's emergencies of the last 60 days (IFRC GO), at each country they name"
                         @onclick="ToggleHumanitarianAsync">
-                    HUMANITARIAN [@(_humanitarianOn ? "ON" : "OFF")]
+                    <span class="tg-row-name">HUMANITARIAN</span><span class="tg-row-state">@(_humanitarianOn ? "ON" : "OFF")</span><span class="tg-switch" aria-hidden="true"></span>
                 </button>
             </div>
             @if (_convergenceOn && !string.IsNullOrWhiteSpace(_convergenceSummary))
@@ -358,29 +378,29 @@
         <div class="tg-layer-group">
             <div class="tg-layer-group-title">HAZARDS</div>
             <div class="tg-layer-buttons">
-                <button type="button" data-tg-toggle="hazards" class="tg-toggle @(_hazardsOn ? "tg-toggle-on" : "")"
+                <button type="button" data-tg-toggle="hazards" class="tg-toggle tg-layer-row @(_hazardsOn ? "tg-toggle-on" : "")"
                         title="Earthquakes (USGS), wildfires (NIFC in the US, GDACS elsewhere), flooding river gauges (NOAA), tropical storms (NOAA's hurricane center, GDACS elsewhere), floods, volcanoes and droughts worldwide (GDACS), and landslides, dust and sea ice (NASA EONET)" @onclick="ToggleHazardsAsync">
-                    HAZARDS [@(_hazardsOn ? "ON" : "OFF")]
+                    <span class="tg-row-name">HAZARDS</span><span class="tg-row-state">@(_hazardsOn ? "ON" : "OFF")</span><span class="tg-switch" aria-hidden="true"></span>
                 </button>
-                <button type="button" data-tg-toggle="wmo" class="tg-toggle @(_wmoOn ? "tg-toggle-on" : "")"
+                <button type="button" data-tg-toggle="wmo" class="tg-toggle tg-layer-row @(_wmoOn ? "tg-toggle-on" : "")"
                         title="Severe-weather warnings from about 40 national weather services outside the US (WMO Severe Weather Information Centre), one pin per country" @onclick="ToggleWmoAsync">
-                    WORLD WARNINGS [@(_wmoOn ? "ON" : "OFF")]
+                    <span class="tg-row-name">WORLD WARNINGS</span><span class="tg-row-state">@(_wmoOn ? "ON" : "OFF")</span><span class="tg-switch" aria-hidden="true"></span>
                 </button>
-                <button type="button" data-tg-toggle="outages" class="tg-toggle @(_outagesOn ? "tg-toggle-on" : "")"
+                <button type="button" data-tg-toggle="outages" class="tg-toggle tg-layer-row @(_outagesOn ? "tg-toggle-on" : "")"
                         title="Power outages by county from utilities that report to the U.S. DOE's ODIN (60+ utilities in 26 states)" @onclick="ToggleOutagesAsync">
-                    POWER OUTAGES [@(_outagesOn ? "ON" : "OFF")]
+                    <span class="tg-row-name">POWER OUTAGES</span><span class="tg-row-state">@(_outagesOn ? "ON" : "OFF")</span><span class="tg-switch" aria-hidden="true"></span>
                 </button>
-                <button type="button" data-tg-toggle="internet" class="tg-toggle @(_internetOn ? "tg-toggle-on" : "")"
+                <button type="button" data-tg-toggle="internet" class="tg-toggle tg-layer-row @(_internetOn ? "tg-toggle-on" : "")"
                         title="Internet outages by country in the last day, from Georgia Tech's IODA (routing, active probing and Google traffic)" @onclick="ToggleInternetAsync">
-                    INTERNET OUTAGES [@(_internetOn ? "ON" : "OFF")]
+                    <span class="tg-row-name">INTERNET OUTAGES</span><span class="tg-row-state">@(_internetOn ? "ON" : "OFF")</span><span class="tg-switch" aria-hidden="true"></span>
                 </button>
-                <button type="button" data-tg-toggle="fires" class="tg-toggle @(_firesOn ? "tg-toggle-on" : "")"
+                <button type="button" data-tg-toggle="fires" class="tg-toggle tg-layer-row @(_firesOn ? "tg-toggle-on" : "")"
                         title="Every satellite heat detection worldwide in the last day (NASA FIRMS: VIIRS on NOAA-20 and MODIS), grouped into half-degree cells" @onclick="ToggleFiresAsync">
-                    FIRE HOTSPOTS [@(_firesOn ? "ON" : "OFF")]@(_firesOn && _firesThinned ? " · ZOOM IN" : "")
+                    <span class="tg-row-name">FIRE HOTSPOTS</span><span class="tg-row-hint">@(_firesOn && _firesThinned ? "ZOOM IN" : "")</span><span class="tg-row-state">@(_firesOn ? "ON" : "OFF")</span><span class="tg-switch" aria-hidden="true"></span>
                 </button>
-                <button type="button" data-tg-toggle="night-lights" class="tg-toggle @(_nightLightsOn ? "tg-toggle-on" : "")"
+                <button type="button" data-tg-toggle="night-lights" class="tg-toggle tg-layer-row @(_nightLightsOn ? "tg-toggle-on" : "")"
                         title="City lights from space, one night at a time (NASA VIIRS on NOAA-20), against a normal night (Black Marble): dark where it's normally lit can be a blackout. Clouds and moonlight dim a night too." @onclick="ToggleNightLightsAsync">
-                    NIGHT LIGHTS [@(_nightLightsOn ? "ON" : "OFF")]
+                    <span class="tg-row-name">NIGHT LIGHTS</span><span class="tg-row-state">@(_nightLightsOn ? "ON" : "OFF")</span><span class="tg-switch" aria-hidden="true"></span>
                 </button>
             </div>
             @if (_nightLightsOn)
@@ -417,17 +437,17 @@
         <div class="tg-layer-group">
             <div class="tg-layer-group-title">AIR</div>
             <div class="tg-layer-buttons">
-                <button type="button" data-tg-toggle="aircraft" class="tg-toggle @(_aircraftOn ? "tg-toggle-on" : "")"
+                <button type="button" data-tg-toggle="aircraft" class="tg-toggle tg-layer-row @(_aircraftOn ? "tg-toggle-on" : "")"
                         title="Aircraft in flight (OpenSky Network), refreshed every minute" @onclick="ToggleAircraftAsync">
-                    AIRCRAFT [@(_aircraftOn ? "ON" : "OFF")]@(_aircraftOn && NeedsZoom(_aircraftSummary) ? " · ZOOM IN" : "")
+                    <span class="tg-row-name">AIRCRAFT</span><span class="tg-row-hint">@(_aircraftOn && NeedsZoom(_aircraftSummary) ? "ZOOM IN" : "")</span><span class="tg-row-state">@(_aircraftOn ? "ON" : "OFF")</span><span class="tg-switch" aria-hidden="true"></span>
                 </button>
-                <button type="button" data-tg-toggle="airquality" class="tg-toggle @(_airQualityOn ? "tg-toggle-on" : "")"
+                <button type="button" data-tg-toggle="airquality" class="tg-toggle tg-layer-row @(_airQualityOn ? "tg-toggle-on" : "")"
                         title="Air quality index across the view (Open-Meteo, hourly model)" @onclick="ToggleAirQualityAsync">
-                    AIR QUALITY [@(_airQualityOn ? "ON" : "OFF")]
+                    <span class="tg-row-name">AIR QUALITY</span><span class="tg-row-state">@(_airQualityOn ? "ON" : "OFF")</span><span class="tg-switch" aria-hidden="true"></span>
                 </button>
-                <button type="button" data-tg-toggle="airports" class="tg-toggle @(_airportsOn ? "tg-toggle-on" : "")"
+                <button type="button" data-tg-toggle="airports" class="tg-toggle tg-layer-row @(_airportsOn ? "tg-toggle-on" : "")"
                         title="US airport ground stops, delay programs, delays and closures (FAA airport status, about 80 major airports)" @onclick="ToggleAirportsAsync">
-                    AIRPORT DELAYS [@(_airportsOn ? "ON" : "OFF")]
+                    <span class="tg-row-name">AIRPORT DELAYS</span><span class="tg-row-state">@(_airportsOn ? "ON" : "OFF")</span><span class="tg-switch" aria-hidden="true"></span>
                 </button>
             </div>
             @if ((_aircraftOn || _airQualityOn) && !string.IsNullOrWhiteSpace(_airSummary))
@@ -442,13 +462,13 @@
         <div class="tg-layer-group">
             <div class="tg-layer-group-title">SPACE</div>
             <div class="tg-layer-buttons">
-                <button type="button" data-tg-toggle="aurora" class="tg-toggle @(_auroraOn ? "tg-toggle-on" : "")"
+                <button type="button" data-tg-toggle="aurora" class="tg-toggle tg-layer-row @(_auroraOn ? "tg-toggle-on" : "")"
                         title="Where the aurora may be seen in the next hour (NOAA SWPC's OVATION forecast), and the planetary Kp index" @onclick="ToggleAuroraAsync">
-                    AURORA [@(_auroraOn ? "ON" : "OFF")]
+                    <span class="tg-row-name">AURORA</span><span class="tg-row-state">@(_auroraOn ? "ON" : "OFF")</span><span class="tg-switch" aria-hidden="true"></span>
                 </button>
-                <button type="button" data-tg-toggle="satellites" class="tg-toggle @(_satellitesOn ? "tg-toggle-on" : "")"
+                <button type="button" data-tg-toggle="satellites" class="tg-toggle tg-layer-row @(_satellitesOn ? "tg-toggle-on" : "")"
                         title="Only satellites whose data the public can see: the ISS (with who's aboard) and the weather and Earth-imaging satellites, whose imagery you can open and lay over the globe; from CelesTrak's orbital elements, moving every 30 seconds" @onclick="ToggleSatellitesAsync">
-                    SATELLITES [@(_satellitesOn ? "ON" : "OFF")]
+                    <span class="tg-row-name">SATELLITES</span><span class="tg-row-state">@(_satellitesOn ? "ON" : "OFF")</span><span class="tg-switch" aria-hidden="true"></span>
                 </button>
             </div>
             @if (_auroraOn && !string.IsNullOrWhiteSpace(_auroraSummary))
@@ -463,13 +483,13 @@
         <div class="tg-layer-group">
             <div class="tg-layer-group-title">SEA</div>
             <div class="tg-layer-buttons">
-                <button type="button" data-tg-toggle="ships" class="tg-toggle @(_shipsOn ? "tg-toggle-on" : "")"
+                <button type="button" data-tg-toggle="ships" class="tg-toggle tg-layer-row @(_shipsOn ? "tg-toggle-on" : "")"
                         title="Ships broadcasting AIS: the Baltic from Finland's open AIS, worldwide with an aisstream.io key; refreshed every 30 seconds" @onclick="ToggleShipsAsync">
-                    SHIPS [@(_shipsOn ? "ON" : "OFF")]@(_shipsOn && NeedsZoom(_shipSummary) ? " · ZOOM IN" : "")
+                    <span class="tg-row-name">SHIPS</span><span class="tg-row-hint">@(_shipsOn && NeedsZoom(_shipSummary) ? "ZOOM IN" : "")</span><span class="tg-row-state">@(_shipsOn ? "ON" : "OFF")</span><span class="tg-switch" aria-hidden="true"></span>
                 </button>
-                <button type="button" data-tg-toggle="chokepoints" class="tg-toggle @(_chokepointsOn ? "tg-toggle-on" : "")"
+                <button type="button" data-tg-toggle="chokepoints" class="tg-toggle tg-layer-row @(_chokepointsOn ? "tg-toggle-on" : "")"
                         title="Daily ship transits through 28 chokepoints (Suez, Panama, Hormuz, Bab el-Mandeb, Bosporus, Malacca...), the last week against the month before; IMF PortWatch, a few days behind" @onclick="ToggleChokepointsAsync">
-                    CHOKEPOINTS [@(_chokepointsOn ? "ON" : "OFF")]
+                    <span class="tg-row-name">CHOKEPOINTS</span><span class="tg-row-state">@(_chokepointsOn ? "ON" : "OFF")</span><span class="tg-switch" aria-hidden="true"></span>
                 </button>
             </div>
             @if (_chokepointsOn && !string.IsNullOrWhiteSpace(_chokepointSummary))
@@ -484,21 +504,21 @@
         <div class="tg-layer-group">
             <div class="tg-layer-group-title">TOOLS</div>
             <div class="tg-layer-buttons">
-                <button type="button" data-tg-toggle="sun-shadow" class="tg-toggle @(_sunToolOn ? "tg-toggle-on" : "")"
+                <button type="button" data-tg-toggle="sun-shadow" class="tg-toggle tg-layer-row @(_sunToolOn ? "tg-toggle-on" : "")"
                         title="Where the sun is and which way shadows fall at the centre of the view, for a time you choose: check when a photo was taken" @onclick="ToggleSunTool">
-                    SUN &amp; SHADOW [@(_sunToolOn ? "ON" : "OFF")]
+                    <span class="tg-row-name">SUN &amp; SHADOW</span><span class="tg-row-state">@(_sunToolOn ? "ON" : "OFF")</span><span class="tg-switch" aria-hidden="true"></span>
                 </button>
-                <button type="button" data-tg-toggle="satellite-scenes" class="tg-toggle @(_scenesOn ? "tg-toggle-on" : "")"
+                <button type="button" data-tg-toggle="satellite-scenes" class="tg-toggle tg-layer-row @(_scenesOn ? "tg-toggle-on" : "")"
                         title="The recent clear-sky Sentinel-2 passes (10 m) over the centre of the view; lay one over the globe, or compare two with a slider" @onclick="ToggleScenesAsync">
-                    SATELLITE SCENES [@(_scenesOn ? "ON" : "OFF")]
+                    <span class="tg-row-name">SATELLITE SCENES</span><span class="tg-row-state">@(_scenesOn ? "ON" : "OFF")</span><span class="tg-switch" aria-hidden="true"></span>
                 </button>
-                <button type="button" data-tg-toggle="measure" class="tg-toggle @(_measureOn ? "tg-toggle-on" : "")"
+                <button type="button" data-tg-toggle="measure" class="tg-toggle tg-layer-row @(_measureOn ? "tg-toggle-on" : "")"
                         title="Click points on the map for distances and bearings, and draw range rings around the first point" @onclick="ToggleMeasureAsync">
-                    MEASURE [@(_measureOn ? "ON" : "OFF")]
+                    <span class="tg-row-name">MEASURE</span><span class="tg-row-state">@(_measureOn ? "ON" : "OFF")</span><span class="tg-switch" aria-hidden="true"></span>
                 </button>
-                <button type="button" data-tg-toggle="layer-health" class="tg-toggle @(_layerHealthOn ? "tg-toggle-on" : "")"
+                <button type="button" data-tg-toggle="layer-health" class="tg-toggle tg-layer-row @(_layerHealthOn ? "tg-toggle-on" : "")"
                         title="Each layer's source, and the last problem it hit since this page opened" @onclick="() => _layerHealthOn = !_layerHealthOn">
-                    LAYER HEALTH [@(_layerHealthOn ? "ON" : "OFF")]
+                    <span class="tg-row-name">LAYER HEALTH</span><span class="tg-row-state">@(_layerHealthOn ? "ON" : "OFF")</span><span class="tg-switch" aria-hidden="true"></span>
                 </button>
                 <button type="button" class="tg-toggle" disabled="@_briefingPdfBusy"
                         title="Download this view as a PDF: a satellite map, every layer that's on and what it shows, and the Brief me facts if gathered" @onclick="DownloadBriefingPdfAsync">
@@ -577,16 +597,16 @@
             @* "Zoom in" hints (19-11-26, Holo Wireframe): shown only while a layer is actually thinned. *@
             <div class="tg-layer-group-title">CAMERAS@(_camerasInViewTotal > _visibleCameras.Count ? " · ZOOM IN FOR ALL" : "")</div>
             <div class="tg-layer-buttons">
-                <button type="button" data-tg-toggle="healthy" class="tg-toggle @(_hideUnhealthy ? "tg-toggle-on" : "")"
+                <button type="button" data-tg-toggle="healthy" class="tg-toggle tg-layer-row @(_hideUnhealthy ? "tg-toggle-on" : "")"
                         title="Hide cameras found frozen, stale or offline (checked when opened, and every 10 minutes for favorites)" @onclick="ToggleHideUnhealthyAsync">
-                    HEALTHY ONLY [@(_hideUnhealthy ? "ON" : "OFF")]
+                    <span class="tg-row-name">HEALTHY ONLY</span><span class="tg-row-state">@(_hideUnhealthy ? "ON" : "OFF")</span><span class="tg-switch" aria-hidden="true"></span>
                 </button>
-                <button type="button" data-tg-toggle="live-video" class="tg-toggle @(_liveVideoOnly ? "tg-toggle-on" : "")"
+                <button type="button" data-tg-toggle="live-video" class="tg-toggle tg-layer-row @(_liveVideoOnly ? "tg-toggle-on" : "")"
                         title="Show only cameras with live video (square pins). Still-image cameras are round; hollow pins were found not working." @onclick="ToggleLiveVideoOnlyAsync">
-                    LIVE VIDEO ONLY [@(_liveVideoOnly ? "ON" : "OFF")]
+                    <span class="tg-row-name">LIVE VIDEO ONLY</span><span class="tg-row-state">@(_liveVideoOnly ? "ON" : "OFF")</span><span class="tg-switch" aria-hidden="true"></span>
                 </button>
-                <button type="button" data-tg-toggle="select" class="tg-toggle @(_selectModeOn ? "tg-toggle-on" : "")" title="Select multiple cameras for the watch wall (S)" @onclick="ToggleSelectModeAsync">
-                    SELECT [@(_selectModeOn ? "ON" : "OFF")]
+                <button type="button" data-tg-toggle="select" class="tg-toggle tg-layer-row @(_selectModeOn ? "tg-toggle-on" : "")" title="Select multiple cameras for the watch wall (S)" @onclick="ToggleSelectModeAsync">
+                    <span class="tg-row-name">SELECT</span><span class="tg-row-state">@(_selectModeOn ? "ON" : "OFF")</span><span class="tg-switch" aria-hidden="true"></span>
                 </button>
             </div>
         </div>
@@ -907,9 +927,10 @@
         </div>
     }
 
-    @* Side panel: one tabbed panel instead of separate floating panels. On narrow screens it
-       becomes a bottom sheet (see OverwatchGrid.razor.css). *@
-    <aside class="tg-side-panel @(_panelTab is null ? "is-collapsed" : "")" aria-label="Overwatch panel">
+    @* Inspector (Apple structure, 20-11-26): the tabbed side panel, docked on the right; the Layers
+       sidebar is on the left. Below 720 px both become bottom sheets (see OverwatchGrid.razor.css).
+       Camera, incident and other feature details still open as tactical-globe.js modals. *@
+    <aside class="tg-side-panel tg-inspector @(_panelTab is null ? "is-collapsed" : "")" aria-label="Overwatch panel">
         <div class="tg-tabs" role="tablist">
             <button type="button" role="tab" data-tg-toggle="coverage" class="tg-tab @(_panelTab == "explore" ? "is-active" : "")"
                     aria-selected="@(_panelTab == "explore" ? "true" : "false")" title="Known camera coverage and where to go (C)" @onclick='() => SelectPanelTabAsync("explore")'>EXPLORE</button>
@@ -1587,7 +1608,8 @@
         </div>
     </aside>
 
-    @* Map controls (bottom-right). *@
+    @* Map controls: bottom-right of the free map area, as Apple Maps keeps them (a two-column grid under
+       the toolbar below 720 px). *@
     <div class="tg-map-controls" role="group" aria-label="Map controls">
         <button type="button" class="tg-icon-btn" aria-label="Zoom in" title="Zoom in" @onclick="() => ZoomAsync(true)"><i class="bi bi-plus-lg" aria-hidden="true"></i></button>
         <button type="button" class="tg-icon-btn" aria-label="Zoom out" title="Zoom out" @onclick="() => ZoomAsync(false)"><i class="bi bi-dash-lg" aria-hidden="true"></i></button>
@@ -1745,6 +1767,8 @@
             await JS.InvokeAsync<bool>("gwsStreetView.open", "tg-sv", _dotNetRef, StreetSceneForViewer(openScene));
         }
         if (!firstRender) return;
+
+        await RestoreLookAsync();
 
         if (!_hasAnyProviderConfigured)
         {
@@ -2928,8 +2952,51 @@
     private bool _infoOpen;
     private bool _helpOpen;
 
-    private int ActiveLayerCount =>
-        new[] { _radarOn, _alertsOn, _incidentsOn, _worldNewsOn, _hazardsOn, _signsOn, _roadWeatherOn, _aircraftOn, _airQualityOn, _shipsOn, _outagesOn, _internetOn, _convergenceOn, _airportsOn, _wmoOn, _auroraOn, _satellitesOn, _cityTrafficOn, _liveFlowOn, _hideUnhealthy, _liveVideoOnly, _selectModeOn, _travelOn, _firesOn, _conflictOn, _humanitarianOn }.Count(on => on);
+    // Look switch (Night Ops x Apple, 20-11-26): Night Ops is the look the page always had; Standard
+    // drops the grain and scan lines for a calmer palette. Satellite reads as Standard for now: the
+    // imagery swap is a later tactical-globe.js unit (plan: overwatch-night-ops-2026-11-20.md).
+    private const string LookStorageKey = "gws.overwatch.look";
+    private static readonly (string Key, string Label, string Glyph)[] Looks =
+        [("standard", "Standard", "◐"), ("night-ops", "Night Ops", "☾"), ("satellite", "Satellite", "◍")];
+    private string _look = "night-ops";
+
+    private async Task SetLookAsync(string look)
+    {
+        if (!Looks.Any(option => option.Key == look)) return;
+        _look = look;
+        try
+        {
+            await JS.InvokeVoidAsync("localStorage.setItem", LookStorageKey, look);
+        }
+        catch (JSException)
+        {
+            // Private windows and blocked site data refuse storage; the look still applies until reload.
+        }
+    }
+
+    private async Task RestoreLookAsync()
+    {
+        try
+        {
+            var saved = await JS.InvokeAsync<string?>("localStorage.getItem", LookStorageKey);
+            if (saved is not null && saved != _look && Looks.Any(option => option.Key == saved))
+            {
+                _look = saved;
+                StateHasChanged();
+            }
+        }
+        catch (JSException)
+        {
+            // No storage: keep the default look.
+        }
+    }
+
+    private int ActiveLayerCount => LayerStates.Count(on => on);
+    private int LayerTotal => LayerStates.Length;
+
+    // Every on/off layer the sidebar counts ("26 · 3 ON").
+    private bool[] LayerStates =>
+        new[] { _radarOn, _alertsOn, _incidentsOn, _worldNewsOn, _hazardsOn, _signsOn, _roadWeatherOn, _aircraftOn, _airQualityOn, _shipsOn, _outagesOn, _internetOn, _convergenceOn, _airportsOn, _wmoOn, _auroraOn, _satellitesOn, _cityTrafficOn, _liveFlowOn, _hideUnhealthy, _liveVideoOnly, _selectModeOn, _travelOn, _firesOn, _conflictOn, _humanitarianOn };
 
     private async Task SelectPanelTabAsync(string tab, bool keepOpen = false)
     {

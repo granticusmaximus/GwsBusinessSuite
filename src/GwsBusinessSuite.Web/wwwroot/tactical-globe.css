@@ -11,7 +11,53 @@
     --ow-info: #66e0c8;
     --ow-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
     --ow-display: "Chakra Petch", "Segoe UI", system-ui, sans-serif;
+    /* Night Ops x Apple, combined (20-11-26): SF Pro for text, SF Mono for figures, glass panels. */
+    --ow-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", Inter, system-ui, sans-serif;
+    --ow-figures: "SF Mono", ui-monospace, "IBM Plex Mono", Menlo, Consolas, monospace;
+    --ow-glass: rgb(4 14 8 / 0.5);
+    --ow-glass-solid: #06110a;
+    --ow-glass-blur: blur(18px) saturate(140%);
+    --ow-edge: rgb(var(--ow-accent-rgb) / 0.45);
+    --ow-cut: 12px;
+    --ow-glow: 0 0 6px rgb(var(--ow-accent-rgb) / 0.5);
+    --ow-switch-off: rgb(120 140 125 / 0.32);
+    --ow-knob: var(--ow-ink);
+    /* Shadows for the Apple-structure chrome (21-11-26), shared so the design guard's count stays put. */
+    --ow-shadow-vignette: inset 0 0 90px rgba(0, 0, 0, 0.35);
+    --ow-shadow-edge: inset 0 0 0 1px var(--ow-edge, rgb(89 240 122 / 0.45));
+    --ow-shadow-edge-strong: inset 0 0 0 1px rgb(var(--ow-accent-rgb, 89 240 122) / 0.55);
+    --ow-shadow-edge-contrast: inset 0 0 0 1px var(--ow-ink, #d4ffd9);
+    --ow-shadow-knob: 0 1px 3px rgba(0, 0, 0, 0.45);
 }
+
+/* Look switch (20-11-26): OverwatchGrid.razor sets data-ow-look on .tg-shell. Night Ops is the look as
+   it was. Standard is calmer: Apple system green on neutral glass, no glow (the page's scoped CSS also
+   drops the scan lines and grain). Satellite reads as Standard for now.
+   TODO(overwatch look): Satellite should also swap the globe to plain satellite imagery; that is a
+   tactical-globe.js unit, tracked in .claude/plans/overwatch-night-ops-2026-11-20.md. */
+.tg-shell[data-ow-look="standard"],
+.tg-shell[data-ow-look="satellite"] {
+    --ow-accent: #30d158;
+    --ow-accent-rgb: 48 209 88;
+    --ow-ink: #f2f5f3;
+    --ow-muted: #9aa39d;
+    --ow-glass: rgb(22 24 23 / 0.55);
+    --ow-glass-solid: #1c1e1d;
+    --ow-edge: rgb(255 255 255 / 0.14);
+    --ow-glow: none;
+}
+
+.tg-shell[data-ow-look="standard"] :is(.tg-stream-panel, .tg-watch-wall-panel, .tg-weather-panel, .tg-selection-indicator, .tg-hover-tooltip, .tg-radar-bar),
+.tg-shell[data-ow-look="satellite"] :is(.tg-stream-panel, .tg-watch-wall-panel, .tg-weather-panel, .tg-selection-indicator, .tg-hover-tooltip, .tg-radar-bar),
+.tg-shell[data-ow-look="standard"] :is(.tg-stream-panel, .tg-watch-wall-panel, .tg-weather-panel, .tg-selection-indicator, .tg-hover-tooltip, .tg-radar-bar) *,
+.tg-shell[data-ow-look="satellite"] :is(.tg-stream-panel, .tg-watch-wall-panel, .tg-weather-panel, .tg-selection-indicator, .tg-hover-tooltip, .tg-radar-bar) * {
+    text-shadow: none;
+}
+
+/* The page's docked sidebar and inspector (OverwatchGrid.razor.css sets --tg-inset-l/-r on .tg-shell):
+   the floating bits tactical-globe.js builds keep to the free map area between them. */
+.tg-shell .tg-weather-panel { left: calc(var(--tg-inset-l, 0px) + 1.1rem); }
+.tg-shell .tg-selection-indicator { right: calc(var(--tg-inset-r, 0px) + 4.6rem); }
 
 /* Text never drops below 12px (12-11-26): the HUD had 81 labels under it on a phone. Sizes below
    .75rem read max(size, 12px). */
@@ -874,18 +920,18 @@
 .tg-route-form select { min-width: 0; flex: 1 1 auto; }
 
 
-/* 2026-10 layout: keep the weather panel clear of the left side panel when it's open. */
-.tg-shell:has(.tg-side-panel:not(.is-collapsed)) .tg-weather-panel { left: calc(min(360px, 100% - 1.6rem) + 1.6rem); }
-@container gws-main (max-width: 720px) {
-    .tg-shell:has(.tg-side-panel:not(.is-collapsed)) .tg-weather-panel { left: 0.8rem; bottom: calc(55% + 0.8rem); }
-}
-/* With the side panel open, the radar bar centres in the space to its right. */
-.tg-shell:has(.tg-side-panel:not(.is-collapsed)) .tg-radar-bar {
-    left: calc((100% + min(360px, 100% - 1.6rem) + 0.8rem) / 2);
-    width: min(640px, calc(100% - min(360px, 100% - 1.6rem) - 5.5rem));
+/* Apple structure (20-11-26): the radar bar centres in the free map area between the Layers sidebar and
+   the inspector (--tg-inset-l/-r, set by OverwatchGrid.razor.css; both 0 below 720 px). Below 720 px an
+   open bottom sheet (--tg-sheet-up) lifts the bar, the weather panel and the selection chip above it. */
+.tg-shell .tg-radar-bar {
+    left: calc(var(--tg-inset-l, 0px) + (100% - var(--tg-inset-l, 0px) - var(--tg-inset-r, 0px)) / 2);
+    width: min(640px, calc(100% - var(--tg-inset-l, 0px) - var(--tg-inset-r, 0px) - 5.5rem));
 }
 @container gws-main (max-width: 720px) {
-    .tg-shell:has(.tg-side-panel:not(.is-collapsed)) .tg-radar-bar { left: 50%; width: calc(100% - 2rem); bottom: calc(55% + 0.8rem); }
+    .tg-shell .tg-radar-bar { width: calc(100% - 2rem); bottom: calc(var(--tg-sheet-up, 0px) + 3.6rem); }
+    .tg-shell .tg-weather-panel { left: 0.8rem; bottom: calc(var(--tg-sheet-up, 0px) + 3.6rem); }
+    .tg-shell.tg-radar-active .tg-weather-panel { bottom: calc(var(--tg-sheet-up, 0px) + 9.6rem); }
+    .tg-shell .tg-selection-indicator { right: 0.8rem; bottom: calc(var(--tg-sheet-up, 0px) + 3.6rem); }
 }
 
 /* Street view walk arrows (created by street-view.js). */

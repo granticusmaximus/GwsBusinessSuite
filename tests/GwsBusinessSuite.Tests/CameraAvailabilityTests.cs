@@ -103,7 +103,7 @@ public sealed class CameraAvailabilityTests
         page.Should().Contain("mode = availability.Mode.ToString()")
             .And.Contain("state = availability.State.ToString()")
             .And.Contain("include: CameraFilter()")
-            .And.Contain("LIVE VIDEO ONLY [");
+            .And.Contain("<span class=\"tg-row-name\">LIVE VIDEO ONLY</span>");
     }
 
     // The Overwatch "cameras in view" list: working first, nearest, or most recently seen working.

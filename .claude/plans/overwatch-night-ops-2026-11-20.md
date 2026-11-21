@@ -122,3 +122,14 @@ web only unless the separate AppKit map window is built.
   desktop, Explore panel on phones): moved under the toolbar (top-right wide, top-left below 720 px). Test fixes:
   OverwatchNightOpsBrowserTests ignore harness "Failed to load resource" (no server behind the page);
   ClickingAnAircraft expects 5 entities (brackets). Next: Apple layout stream (worktree agent-a020c99fa2f0fae99).
+- 21-11-26: APPLE LAYOUT STREAM merged into main, gate PASS, visual check done (Chromium + WebKit, 1440/820/390):
+  toolbar (Layers button with count, OVERWATCH title, Look switch Standard / Night Ops / Satellite setting
+  data-ow-look, search, inspector button), Layers sidebar (glass, cut corners, header "N · M ON", status line,
+  layer rows with Apple switches, contours/slope stacked under 3D), inspector = the tabbed side panel docked
+  right; bottom sheets below 720 px; map controls two-column top-right on phones. Satellite look = Standard
+  styling for now (imagery swap is a later JS task). Fixes from the visual check: stage chip/readout final
+  placement (top of the free map area, centred between sidebar and inspector; top-left below 720 px) after
+  conflicting edge rules stretched the chip; contours/slope rows stacked; 5 raw shadows moved to --ow-shadow-*
+  tokens (DesignSystemGuardTests ceiling 185). Known: Playwright WebKit at 820/390 sometimes logs
+  "glTexParameteri: Parameter outside of bounds" WebGL warnings (not every run, same code; not errors).
+  Next: Mac phase 6 stream (worktree agent-a4cbe5f4d01ff3844, rebase onto main first).
