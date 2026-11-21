@@ -25,6 +25,9 @@
   --neu-raised-shadow: inset 0 1px 0 var(--neu-highlight), 0 10px 26px -10px var(--neu-shadow), 0 2px 6px -2px var(--neu-inset);
   --neu-raised-shadow-sm: inset 0 1px 0 var(--neu-highlight), 0 3px 10px -4px var(--neu-shadow);
   --neu-inset-shadow: inset 0 1px 3px var(--neu-inset), inset 0 -1px 0 var(--neu-highlight);
+  --glass-filter: saturate(165%) blur(20px);
+  --glass-edge-rest: rgba(250, 250, 249, 0.08);
+  --glass-bevel: inset 0 1px 0 rgba(250, 250, 249, 0.12), inset 0 -1px 0 rgba(0, 0, 0, 0.28), 0 10px 30px rgba(0, 0, 0, 0.42);
 
   --font-serif: 'Playfair Display', Georgia, 'Times New Roman', serif;
   --font-sans:  'Inter', system-ui, -apple-system, sans-serif;
@@ -2002,10 +2005,12 @@ span.footer-group-heading { font-size: 0.8rem; }
     .gws-callout, .gws-posts-grid-item, .gws-posts-grid-list-item, .gws-related-posts-item,
     .gws-toc, .contact-thank-you-card, .gws-consent, .nav-dropdown-menu,
     .gws-portfolio-lightbox-panel) {
-  border-color: color-mix(in srgb, var(--border) 58%, transparent);
+  border-color: var(--glass-edge-rest);
   border-radius: calc(var(--radius) + 5px);
-  background: linear-gradient(145deg, color-mix(in srgb, var(--neu-raised) 96%, white), var(--neu-raised));
-  box-shadow: var(--neu-raised-shadow);
+  background: linear-gradient(165deg, color-mix(in srgb, var(--neu-raised) 76%, transparent), color-mix(in srgb, var(--bg-surface) 70%, transparent));
+  -webkit-backdrop-filter: var(--glass-filter);
+  backdrop-filter: var(--glass-filter);
+  box-shadow: var(--glass-bevel);
 }
 
 :is(.article-card, .gws-card, .gws-posts-grid-item, .gws-posts-grid-list-item,

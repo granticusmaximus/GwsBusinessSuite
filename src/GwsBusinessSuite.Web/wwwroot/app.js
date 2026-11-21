@@ -1516,3 +1516,48 @@ window.gwsReader = {
 	stop: function () { if (this.canSpeak()) window.speechSynthesis.cancel(); },
 	speaking: function () { return this.canSpeak() && (window.speechSynthesis.speaking || window.speechSynthesis.pending); }
 };
+
+// Kit H2: Realistic Prismatic Glass pointer bevel grazing & button ripple feedback.
+(function () {
+	var GLASS_TARGET = '.gws-content .card:not(.card .card), .surface-panel:not(.card .surface-panel), .modal-content, .gws-command-dialog';
+	var lastEl = null;
+
+	function reducedMotion() {
+		return window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+	}
+
+	function coarsePointer() {
+		return window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
+	}
+
+	document.addEventListener('pointermove', function (event) {
+		if (coarsePointer() || reducedMotion()) return;
+		var target = event.target instanceof Element ? event.target.closest(GLASS_TARGET) : null;
+		if (lastEl && lastEl !== target) {
+			lastEl.style.setProperty('--gws-mx', '-220px');
+			lastEl.style.setProperty('--gws-my', '-220px');
+		}
+		lastEl = target;
+		if (!target) return;
+		var rect = target.getBoundingClientRect();
+		target.style.setProperty('--gws-mx', (event.clientX - rect.left) + 'px');
+		target.style.setProperty('--gws-my', (event.clientY - rect.top) + 'px');
+	}, { passive: true });
+
+	document.addEventListener('pointerdown', function (event) {
+		if (reducedMotion()) return;
+		var btn = event.target instanceof Element ? event.target.closest('.btn:not(.btn-link):not(.btn-close)') : null;
+		if (!btn || btn.disabled) return;
+		var rect = btn.getBoundingClientRect();
+		var size = Math.max(rect.width, rect.height);
+		if (!size) return;
+		var dot = document.createElement('span');
+		dot.className = 'gws-real-ripple';
+		dot.style.width = size + 'px';
+		dot.style.height = size + 'px';
+		dot.style.left = (event.clientX - rect.left - size / 2) + 'px';
+		dot.style.top = (event.clientY - rect.top - size / 2) + 'px';
+		btn.appendChild(dot);
+		window.setTimeout(function () { dot.remove(); }, 460);
+	}, { passive: true });
+})();
