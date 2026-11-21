@@ -126,6 +126,12 @@ window.tacticalGlobe = (function () {
             const h = viewer.scene.globe.getHeight(place);
             if (typeof h === 'number' && isFinite(h)) ground = Math.round(h);
         }
+        writeReadout(out, heading, tilt, height, ground, lat, lon);
+    }
+
+    // The readout line and night mode, from either map: the globe above, or the Mac's Apple map's
+    // camera reports (showNativeCamera). ground is null where the map can't give it.
+    function writeReadout(out, heading, tilt, height, ground, lat, lon) {
         const alt = height >= 10000 ? (height / 1000).toFixed(height >= 100000 ? 0 : 1) + ' km' : Math.round(height) + ' m';
         const sun = sunPosition(new Date(), lat, lon);
         const parts = ['HDG ' + String(heading).padStart(3, '0') + '°'];
@@ -6532,6 +6538,25 @@ window.tacticalGlobe = (function () {
             if (nativeDotNetRef) nativeDotNetRef.invokeMethodAsync('OnGlobeViewChanged', region[0], region[1], region[2], region[3]).catch(function () { });
         };
 
+        // Night Ops phase 6 (20-11-26): the Apple map reports its camera (MacNativeOverwatchBridge
+        // ReportCamera, at most every 200 ms): { altitude (m), heading, pitch (degrees from straight
+        // down), lat, lon } at the centre of the view. The stage chip, readout line and night mode
+        // follow it as they follow the globe's camera; MapKit gives no ground height, so no GND. The
+        // Mac map dims itself at night (OverwatchMapLook.Dim): the CSS filter can't reach it.
+        const showNativeCamera = function (report) {
+            if (!report || ![report.altitude, report.heading, report.pitch, report.lat, report.lon].every(Number.isFinite)) return;
+            const out = document.getElementById('tg-readout');
+            const container = document.getElementById(nativeContainerId);
+            const shell = (out && out.closest('.tg-shell')) || (container && container.closest('.tg-shell'));
+            const stage = zoomStage(report.altitude);
+            if (shell && shell.dataset.owStage !== stage) {
+                shell.dataset.owStage = stage;
+                const stageName = document.getElementById('tg-stage-name');
+                if (stageName) stageName.textContent = stage.toUpperCase();
+            }
+            if (out) writeReadout(out, Math.round((report.heading + 360) % 360) % 360, Math.round(report.pitch), report.altitude, null, report.lat, report.lon);
+        };
+
         // Pins the native map can't split by zooming (news stories placed at one country or city
         // share a coordinate) arrive together; list them and open the one chosen.
         const nativeLayerNames = {
@@ -6596,6 +6621,7 @@ window.tacticalGlobe = (function () {
                 if (hit.speed) openSpeedPanel(hit.speed);
                 else openRoadPanel(nativeEntry, hit.road, [place.lat, place.lon]);
             },
+            camera: function (report) { showNativeCamera(report); },
             regionChanged: function (north, south, east, west) {
                 const region = [north, south, east, west];
                 if (nativePointer && nativeMoved) { nativeDeferredRegion = region; return; }
@@ -6882,7 +6908,9 @@ window.tacticalGlobe = (function () {
         api.whenDrawn = function () { return Promise.resolve(true); };
         api.setThreeD = function (containerId, on) {
             postNative('setThreeD', arguments);
-            return Promise.resolve(on ? 'on' : 'off');
+            // 'apple': 3D is on (Apple's realistic terrain), but contours and slope are web only,
+            // so the page keeps their buttons hidden (OverwatchGrid.razor SetThreeDAsync).
+            return Promise.resolve(on ? 'apple' : 'off');
         };
         api.setSelectModeEnabled = function (containerIdOrEnabled, maybeEnabled) {
             const enabled = typeof containerIdOrEnabled === 'string' ? maybeEnabled : containerIdOrEnabled;

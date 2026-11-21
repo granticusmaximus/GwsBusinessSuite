@@ -251,6 +251,15 @@ public sealed class NativeShapesTests
         Assert.True(azimuth < 10 || azimuth > 350, $"azimuth {azimuth}");
         Assert.True(OverwatchMapLook.SunPosition(new DateTimeOffset(2026, 6, 21, 0, 0, 0, TimeSpan.Zero), 0, 0).Elevation < -40, "midnight is below the horizon");
 
+        // Night mode (phases 5/6): one rule for both maps, and the Mac's dimming as strong as the web's
+        // CSS brightness filter (brightness = 1 - dim).
+        Assert.Contains("shell.dataset.owNight = sun.el < -6 ? 'night' : sun.el < 0 ? 'dusk' : 'day';", js);
+        Assert.Equal(["day", "dusk", "dusk", "night"], new[] { 10d, -0.5, -5.9, -6.1 }.Select(OverwatchMapLook.Night));
+        Assert.Equal([0, OverwatchMapLook.DuskDim, OverwatchMapLook.NightDim], new[] { "day", "dusk", "night" }.Select(OverwatchMapLook.Dim));
+        var css = File.ReadAllText(Path.Combine(root, "src/GwsBusinessSuite.Web/Components/Pages/BusinessSuite/OverwatchGrid.razor.css"));
+        Assert.Contains($"filter: brightness({N(Math.Round(1 - OverwatchMapLook.DuskDim, 2))});", css);
+        Assert.Contains($"filter: brightness({N(Math.Round(1 - OverwatchMapLook.NightDim, 2))}) contrast(1.12);", css);
+
         using var land = System.Text.Json.JsonDocument.Parse(File.ReadAllText(Path.Combine(root, "src/GwsBusinessSuite.Web/wwwroot/data/overwatch-land.json")));
         Assert.True(land.RootElement.GetProperty("rings").GetArrayLength() > 200, "both maps draw the land from this one file");
     }

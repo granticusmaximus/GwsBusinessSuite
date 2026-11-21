@@ -133,3 +133,14 @@ web only unless the separate AppKit map window is built.
   tokens (DesignSystemGuardTests ceiling 185). Known: Playwright WebKit at 820/390 sometimes logs
   "glTexParameteri: Parameter outside of bounds" WebGL warnings (not every run, same code; not errors).
   Next: Mac phase 6 stream (worktree agent-a4cbe5f4d01ff3844, rebase onto main first).
+- 21-11-26 Phase 6 Mac applied to main (from worktree agent-a4cbe5f4d01ff3844). The native map reports its
+  camera (altitude/heading/pitch/lat/lon, throttled 200 ms) to window.gwsNativeOverwatch.camera, so the stage
+  chip, readout and data-ow-night work on the Mac; native night dimming is a black UIView whose alpha comes
+  from OverwatchMapLook.Dim(Night(sun elevation)) (DuskDim 0.18, NightDim 0.38); 3D uses
+  MKHybridMapConfiguration with realistic elevation and 55 degree pitch; setThreeD returns 'apple' on the Mac,
+  and contours/slope stay hidden there. Tests: OverwatchNativeCameraBrowserTests plus Mac bridge and
+  NativeShapes checks. Visual check: local app in Playwright with the Mac app faked (Chromium + WebKit at
+  1280/820/390, regional by day and ground by night): stage, night, readout correct; no overflow; no errors.
+  Not checked: the real Mac app on screen (it reads its server from a saved preference; repointing Grant's
+  install at a local server needs his go-ahead).
+  Next: Satellite look imagery swap (JS), then the user guide update.

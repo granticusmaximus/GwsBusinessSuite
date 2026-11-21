@@ -200,9 +200,10 @@
                 {
                     <div class="tg-favorites-empty" role="status">@_threeDError</div>
                 }
-                @if (_threeDOn)
+                @if (_threeDOn && !_threeDOnAppleMap)
                 {
-                    @* Night Ops terrain shading (20-11-26): contour lines or slope, on the 3D terrain only. *@
+                    @* Night Ops terrain shading (20-11-26): contour lines or slope, on the 3D terrain only.
+                       Not on the Mac's Apple map, which can't draw either (setThreeD answers "apple"). *@
                     <div class="tg-hud-toggles" role="group" aria-label="Terrain shading">
                         <button type="button" data-tg-toggle="contours" class="tg-toggle tg-layer-row @(_terrainShading == "contours" ? "tg-toggle-on" : "")"
                                 title="Contour lines every 20 m, on the 3D terrain" @onclick='() => SetTerrainShadingAsync(_terrainShading == "contours" ? "off" : "contours")'>
@@ -3988,12 +3989,14 @@
     // the guide describes: assets:read on those two assets, limited to this site's URL. ----
     private string? IonToken => Configuration["Overwatch:CesiumIonToken"] is { Length: > 0 } token ? token.Trim() : null;
     private bool _threeDOn;
+    private bool _threeDOnAppleMap;
     private string? _threeDError;
 
     private async Task SetThreeDAsync(bool on)
     {
         var status = await JS.InvokeAsync<string>("tacticalGlobe.setThreeD", "tg-viewport", on);
-        _threeDOn = status == "on";
+        _threeDOnAppleMap = status == "apple";
+        _threeDOn = status == "on" || _threeDOnAppleMap;
         if (!_threeDOn) _terrainShading = "off";
         _threeDError = status.StartsWith("failed", StringComparison.Ordinal)
             ? (IonToken is null ? "3D terrain couldn't load. The flat globe is still working."

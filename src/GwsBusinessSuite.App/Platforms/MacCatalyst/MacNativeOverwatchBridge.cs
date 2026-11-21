@@ -62,6 +62,47 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
     internal nfloat FocusAlpha(string operation) => _focus is null || _focus.Contains(operation) ? 1 : (nfloat)OverwatchFocus.DimAlpha;
 
     private MKOverlayRenderer? _streetRenderer;
+    private readonly UIView _nightShade;
+    private bool _cameraReportPending;
+    private const int CameraReportMilliseconds = 200;
+
+    // Night Ops phase 6 (20-11-26): the page's stage chip, HUD readout and night mode follow this
+    // map's camera as they follow the web globe's. At most one report per CameraReportMilliseconds,
+    // always the camera as it is when sent (window.gwsNativeOverwatch.camera in tactical-globe.js).
+    internal void ScheduleCameraReport()
+    {
+        if (_cameraReportPending) return;
+        _cameraReportPending = true;
+        _ = Task.Run(async () =>
+        {
+            await Task.Delay(CameraReportMilliseconds);
+            await MainThread.InvokeOnMainThreadAsync(ReportCamera);
+        });
+    }
+
+    private void ReportCamera()
+    {
+        _cameraReportPending = false;
+        if (_map.Hidden) return;
+        var camera = _map.Camera;
+        var centre = _map.CenterCoordinate;
+        if (!IsValid(centre)) return;
+        // The same sun and the same rule as the page, so the map dims exactly when the page says
+        // night (OverwatchMapLook.Night/Dim; the CSS filter on .tg-viewport can't reach this map).
+        var sun = OverwatchMapLook.SunPosition(DateTimeOffset.UtcNow, centre.Latitude, centre.Longitude);
+        var dim = (nfloat)OverwatchMapLook.Dim(OverwatchMapLook.Night(sun.Elevation));
+        if (_nightShade.Alpha != dim) UIView.Animate(1.2, () => _nightShade.Alpha = dim);
+        var report = JsonSerializer.Serialize(new
+        {
+            // MKMapCamera.Altitude is obsolete; the camera height is its distance times cos(tilt).
+            altitude = camera.CenterCoordinateDistance * Math.Cos((double)camera.Pitch * Math.PI / 180),
+            heading = camera.Heading,
+            pitch = (double)camera.Pitch,
+            lat = centre.Latitude,
+            lon = centre.Longitude
+        });
+        _ = SendAsync($"window.gwsNativeOverwatch && window.gwsNativeOverwatch.camera && window.gwsNativeOverwatch.camera({report})");
+    }
     private MKOverlayRenderer? _landRenderer;
 
     // The land the web globe draws, from the same file on the same server.
@@ -130,6 +171,16 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
         _map.AddOverlay(_streets, MKOverlayLevel.AboveLabels);
         _map.AddOverlay(HoloMap.Grid(), MKOverlayLevel.AboveLabels);
         _ = LoadHoloLandAsync();
+        // Night mode's dimming (OverwatchMapLook.Dim): black over the whole map, pins included, as
+        // the web's brightness filter covers its whole globe. It never takes a click.
+        _nightShade = new UIView(_map.Bounds)
+        {
+            AutoresizingMask = UIViewAutoresizing.FlexibleWidth | UIViewAutoresizing.FlexibleHeight,
+            BackgroundColor = UIColor.Black,
+            Alpha = 0,
+            UserInteractionEnabled = false
+        };
+        _map.AddSubview(_nightShade);
         _delegate = new MapDelegate(this);
         _map.Delegate = _delegate;
         webView.Superview?.InsertSubviewBelow(_map, webView);
@@ -310,6 +361,8 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
             _hasInitialRegion = true;
             _map.SetRegion(new MKCoordinateRegion(new CLLocationCoordinate2D(20, 0), new MKCoordinateSpan(140, 340)), false);
         }
+        // A page opened again over an unmoved map still gets its stage, readout and night mode.
+        ScheduleCameraReport();
     }
 
     private void Render(string operation, object?[] arguments)
@@ -480,10 +533,18 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
         double.IsFinite(coordinate.Latitude) && double.IsFinite(coordinate.Longitude)
         && coordinate.Latitude is >= -90 and <= 90 && coordinate.Longitude is >= -180 and <= 180;
 
+    // 3D (Night Ops phase 6, 20-11-26): Apple's realistic elevation, with the camera tilted so the
+    // relief shows (MapKit lowers the tilt itself when the camera is too high for it); off lays the
+    // map flat and looks straight down again. Contours and slope stay web only (setTerrainShading).
+    internal const double ThreeDPitch = 55;
+
     private void SetThreeD(object?[] arguments)
     {
         var enabled = arguments.LastOrDefault() is true;
-        _map.MapType = enabled ? MKMapType.HybridFlyover : MKMapType.Hybrid;
+        _map.PreferredConfiguration = new MKHybridMapConfiguration(enabled ? MKMapElevationStyle.Realistic : MKMapElevationStyle.Flat);
+        var camera = _map.Camera;
+        _map.SetCamera(MKMapCamera.CameraLookingAtCenterCoordinate(
+            _map.CenterCoordinate, camera.CenterCoordinateDistance, (nfloat)(enabled ? ThreeDPitch : 0), camera.Heading), true);
     }
 
     private void MapTap(object?[] arguments)
@@ -1383,6 +1444,7 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
             owner.UpdateHolo();
             owner.RegroupIfZoomed();
             owner.RegionDidChange(mapView.Region);
+            owner.ScheduleCameraReport();
         }
     }
 }

@@ -58,6 +58,22 @@ public static class OverwatchMapLook
         return ((az / Rad + 360) % 360, el / Rad);
     }
 
+    // Night mode (Night Ops phase 5/6, 20-11-26): the sun at the centre of the view sets day, dusk
+    // (below the horizon) or night (below civil twilight, -6 degrees), as data-ow-night on the web.
+    // The web dims its map with a CSS brightness filter of 1 - the dim; the Mac map, which is native
+    // and outside that CSS, lays black over itself at the same strength.
+    public const double DuskDim = 0.18;
+    public const double NightDim = 0.38;
+
+    public static string Night(double sunElevation) => sunElevation < -6 ? "night" : sunElevation < 0 ? "dusk" : "day";
+
+    public static double Dim(string night) => night switch
+    {
+        "night" => NightDim,
+        "dusk" => DuskDim,
+        _ => 0,
+    };
+
     // How much of the street map shows at a camera height: none above StreetsBelowMetres, all of it
     // below StreetsFullMetres (holoStreetShare in tactical-globe.js).
     public static double StreetShare(double heightMetres) =>

@@ -202,4 +202,35 @@ public sealed class NativeOverwatchMacMapBridgeTests
         routed.Should().BeEquivalentTo(NativeOverwatchOperations.Selectable);
         NativeOverwatchOperations.All.Should().Contain(NativeOverwatchOperations.Selectable);
     }
+
+    // Night Ops phase 6 (20-11-26): the Apple map reports its camera to the page (stage chip, HUD
+    // readout, night mode), throttled; dims itself at night from the shared values; and 3D is
+    // Apple's realistic elevation, with contours and slope kept off the page.
+    [Fact]
+    public void MacMap_ShouldReportItsCamera_DimAtNight_AndUseRealisticElevationIn3D()
+    {
+        var script = File.ReadAllText(Path.Combine(RepoRoot, "src/GwsBusinessSuite.Web/wwwroot/js/tactical-globe.js"));
+        var page = File.ReadAllText(Path.Combine(RepoRoot, "src/GwsBusinessSuite.Web/Components/Pages/BusinessSuite/OverwatchGrid.razor"));
+        var bridge = File.ReadAllText(Path.Combine(RepoRoot, "src/GwsBusinessSuite.App/Platforms/MacCatalyst/MacNativeOverwatchBridge.cs"));
+
+        bridge.Should().Contain("owner.ScheduleCameraReport();")
+            .And.Contain("private const int CameraReportMilliseconds = 200;")
+            .And.Contain("if (_cameraReportPending) return;")
+            .And.Contain("window.gwsNativeOverwatch.camera({report})")
+            .And.Contain("altitude = camera.CenterCoordinateDistance * Math.Cos(")
+            .And.Contain("OverwatchMapLook.SunPosition(DateTimeOffset.UtcNow, centre.Latitude, centre.Longitude)")
+            .And.Contain("OverwatchMapLook.Dim(OverwatchMapLook.Night(sun.Elevation))")
+            .And.Contain("_map.AddSubview(_nightShade);")
+            .And.Contain("UserInteractionEnabled = false")
+            .And.Contain("new MKHybridMapConfiguration(enabled ? MKMapElevationStyle.Realistic : MKMapElevationStyle.Flat)")
+            .And.Contain("case NativeOverwatchOperations.SetTerrainShading: return;");
+
+        script.Should().Contain("camera: function (report) { showNativeCamera(report); },")
+            .And.Contain("const stage = zoomStage(report.altitude);")
+            .And.Contain("writeReadout(out, Math.round((report.heading + 360) % 360) % 360, Math.round(report.pitch), report.altitude, null, report.lat, report.lon);")
+            .And.Contain("writeReadout(out, heading, tilt, height, ground, lat, lon);")
+            .And.Contain("return Promise.resolve(on ? 'apple' : 'off');");
+        page.Should().Contain("_threeDOnAppleMap = status == \"apple\";")
+            .And.Contain("@if (_threeDOn && !_threeDOnAppleMap)");
+    }
 }
