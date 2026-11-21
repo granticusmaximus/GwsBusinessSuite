@@ -7,7 +7,7 @@ namespace GwsBusinessSuite.Application.Overwatch;
 // wash, fading in as the camera comes down. NativeShapesTests keeps the web file equal to this.
 public static class OverwatchMapLook
 {
-    public const string Green = "#7dffb0";
+    public const string Green = "#59f07a"; // Night Ops green (20-11-26)
     public const string Bright = "#b8ffd6";
     public const string Globe = "#04160c";
     public const double LandAlpha = 0.07;

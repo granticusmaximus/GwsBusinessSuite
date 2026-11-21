@@ -1,3 +1,18 @@
+/* Night Ops (approved 20-11-26, .claude/plans/overwatch-night-ops-2026-11-20.md): Overwatch's own
+   tokens, beside the admin's --neu-* ones. Rules elsewhere repeat the value as a var() fallback, so a
+   panel still reads right if this sheet hasn't loaded yet. */
+:root {
+    --ow-accent: #59f07a;
+    --ow-accent-rgb: 89 240 122;
+    --ow-ink: #d4ffd9;
+    --ow-muted: #5f9a68;
+    --ow-warn: #e8ff4d;
+    --ow-crit: #ff5a3c;
+    --ow-info: #66e0c8;
+    --ow-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+    --ow-display: "Chakra Petch", "Segoe UI", system-ui, sans-serif;
+}
+
 /* Text never drops below 12px (12-11-26): the HUD had 81 labels under it on a phone. Sizes below
    .75rem read max(size, 12px). */
 /* Styling for every Overwatch UI element built entirely by tactical-globe.js via
@@ -52,10 +67,10 @@
     display: flex;
     flex-direction: column;
     background: rgba(5, 8, 10, 0.96);
-    border: 1px solid rgba(125, 255, 176, 0.5);
-    box-shadow: 0 0 12px rgba(125, 255, 176, 0.15), 0 24px 70px rgba(0, 0, 0, 0.7);
-    color: #7dffb0;
-    font-family: "Share Tech Mono", ui-monospace, monospace;
+    border: 1px solid rgb(var(--ow-accent-rgb, 89 240 122) / 0.5);
+    box-shadow: 0 0 12px rgb(var(--ow-accent-rgb, 89 240 122) / 0.15), 0 24px 70px rgba(0, 0, 0, 0.7);
+    color: var(--ow-accent, #59f07a);
+    font-family: var(--ow-mono, "IBM Plex Mono", ui-monospace, Menlo, monospace);
 }
 
 .tg-stream-panel-header {
@@ -63,7 +78,7 @@
     justify-content: space-between;
     align-items: center;
     padding: 0.5rem 0.7rem;
-    border-bottom: 1px solid rgba(125, 255, 176, 0.35);
+    border-bottom: 1px solid rgb(var(--ow-accent-rgb, 89 240 122) / 0.35);
     font-size: 0.75rem;
     letter-spacing: 0.05em;
     flex-shrink: 0;
@@ -79,8 +94,8 @@
 
 .tg-stream-panel-close {
     background: none;
-    border: 1px solid rgba(125, 255, 176, 0.5);
-    color: #7dffb0;
+    border: 1px solid rgb(var(--ow-accent-rgb, 89 240 122) / 0.5);
+    color: var(--ow-accent, #59f07a);
     cursor: pointer;
     font-size: max(0.7rem, 12px);
     line-height: 1;
@@ -105,8 +120,8 @@
 .tg-stream-panel-analyze,
 .tg-stream-panel-report {
     background: none;
-    border: 1px solid rgba(125, 255, 176, 0.5);
-    color: #7dffb0;
+    border: 1px solid rgb(var(--ow-accent-rgb, 89 240 122) / 0.5);
+    color: var(--ow-accent, #59f07a);
     cursor: pointer;
     font-size: max(0.65rem, 12px);
     line-height: 1;
@@ -122,7 +137,7 @@
 .tg-stream-panel-analysis {
     margin-top: 0.4rem;
     padding: 0.4rem 0.5rem;
-    border: 1px solid rgba(125, 255, 176, 0.25);
+    border: 1px solid rgb(var(--ow-accent-rgb, 89 240 122) / 0.25);
     border-radius: 0.25rem;
     font-size: max(0.7rem, 12px);
     line-height: 1.3;
@@ -146,7 +161,7 @@
     min-height: 0;
     object-fit: contain;
     display: block;
-    border: 1px solid rgba(125, 255, 176, 0.35);
+    border: 1px solid rgb(var(--ow-accent-rgb, 89 240 122) / 0.35);
     background: #000;
 }
 
@@ -169,14 +184,14 @@
 .tg-stream-panel-health {
     margin-top: 0.4rem;
     padding: 0.25rem 0.5rem;
-    border: 1px solid rgba(125, 255, 176, 0.35);
+    border: 1px solid rgb(var(--ow-accent-rgb, 89 240 122) / 0.35);
     border-radius: 0.25rem;
     font-size: max(0.65rem, 12px);
     letter-spacing: 0.04em;
     flex-shrink: 0;
 }
 
-.tg-stream-panel-health[data-status="live"] { color: #7dffb0; }
+.tg-stream-panel-health[data-status="live"] { color: var(--ow-accent, #59f07a); }
 .tg-stream-panel-health[data-status="frozen"],
 .tg-stream-panel-health[data-status="stale"] { color: #ffd166; border-color: rgba(255, 209, 102, 0.5); }
 .tg-stream-panel-health[data-status="offline"] { color: #ff8080; border-color: rgba(255, 128, 128, 0.5); }
@@ -203,10 +218,10 @@
     display: flex;
     flex-direction: column;
     background: rgba(5, 8, 10, 0.92);
-    border: 1px solid rgba(125, 255, 176, 0.5);
+    border: 1px solid rgb(var(--ow-accent-rgb, 89 240 122) / 0.5);
     box-shadow: 0 0 24px rgba(0, 0, 0, 0.6);
-    color: #7dffb0;
-    font-family: "Share Tech Mono", ui-monospace, monospace;
+    color: var(--ow-accent, #59f07a);
+    font-family: var(--ow-mono, "IBM Plex Mono", ui-monospace, Menlo, monospace);
 }
 
 .tg-watch-wall-header {
@@ -214,7 +229,7 @@
     justify-content: space-between;
     align-items: center;
     padding: 0.5rem 0.7rem;
-    border-bottom: 1px solid rgba(125, 255, 176, 0.35);
+    border-bottom: 1px solid rgb(var(--ow-accent-rgb, 89 240 122) / 0.35);
     font-size: 0.75rem;
     letter-spacing: 0.05em;
     flex-shrink: 0;
@@ -224,8 +239,8 @@
 
 .tg-watch-wall-close {
     background: none;
-    border: 1px solid rgba(125, 255, 176, 0.5);
-    color: #7dffb0;
+    border: 1px solid rgb(var(--ow-accent-rgb, 89 240 122) / 0.5);
+    color: var(--ow-accent, #59f07a);
     cursor: pointer;
     font-size: max(0.7rem, 12px);
     line-height: 1;
@@ -245,7 +260,7 @@
     display: flex;
     flex-direction: column;
     min-height: 0;
-    border: 1px solid rgba(125, 255, 176, 0.3);
+    border: 1px solid rgb(var(--ow-accent-rgb, 89 240 122) / 0.3);
     background: rgba(0, 0, 0, 0.4);
 }
 
@@ -255,14 +270,14 @@
     align-items: center;
     padding: 0.2rem 0.4rem;
     font-size: max(0.6rem, 12px);
-    border-bottom: 1px solid rgba(125, 255, 176, 0.25);
+    border-bottom: 1px solid rgb(var(--ow-accent-rgb, 89 240 122) / 0.25);
     flex-shrink: 0;
 }
 
 .tg-watch-wall-tile-close {
     background: none;
     border: none;
-    color: #7dffb0;
+    color: var(--ow-accent, #59f07a);
     cursor: pointer;
     font-size: max(0.65rem, 12px);
     line-height: 1;
@@ -301,10 +316,10 @@
     bottom: 2.6rem;
     right: 1.1rem;
     padding: 0.4rem 0.7rem;
-    background: rgba(125, 255, 176, 0.2);
-    border: 1px solid rgba(125, 255, 176, 0.6);
-    color: #7dffb0;
-    font-family: "Share Tech Mono", ui-monospace, monospace;
+    background: rgb(var(--ow-accent-rgb, 89 240 122) / 0.2);
+    border: 1px solid rgb(var(--ow-accent-rgb, 89 240 122) / 0.6);
+    color: var(--ow-accent, #59f07a);
+    font-family: var(--ow-mono, "IBM Plex Mono", ui-monospace, Menlo, monospace);
     font-size: max(0.7rem, 12px);
     letter-spacing: 0.03em;
     cursor: pointer;
@@ -312,7 +327,7 @@
 }
 
 .tg-selection-indicator:hover {
-    background: rgba(125, 255, 176, 0.32);
+    background: rgb(var(--ow-accent-rgb, 89 240 122) / 0.32);
 }
 
 .tg-incident-type {
@@ -410,7 +425,7 @@
 .tg-world-news-camera {
     border: 0;
     padding: 0;
-    color: #7dffb0;
+    color: var(--ow-accent, #59f07a);
     text-decoration: underline;
 }
 
@@ -449,13 +464,13 @@
 .tg-world-news-playback-row input[type="range"] {
     flex: 1 1 auto;
     min-width: 0;
-    accent-color: #7dffb0;
+    accent-color: var(--ow-accent, #59f07a);
 }
 
 .tg-world-news-play {
     background: transparent;
-    border: 1px solid rgba(125, 255, 176, 0.6);
-    color: #7dffb0;
+    border: 1px solid rgb(var(--ow-accent-rgb, 89 240 122) / 0.6);
+    color: var(--ow-accent, #59f07a);
     font: inherit;
     padding: 0.2rem 0.5rem;
     cursor: pointer;
@@ -478,7 +493,7 @@
     width: 14px;
     height: 14px;
     cursor: nwse-resize;
-    background: linear-gradient(135deg, transparent 50%, rgba(125, 255, 176, 0.6) 50%);
+    background: linear-gradient(135deg, transparent 50%, rgb(var(--ow-accent-rgb, 89 240 122) / 0.6) 50%);
 }
 
 /* Weather-on-zoom - a single fixed HUD panel (not draggable, only one ever exists) that always
@@ -492,9 +507,9 @@
     max-width: 260px;
     padding: 0.5rem 0.7rem;
     background: rgba(5, 8, 10, 0.75);
-    border: 1px solid rgba(125, 255, 176, 0.4);
-    color: #7dffb0;
-    font-family: "Share Tech Mono", ui-monospace, monospace;
+    border: 1px solid rgb(var(--ow-accent-rgb, 89 240 122) / 0.4);
+    color: var(--ow-accent, #59f07a);
+    font-family: var(--ow-mono, "IBM Plex Mono", ui-monospace, Menlo, monospace);
     pointer-events: none;
     display: none;
 }
@@ -521,9 +536,9 @@
     max-width: 260px;
     padding: 0.4rem 0.6rem;
     background: rgba(5, 8, 10, 0.9);
-    border: 1px solid rgba(125, 255, 176, 0.5);
-    color: #7dffb0;
-    font-family: "Share Tech Mono", ui-monospace, monospace;
+    border: 1px solid rgb(var(--ow-accent-rgb, 89 240 122) / 0.5);
+    color: var(--ow-accent, #59f07a);
+    font-family: var(--ow-mono, "IBM Plex Mono", ui-monospace, Menlo, monospace);
     font-size: max(0.7rem, 12px);
     line-height: 1.35;
     box-shadow: 0 0 14px rgba(0, 0, 0, 0.5);
@@ -546,7 +561,7 @@
 .tg-hover-tooltip-website {
     display: inline-block;
     margin-top: 0.3rem;
-    color: #7dffb0;
+    color: var(--ow-accent, #59f07a);
     text-decoration: underline;
     pointer-events: auto;
     cursor: pointer;
@@ -564,14 +579,14 @@
     width: 160px;
     height: 90px;
     object-fit: cover;
-    border: 1px solid rgba(125, 255, 176, 0.4);
+    border: 1px solid rgb(var(--ow-accent-rgb, 89 240 122) / 0.4);
 }
 
 .tg-hover-photo-prev,
 .tg-hover-photo-next {
-    background: rgba(125, 255, 176, 0.15);
-    border: 1px solid rgba(125, 255, 176, 0.5);
-    color: #7dffb0;
+    background: rgb(var(--ow-accent-rgb, 89 240 122) / 0.15);
+    border: 1px solid rgb(var(--ow-accent-rgb, 89 240 122) / 0.5);
+    color: var(--ow-accent, #59f07a);
     font-size: 0.9rem;
     line-height: 1;
     padding: 0.2rem 0.4rem;
@@ -660,7 +675,7 @@
 .tg-coverage-map-toggle {
     min-height: 32px;
     padding: 0.15rem 0.5rem;
-    border: 1px solid rgba(125, 255, 176, 0.45);
+    border: 1px solid rgb(var(--ow-accent-rgb, 89 240 122) / 0.45);
     border-radius: 0.25rem;
     background: transparent;
     color: inherit;
@@ -674,7 +689,7 @@
     font-size: max(0.6rem, 12px);
 }
 
-.tg-coverage-status.is-ok { color: #7dffb0; opacity: 0.85; }
+.tg-coverage-status.is-ok { color: var(--ow-accent, #59f07a); opacity: 0.85; }
 
 @media (pointer: coarse) {
     .tg-coverage-map-toggle { min-height: 44px; }
@@ -700,9 +715,9 @@
 .tg-timelapse-play {
     min-height: 32px;
     padding: 0.15rem 0.5rem;
-    border: 1px solid rgba(125, 255, 176, 0.5);
+    border: 1px solid rgb(var(--ow-accent-rgb, 89 240 122) / 0.5);
     background: none;
-    color: #7dffb0;
+    color: var(--ow-accent, #59f07a);
     font: inherit;
     cursor: pointer;
 }
@@ -729,9 +744,9 @@
     width: min(640px, calc(100% - 2rem));
     padding: 0.45rem 0.6rem;
     background: rgba(5, 8, 10, 0.82);
-    border: 1px solid rgba(125, 255, 176, 0.4);
-    color: #7dffb0;
-    font-family: "Share Tech Mono", ui-monospace, monospace;
+    border: 1px solid rgb(var(--ow-accent-rgb, 89 240 122) / 0.4);
+    color: var(--ow-accent, #59f07a);
+    font-family: var(--ow-mono, "IBM Plex Mono", ui-monospace, Menlo, monospace);
     display: none;
 }
 
@@ -747,9 +762,9 @@
     min-height: 32px;
     min-width: 32px;
     padding: 0.15rem 0.45rem;
-    border: 1px solid rgba(125, 255, 176, 0.5);
+    border: 1px solid rgb(var(--ow-accent-rgb, 89 240 122) / 0.5);
     background: none;
-    color: #7dffb0;
+    color: var(--ow-accent, #59f07a);
     font: inherit;
     font-size: max(0.7rem, 12px);
     cursor: pointer;
@@ -757,14 +772,14 @@
 }
 
 .tg-radar-btn:hover,
-.tg-radar-btn:focus-visible { background: rgba(125, 255, 176, 0.15); }
+.tg-radar-btn:focus-visible { background: rgb(var(--ow-accent-rgb, 89 240 122) / 0.15); }
 
 /* The track carries a bright tick at "now" (--tg-radar-now, set per timeline) so the observed
    past and the forecast future read at a glance. */
 .tg-radar-slider {
     flex: 1 1 auto;
     min-width: 0;
-    accent-color: #7dffb0;
+    accent-color: var(--ow-accent, #59f07a);
     background: linear-gradient(90deg,
         transparent calc(var(--tg-radar-now, 0%) - 1px),
         #ffd166 calc(var(--tg-radar-now, 0%) - 1px),
@@ -836,7 +851,7 @@
     background: #111;
     border: 2px solid #333;
     color: #ffb000;
-    font-family: "Share Tech Mono", ui-monospace, monospace;
+    font-family: var(--ow-mono, "IBM Plex Mono", ui-monospace, Menlo, monospace);
     font-size: 0.85rem;
     font-weight: 700;
     letter-spacing: 0.08em;
@@ -854,7 +869,7 @@
 /* "Ask the cameras" results (CameraConditions levels), matching the dots on the globe. */
 .tg-condition-bad { border-left: 3px solid #ff3b3b; }
 .tg-condition-caution { border-left: 3px solid #ffb000; }
-.tg-condition-ok { border-left: 3px solid #7dffb0; }
+.tg-condition-ok { border-left: 3px solid var(--ow-accent, #59f07a); }
 .tg-condition-unknown { border-left: 3px solid #8a8a8a; }
 .tg-route-form select { min-width: 0; flex: 1 1 auto; }
 
@@ -890,19 +905,19 @@
 }
 .tg-sv-arrow svg { width: 100%; height: 100%; fill: currentColor; }
 .tg-sv-arrow:hover,
-.tg-sv-arrow:focus-visible { background: rgba(125, 255, 176, 0.55); outline: none; }
+.tg-sv-arrow:focus-visible { background: rgb(var(--ow-accent-rgb, 89 240 122) / 0.55); outline: none; }
 
 /* Incident panel: REPORT (PDF) link (the panel is built by tactical-globe.js, so this lives here). */
 .tg-incident-report {
     display: inline-block;
     margin-top: 0.5rem;
     padding: 0.3rem 0.6rem;
-    border: 1px solid rgba(125, 255, 176, 0.6);
-    color: #7dffb0;
+    border: 1px solid rgb(var(--ow-accent-rgb, 89 240 122) / 0.6);
+    color: var(--ow-accent, #59f07a);
     text-decoration: none;
     letter-spacing: 0.05em;
 }
-.tg-incident-report:hover { background: rgba(125, 255, 176, 0.15); }
+.tg-incident-report:hover { background: rgb(var(--ow-accent-rgb, 89 240 122) / 0.15); }
 @media (pointer: coarse) { .tg-incident-report { min-height: 44px; line-height: 2rem; } }
 
 /* A hazard's summary keeps its lines (19-11-26): what happened, then the totals or the list. */
@@ -917,4 +932,12 @@
     opacity: 0.8;
     font-size: var(--gws-type-xs, 12px);
     white-space: normal;
+}
+
+/* Night Ops: panel titles in the display face, caps with tracking; figures stay in the mono face. */
+.tg-stream-panel-header,
+.tg-watch-wall-header,
+.tg-coverage-panel-header {
+    font-family: var(--ow-display, "Chakra Petch", system-ui, sans-serif);
+    letter-spacing: 0.06em;
 }

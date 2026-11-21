@@ -24,7 +24,7 @@ public static class NativeShapes
         MarkerTone.Orange => "#ffb000",
         MarkerTone.Yellow => "#ffb000",
         MarkerTone.Gray => "#3f8f62",
-        _ => "#7dffb0",
+        _ => "#59f07a", // Night Ops green (20-11-26)
     };
 
     // The glyph is near-black on every tone except red, where white reads better.

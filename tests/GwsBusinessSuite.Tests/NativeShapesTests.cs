@@ -185,8 +185,8 @@ public sealed class NativeShapesTests
     [Fact]
     public void MacMapPalette_ShouldMatchTheWebGlobe()
     {
-        Assert.Equal("#7dffb0", NativeShapes.ToneHex(NativeShapes.MarkerTone.Green));
-        Assert.Equal("#7dffb0", NativeShapes.ToneHex(NativeShapes.MarkerTone.Purple));
+        Assert.Equal("#59f07a", NativeShapes.ToneHex(NativeShapes.MarkerTone.Green));
+        Assert.Equal("#59f07a", NativeShapes.ToneHex(NativeShapes.MarkerTone.Purple));
         Assert.Equal("#ffb000", NativeShapes.ToneHex(NativeShapes.MarkerTone.Orange));
         Assert.Equal("#ff3b3b", NativeShapes.ToneHex(NativeShapes.MarkerTone.Red));
         Assert.True(NativeShapes.DarkGlyph(NativeShapes.MarkerTone.Green));

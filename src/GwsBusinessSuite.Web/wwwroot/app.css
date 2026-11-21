@@ -7379,7 +7379,7 @@ a[download][aria-busy="true"] { opacity: .6; cursor: progress; }
 .gws-copy-button:hover, .gws-copy-button:focus-visible { opacity: 1; background: var(--gws-panel-bg-2); }
 .gws-copy-button.is-copied { opacity: 1; color: var(--bs-success); }
 .modal-header > .btn-close { order: 2; margin-left: .25rem; }
-.tg-stream-panel-header > .gws-copy-button { width: 1.6rem; height: 1.6rem; margin-right: .35rem; color: #7dffb0; }
+.tg-stream-panel-header > .gws-copy-button { width: 1.6rem; height: 1.6rem; margin-right: .35rem; color: var(--ow-accent, #59f07a); }
 .tg-stream-panel-header > .gws-copy-button ~ * { order: 2; }
 
 /* ── Media Watch's article reader (20-11-26) ─────────────── */

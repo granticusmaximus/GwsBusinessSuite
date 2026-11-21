@@ -73,7 +73,7 @@ window.tacticalGlobe = (function () {
     // /data/overwatch-land.json, a 15-degree grid, and Esri's dark street map under a green wash
     // fading in as the camera comes down from HOLO.streetsBelowMetres to HOLO.streetsFullMetres.
     const HOLO = {
-        green: '#7dffb0',
+        green: '#59f07a',
         globe: '#04160c',
         landAlpha: 0.07,
         coastAlpha: 0.9,
@@ -932,7 +932,7 @@ window.tacticalGlobe = (function () {
             cluster.billboard.image = pinBillboardImage;
             cluster.billboard.width = 20;
             cluster.billboard.height = 20;
-            cluster.billboard.color = Cesium.Color.fromCssColorString('#7dffb0');
+            cluster.billboard.color = Cesium.Color.fromCssColorString('#59f07a');
             cluster.billboard.disableDepthTestDistance = 0;
             cluster.point.show = false;
             cluster.label.show = true;
@@ -957,7 +957,7 @@ window.tacticalGlobe = (function () {
             cluster.billboard.image = pinBillboardImage;
             cluster.billboard.width = 18;
             cluster.billboard.height = 18;
-            cluster.billboard.color = Cesium.Color.fromCssColorString('#7dffb0');
+            cluster.billboard.color = Cesium.Color.fromCssColorString('#59f07a');
             cluster.billboard.disableDepthTestDistance = 0;
             cluster.point.show = false;
             cluster.label.show = true;
@@ -981,7 +981,7 @@ window.tacticalGlobe = (function () {
             cluster.billboard.image = pinBillboardImage;
             cluster.billboard.width = 20;
             cluster.billboard.height = 20;
-            cluster.billboard.color = Cesium.Color.fromCssColorString('#7dffb0');
+            cluster.billboard.color = Cesium.Color.fromCssColorString('#59f07a');
             cluster.billboard.disableDepthTestDistance = 0;
             cluster.point.show = false;
             cluster.label.show = true;
@@ -1452,7 +1452,7 @@ window.tacticalGlobe = (function () {
         const photo = Object.assign({ name: name || 'Photo' }, info);
         const pin = entities.add({
             position: Cesium.Cartesian3.fromDegrees(info.longitude, info.latitude),
-            billboard: { image: pinBillboardImage, width: 22, height: 22, color: Cesium.Color.fromCssColorString('#7dffb0'), disableDepthTestDistance: 0 },
+            billboard: { image: pinBillboardImage, width: 22, height: 22, color: Cesium.Color.fromCssColorString('#59f07a'), disableDepthTestDistance: 0 },
             label: {
                 text: 'PHOTO', font: '600 11px monospace', fillColor: Cesium.Color.WHITE, outlineColor: Cesium.Color.BLACK, outlineWidth: 3,
                 style: Cesium.LabelStyle.FILL_AND_OUTLINE, pixelOffset: new Cesium.Cartesian2(0, -20), disableDepthTestDistance: 0
@@ -1466,7 +1466,7 @@ window.tacticalGlobe = (function () {
             entry.photoEntities.push(entities.add({
                 polyline: {
                     positions: Cesium.Cartesian3.fromDegreesArray([info.longitude, info.latitude, toLon, toLat]),
-                    width: 3, material: Cesium.Color.fromCssColorString('#7dffb0'), clampToGround: true
+                    width: 3, material: Cesium.Color.fromCssColorString('#59f07a'), clampToGround: true
                 }
             }));
         }
@@ -1766,7 +1766,7 @@ window.tacticalGlobe = (function () {
                     image: cameraPinImage(pin, entry.selectedCameras.has(pin.id)),
                     width: 14,
                     height: 14,
-                    color: Cesium.Color.fromCssColorString('#7dffb0'),
+                    color: Cesium.Color.fromCssColorString('#59f07a'),
                     disableDepthTestDistance: 0
                 }
             });
@@ -1866,7 +1866,7 @@ window.tacticalGlobe = (function () {
     // Time machine: the past view drawn on its own layers - an archived radar mosaic, plus the
     // incidents and earthquakes that were active then - so the live layers (which the page
     // switches off meanwhile) never mix with history.
-    const TIME_MACHINE_COLOURS = { crash: '#ff4d4d', closure: '#ff9f1c', hazard: '#ffd166', earthquake: '#7dffb0',
+    const TIME_MACHINE_COLOURS = { crash: '#ff4d4d', closure: '#ff9f1c', hazard: '#ffd166', earthquake: '#59f07a',
         aircraft: '#e6f1ff', ship: '#4cc9f0', outage: '#f72585' };
 
     function setTimeMachine(containerId, snapshot) {
@@ -1969,7 +1969,7 @@ window.tacticalGlobe = (function () {
         });
     }
 
-    const AIRCRAFT_COLOUR = '#7dffb0';
+    const AIRCRAFT_COLOUR = '#59f07a';
     const AIRCRAFT_PATH_COLOUR = '#b8ffd6';
 
     // Recolours the clicked plane straight away rather than waiting for the next minute's refresh.
@@ -3216,7 +3216,7 @@ window.tacticalGlobe = (function () {
 
     function applyAlertHighlight(entity, severity) {
         if (!entity || !entity.billboard) return;
-        entity.billboard.color = severity ? severityColor(severity) : Cesium.Color.fromCssColorString('#7dffb0');
+        entity.billboard.color = severity ? severityColor(severity) : Cesium.Color.fromCssColorString('#59f07a');
         entity.billboard.width = severity ? 18 : 14;
         entity.billboard.height = severity ? 18 : 14;
         entity._tacticalGlobeAlertSeverity = severity || null;
@@ -3243,7 +3243,7 @@ window.tacticalGlobe = (function () {
             case 'Extreme': return Cesium.Color.fromCssColorString('#ff3b3b');
             case 'Severe': return Cesium.Color.fromCssColorString('#ff9d3b');
             case 'Moderate': return Cesium.Color.fromCssColorString('#ffb000');
-            default: return Cesium.Color.fromCssColorString('#7dffb0');
+            default: return Cesium.Color.fromCssColorString('#59f07a');
         }
     }
 
@@ -3313,7 +3313,7 @@ window.tacticalGlobe = (function () {
             // Sized by independent sources (wire copies count once, 19-11-26), else outlets.
             const outletSize = Math.min(30, 8 + Math.log2(Math.max(2, Number(signal.independentCount) || Number(signal.outletCount) || 2)) * 4);
             const size = iconsReady && signal.icon ? Math.max(18, outletSize) : outletSize;
-            const color = Cesium.Color.fromCssColorString('#7dffb0').withAlpha(signal.active === false ? 0.45 : 1);
+            const color = Cesium.Color.fromCssColorString('#59f07a').withAlpha(signal.active === false ? 0.45 : 1);
             const billboard = {
                 image: iconsReady ? iconPinImage(signal.icon) : pinBillboardImage,
                 width: size,
@@ -3473,7 +3473,7 @@ window.tacticalGlobe = (function () {
                     positions: Cesium.Cartesian3.fromDegreesArray([c.lon, c.lat, signal.lon, signal.lat]),
                     width: Math.min(6, 1 + Math.log2(Math.max(1, c.outlets))),
                     arcType: Cesium.ArcType.GEODESIC,
-                    material: Cesium.Color.fromCssColorString('#7dffb0').withAlpha(0.7)
+                    material: Cesium.Color.fromCssColorString('#59f07a').withAlpha(0.7)
                 }
             });
             line._tgNewsLine = true;
@@ -3520,7 +3520,7 @@ window.tacticalGlobe = (function () {
             point: {
                 pixelSize: 14,
                 color: Cesium.Color.fromCssColorString('#b8ffd6'),
-                outlineColor: Cesium.Color.fromCssColorString('#7dffb0'),
+                outlineColor: Cesium.Color.fromCssColorString('#59f07a'),
                 outlineWidth: 3,
                 disableDepthTestDistance: 0
             }
@@ -3558,7 +3558,7 @@ window.tacticalGlobe = (function () {
 
     // Five steps of one hue, lighter to darker for more outlets; translucent over the imagery.
     const newsShades = [0.12, 0.2, 0.3, 0.42, 0.56].map(function (alpha) {
-        return Cesium.Color.fromCssColorString('#7dffb0').withAlpha(alpha);
+        return Cesium.Color.fromCssColorString('#59f07a').withAlpha(alpha);
     });
     let newsOutlines = null;
 
@@ -3763,9 +3763,9 @@ window.tacticalGlobe = (function () {
             case 'closure':
             case 'closures': return Cesium.Color.fromCssColorString('#ff9d3b');
             case 'roadwork': return Cesium.Color.fromCssColorString('#ffb000');
-            case 'hazard': return Cesium.Color.fromCssColorString('#7dffb0');
-            case 'event': return Cesium.Color.fromCssColorString('#7dffb0');
-            default: return Cesium.Color.fromCssColorString('#7dffb0');
+            case 'hazard': return Cesium.Color.fromCssColorString('#59f07a');
+            case 'event': return Cesium.Color.fromCssColorString('#59f07a');
+            default: return Cesium.Color.fromCssColorString('#59f07a');
         }
     }
 
@@ -3983,7 +3983,7 @@ window.tacticalGlobe = (function () {
     // of data and always named. Drawn at their real height; the ISS carries its next orbit as a line.
     // Holo Wireframe (19-11-26): every satellite is green; the label says what kind it is.
     const satelliteColors = {
-        'space station': '#b8ffd6', 'whole-Earth imagery': '#7dffb0', 'land imagery': '#7dffb0', 'geostationary weather': '#7dffb0'
+        'space station': '#b8ffd6', 'whole-Earth imagery': '#59f07a', 'land imagery': '#59f07a', 'geostationary weather': '#59f07a'
     };
 
     function setSatellites(satellites, containerId) {
@@ -4216,7 +4216,7 @@ window.tacticalGlobe = (function () {
                     height: size,
                     // Holo Wireframe (19-11-26): green, amber when moderate, red when major; the kind
                     // shows in the window and the pin's size.
-                    color: Cesium.Color.fromCssColorString(hazard.severity === 'major' ? '#ff3b3b' : hazard.severity === 'moderate' ? '#ffb000' : '#7dffb0'),
+                    color: Cesium.Color.fromCssColorString(hazard.severity === 'major' ? '#ff3b3b' : hazard.severity === 'moderate' ? '#ffb000' : '#59f07a'),
                     disableDepthTestDistance: 0
                 },
                 // One of the three callouts in view (OverwatchCallouts), in its severity colour.
@@ -4346,7 +4346,7 @@ window.tacticalGlobe = (function () {
         if (entry) entry.signDataSource.entities.removeAll();
     }
 
-    const roadRiskColors = { 'ice-likely': '#ff3b3b', 'near-freezing': '#ffb000', 'clear': '#7dffb0' };
+    const roadRiskColors = { 'ice-likely': '#ff3b3b', 'near-freezing': '#ffb000', 'clear': '#59f07a' };
     const roadRiskLabels = { 'ice-likely': 'ICE LIKELY', 'near-freezing': 'NEAR FREEZING', 'clear': 'NO ICE RISK' };
 
     // stations: [{ id, name, lat, lon, pavementF, airF, dewpointF, precipitation, observedAt, risk,
@@ -4552,7 +4552,7 @@ window.tacticalGlobe = (function () {
             const text = i === 0 ? 'S' : i === all.length - 1 ? 'F' : String(i);
             return entry.viewer.entities.add({
                 position: Cesium.Cartesian3.fromDegrees(Number(stop.lon), Number(stop.lat)),
-                point: { pixelSize: 16, color: Cesium.Color.fromCssColorString('#7dffb0'), outlineColor: Cesium.Color.BLACK, outlineWidth: 2,
+                point: { pixelSize: 16, color: Cesium.Color.fromCssColorString('#59f07a'), outlineColor: Cesium.Color.BLACK, outlineWidth: 2,
                     disableDepthTestDistance: 0 },
                 label: { text: text, font: 'bold 11px monospace', fillColor: Cesium.Color.BLACK, disableDepthTestDistance: 0 }
             });
@@ -4563,7 +4563,7 @@ window.tacticalGlobe = (function () {
             polyline: {
                 positions: Cesium.Cartesian3.fromDegreesArray(flat),
                 width: 4,
-                material: Cesium.Color.fromCssColorString('#7dffb0').withAlpha(0.85),
+                material: Cesium.Color.fromCssColorString('#59f07a').withAlpha(0.85),
                 clampToGround: true
             }
         });
@@ -4601,7 +4601,7 @@ window.tacticalGlobe = (function () {
 
     // points: [{ lat, lon, level: 'bad'|'caution'|'ok'|'unknown' }] - "ask the cameras" results
     // as colored dots along the route; replaced on every call.
-    const conditionColors = { bad: '#ff3b3b', caution: '#ffb000', ok: '#7dffb0', unknown: '#8a8a8a' };
+    const conditionColors = { bad: '#ff3b3b', caution: '#ffb000', ok: '#59f07a', unknown: '#8a8a8a' };
     function setRouteConditions(containerId, points) {
         const entry = viewers.get(containerId || 'tg-viewport');
         if (!entry) return;
@@ -4695,7 +4695,7 @@ window.tacticalGlobe = (function () {
         if (!entry) return;
         clearCoverageMarkers(containerId);
         entry.coverageEntities = (regions || []).map(function (region) {
-            const color = Cesium.Color.fromCssColorString(region.ok ? '#7dffb0' : '#3f8f62');
+            const color = Cesium.Color.fromCssColorString(region.ok ? '#59f07a' : '#3f8f62');
             return entry.viewer.entities.add({
                 position: Cesium.Cartesian3.fromDegrees(Number(region.lon), Number(region.lat)),
                 point: { pixelSize: 9, color: color.withAlpha(0.85), outlineColor: Cesium.Color.BLACK, outlineWidth: 1 },

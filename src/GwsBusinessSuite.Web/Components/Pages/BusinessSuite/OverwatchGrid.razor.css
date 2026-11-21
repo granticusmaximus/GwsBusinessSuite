@@ -8,8 +8,8 @@
 .tg-shell {
     position: relative;
     background: #05080a;
-    color: #7dffb0;
-    font-family: "Share Tech Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+    color: var(--ow-accent, #59f07a);
+    font-family: var(--ow-mono, "IBM Plex Mono", ui-monospace, Menlo, monospace);
     border-radius: var(--gws-radius-md);
     overflow: hidden;
     /* Fills the content area below the admin bar (app.css trims .gws-content's padding on this
@@ -17,7 +17,7 @@
     height: calc(100vh - var(--gws-admin-bar-height, 52px) - 1.5rem);
     height: calc(100dvh - var(--gws-admin-bar-height, 52px) - 1.5rem);
     min-height: 480px;
-    box-shadow: 0 0 0 1px rgba(125, 255, 176, 0.25), 0 20px 60px rgba(0, 0, 0, 0.5);
+    box-shadow: 0 0 0 1px rgb(var(--ow-accent-rgb, 89 240 122) / 0.25), 0 20px 60px rgba(0, 0, 0, 0.5);
 }
 
 .tg-scanlines {
@@ -63,8 +63,8 @@
 
 .tg-search input {
     background: rgba(5, 8, 10, 0.75);
-    border: 1px solid rgba(125, 255, 176, 0.5);
-    color: #7dffb0;
+    border: 1px solid rgb(var(--ow-accent-rgb, 89 240 122) / 0.5);
+    color: var(--ow-accent, #59f07a);
     font-family: inherit;
     font-size: var(--gws-type-xs);
     letter-spacing: 0.04em;
@@ -73,18 +73,18 @@
 }
 
 .tg-search input::placeholder {
-    color: rgba(125, 255, 176, 0.45);
+    color: rgb(var(--ow-accent-rgb, 89 240 122) / 0.45);
 }
 
 .tg-search input:focus {
     outline: none;
-    box-shadow: 0 0 8px rgba(125, 255, 176, 0.5);
+    box-shadow: 0 0 8px rgb(var(--ow-accent-rgb, 89 240 122) / 0.5);
 }
 
 .tg-search button {
     background: rgba(5, 8, 10, 0.7);
-    border: 1px solid rgba(125, 255, 176, 0.5);
-    color: #7dffb0;
+    border: 1px solid rgb(var(--ow-accent-rgb, 89 240 122) / 0.5);
+    color: var(--ow-accent, #59f07a);
     font-family: inherit;
     font-size: var(--gws-type-xs);
     letter-spacing: 0.05em;
@@ -93,7 +93,7 @@
 }
 
 .tg-search button:hover {
-    background: rgba(125, 255, 176, 0.15);
+    background: rgb(var(--ow-accent-rgb, 89 240 122) / 0.15);
 }
 
 .tg-search-status {
@@ -110,23 +110,23 @@
 
 .tg-toggle {
     background: rgba(5, 8, 10, 0.7);
-    border: 1px solid rgba(125, 255, 176, 0.5);
-    color: #7dffb0;
+    border: 1px solid rgb(var(--ow-accent-rgb, 89 240 122) / 0.5);
+    color: var(--ow-accent, #59f07a);
     font-family: inherit;
     font-size: var(--gws-type-xs);
     letter-spacing: 0.05em;
     padding: 0.25rem 0.5rem;
     cursor: pointer;
-    text-shadow: 0 0 6px rgba(125, 255, 176, 0.5);
+    text-shadow: 0 0 6px rgb(var(--ow-accent-rgb, 89 240 122) / 0.5);
 }
 
 .tg-toggle:hover {
-    background: rgba(125, 255, 176, 0.15);
+    background: rgb(var(--ow-accent-rgb, 89 240 122) / 0.15);
 }
 
 .tg-toggle-on {
-    background: rgba(125, 255, 176, 0.28);
-    box-shadow: 0 0 10px rgba(125, 255, 176, 0.5);
+    background: rgb(var(--ow-accent-rgb, 89 240 122) / 0.28);
+    box-shadow: 0 0 10px rgb(var(--ow-accent-rgb, 89 240 122) / 0.5);
 }
 
 /* Fullscreen/focus-mode toggle - a solid-filled icon button rather than the translucent
@@ -141,20 +141,20 @@
     width: 1.9rem;
     height: 1.9rem;
     padding: 0;
-    background: rgba(125, 255, 176, 0.85);
-    border: 1px solid rgba(125, 255, 176, 0.9);
+    background: rgb(var(--ow-accent-rgb, 89 240 122) / 0.85);
+    border: 1px solid rgb(var(--ow-accent-rgb, 89 240 122) / 0.9);
     border-radius: var(--gws-radius-xs);
     color: #04120a;
     font-size: var(--gws-type-md);
 }
 
 .tg-toggle-focus:hover {
-    background: #7dffb0;
+    background: var(--ow-accent, #59f07a);
 }
 
 .tg-toggle-focus.is-active {
-    background: #7dffb0;
-    box-shadow: 0 0 10px rgba(125, 255, 176, 0.6);
+    background: var(--ow-accent, #59f07a);
+    box-shadow: 0 0 10px rgb(var(--ow-accent-rgb, 89 240 122) / 0.6);
 }
 
 .tg-viewport {
@@ -173,7 +173,7 @@
     justify-content: center;
     gap: 0.75rem;
     background: #05080a;
-    text-shadow: 0 0 8px rgba(125, 255, 176, 0.7);
+    text-shadow: 0 0 8px rgb(var(--ow-accent-rgb, 89 240 122) / 0.7);
     transition: opacity 0.6s ease;
 }
 
@@ -190,15 +190,15 @@
 .tg-boot-bar {
     width: 260px;
     height: 6px;
-    border: 1px solid rgba(125, 255, 176, 0.5);
+    border: 1px solid rgb(var(--ow-accent-rgb, 89 240 122) / 0.5);
     overflow: hidden;
 }
 
 .tg-boot-bar-fill {
     height: 100%;
     width: 0%;
-    background: #7dffb0;
-    box-shadow: 0 0 8px rgba(125, 255, 176, 0.9);
+    background: var(--ow-accent, #59f07a);
+    box-shadow: 0 0 8px rgb(var(--ow-accent-rgb, 89 240 122) / 0.9);
     animation: tg-boot-progress 1.8s ease forwards;
 }
 
@@ -219,7 +219,7 @@
     gap: 0.6rem;
     font-size: var(--gws-type-xs);
     padding: 0.6rem 0.8rem;
-    border: 1px dashed rgba(125, 255, 176, 0.45);
+    border: 1px dashed rgb(var(--ow-accent-rgb, 89 240 122) / 0.45);
     background: rgba(5, 8, 10, 0.6);
     max-width: 480px;
     pointer-events: none;
@@ -228,7 +228,7 @@
 .tg-empty-hint-close {
     background: none;
     border: none;
-    color: #7dffb0;
+    color: var(--ow-accent, #59f07a);
     font-size: var(--gws-type-base);
     line-height: 1;
     cursor: pointer;
@@ -250,13 +250,13 @@
     flex-shrink: 0;
     min-height: 2rem;
     padding: 0.1rem 0.6rem;
-    background: rgba(125, 255, 176, 0.15);
-    border: 1px solid rgba(125, 255, 176, 0.5);
-    color: #7dffb0;
+    background: rgb(var(--ow-accent-rgb, 89 240 122) / 0.15);
+    border: 1px solid rgb(var(--ow-accent-rgb, 89 240 122) / 0.5);
+    color: var(--ow-accent, #59f07a);
     font: inherit;
     cursor: pointer;
 }
-.tg-gap-list button:hover { background: rgba(125, 255, 176, 0.3); }
+.tg-gap-list button:hover { background: rgb(var(--ow-accent-rgb, 89 240 122) / 0.3); }
 @container gws-main (min-width: 721px) {
     .tg-shell:has(.tg-side-panel:not(.is-collapsed)) .tg-empty-hint { left: calc(360px + 1.6rem); }
 }
@@ -281,7 +281,7 @@
 
 .tg-coverage-panel-header {
     padding: 0.4rem 0.6rem;
-    border-bottom: 1px solid rgba(125, 255, 176, 0.3);
+    border-bottom: 1px solid rgb(var(--ow-accent-rgb, 89 240 122) / 0.3);
     letter-spacing: 0.05em;
     font-weight: 700;
 }
@@ -298,14 +298,14 @@
     justify-content: space-between;
     gap: 0.5rem;
     padding: 0.4rem 0.6rem;
-    border-bottom: 1px solid rgba(125, 255, 176, 0.15);
+    border-bottom: 1px solid rgb(var(--ow-accent-rgb, 89 240 122) / 0.15);
 }
 
 .tg-coverage-item button,
 .tg-coverage-item .tg-area-kit {
-    background: rgba(125, 255, 176, 0.15);
-    border: 1px solid rgba(125, 255, 176, 0.5);
-    color: #7dffb0;
+    background: rgb(var(--ow-accent-rgb, 89 240 122) / 0.15);
+    border: 1px solid rgb(var(--ow-accent-rgb, 89 240 122) / 0.5);
+    color: var(--ow-accent, #59f07a);
     font-family: inherit;
     font-size: var(--gws-type-xs);
     padding: 0.15rem 0.4rem;
@@ -314,7 +314,7 @@
 }
 
 .tg-coverage-item button:hover {
-    background: rgba(125, 255, 176, 0.3);
+    background: rgb(var(--ow-accent-rgb, 89 240 122) / 0.3);
 }
 
 /* Favorites reuses .tg-coverage-panel's base look but sits on the opposite side, so both panels
@@ -341,26 +341,26 @@
     display: grid;
     gap: 0.35rem;
     padding: 0.5rem 0.6rem;
-    border-bottom: 1px solid rgba(125, 255, 176, 0.3);
+    border-bottom: 1px solid rgb(var(--ow-accent-rgb, 89 240 122) / 0.3);
 }
 
 .tg-route-form input,
 .tg-route-form button {
     min-height: 32px;
     padding: 0.2rem 0.4rem;
-    border: 1px solid rgba(125, 255, 176, 0.5);
+    border: 1px solid rgb(var(--ow-accent-rgb, 89 240 122) / 0.5);
     background: rgba(5, 8, 10, 0.9);
-    color: #7dffb0;
+    color: var(--ow-accent, #59f07a);
     font-family: inherit;
     font-size: var(--gws-type-xs);
 }
 
-.tg-route-form button { background: rgba(125, 255, 176, 0.15); cursor: pointer; }
+.tg-route-form button { background: rgb(var(--ow-accent-rgb, 89 240 122) / 0.15); cursor: pointer; }
 .tg-route-form button:disabled { opacity: 0.5; cursor: default; }
 
 .tg-route-summary {
     padding: 0.45rem 0.6rem;
-    border-bottom: 1px solid rgba(125, 255, 176, 0.3);
+    border-bottom: 1px solid rgb(var(--ow-accent-rgb, 89 240 122) / 0.3);
     line-height: 1.4;
 }
 
@@ -389,9 +389,9 @@
 
 .tg-route-form select {
     min-height: 32px;
-    border: 1px solid rgba(125, 255, 176, 0.5);
+    border: 1px solid rgb(var(--ow-accent-rgb, 89 240 122) / 0.5);
     background: rgba(5, 8, 10, 0.9);
-    color: #7dffb0;
+    color: var(--ow-accent, #59f07a);
     font-family: inherit;
     font-size: var(--gws-type-xs);
 }
@@ -414,11 +414,11 @@
 .tg-route-stop button,
 .tg-route-row button { flex-shrink: 0; }
 
-.tg-route-stop button.is-on { background: rgba(125, 255, 176, 0.35); }
+.tg-route-stop button.is-on { background: rgb(var(--ow-accent-rgb, 89 240 122) / 0.35); }
 
 .tg-route-subheader {
     padding: 0.35rem 0.6rem;
-    border-bottom: 1px solid rgba(125, 255, 176, 0.3);
+    border-bottom: 1px solid rgb(var(--ow-accent-rgb, 89 240 122) / 0.3);
     letter-spacing: 0.05em;
     font-weight: 700;
 }
@@ -449,7 +449,7 @@
     padding: 0.7rem 0.8rem;
     pointer-events: none;
     background: linear-gradient(to bottom, rgba(0, 0, 0, 0.55), rgba(0, 0, 0, 0));
-    text-shadow: 0 0 6px rgba(125, 255, 176, 0.5);
+    text-shadow: 0 0 6px rgb(var(--ow-accent-rgb, 89 240 122) / 0.5);
     letter-spacing: 0.05em;
 }
 
@@ -480,8 +480,8 @@
     min-height: 34px;
     padding: 0 0.55rem;
     background: rgba(5, 8, 10, 0.82);
-    border: 1px solid rgba(125, 255, 176, 0.5);
-    color: #7dffb0;
+    border: 1px solid rgb(var(--ow-accent-rgb, 89 240 122) / 0.5);
+    color: var(--ow-accent, #59f07a);
     font-family: inherit;
     font-size: var(--gws-type-xs);
     letter-spacing: 0.05em;
@@ -489,17 +489,17 @@
 }
 
 .tg-icon-btn:hover,
-.tg-pill:hover { background: rgba(125, 255, 176, 0.15); }
+.tg-pill:hover { background: rgb(var(--ow-accent-rgb, 89 240 122) / 0.15); }
 
 .tg-icon-btn.is-active,
 .tg-pill.is-active {
-    background: rgba(125, 255, 176, 0.28);
-    box-shadow: 0 0 10px rgba(125, 255, 176, 0.45);
+    background: rgb(var(--ow-accent-rgb, 89 240 122) / 0.28);
+    box-shadow: 0 0 10px rgb(var(--ow-accent-rgb, 89 240 122) / 0.45);
 }
 
 .tg-icon-btn:focus-visible,
 .tg-pill:focus-visible,
-.tg-tab:focus-visible { outline: 2px solid #7dffb0; outline-offset: 2px; }
+.tg-tab:focus-visible { outline: 2px solid var(--ow-accent, #59f07a); outline-offset: 2px; }
 
 /* Side panel: one tabbed panel on the left (like Google Maps). */
 .tg-side-panel {
@@ -513,7 +513,7 @@
     display: flex;
     flex-direction: column;
     background: rgba(5, 8, 10, 0.9);
-    border: 1px solid rgba(125, 255, 176, 0.4);
+    border: 1px solid rgb(var(--ow-accent-rgb, 89 240 122) / 0.4);
     font-size: var(--gws-type-xs);
     box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
 }
@@ -523,7 +523,7 @@
 .tg-tabs {
     display: grid;
     grid-template-columns: repeat(4, 1fr);
-    border-bottom: 1px solid rgba(125, 255, 176, 0.35);
+    border-bottom: 1px solid rgb(var(--ow-accent-rgb, 89 240 122) / 0.35);
 }
 
 .tg-tab {
@@ -532,15 +532,15 @@
     background: none;
     border: none;
     border-bottom: 2px solid transparent;
-    color: rgba(125, 255, 176, 0.75);
+    color: rgb(var(--ow-accent-rgb, 89 240 122) / 0.75);
     font-family: inherit;
     font-size: max(0.72rem, 12px);
     letter-spacing: 0.06em;
     cursor: pointer;
 }
 
-.tg-tab:hover { color: #7dffb0; background: rgba(125, 255, 176, 0.08); }
-.tg-tab.is-active { color: #7dffb0; border-bottom-color: #7dffb0; background: rgba(125, 255, 176, 0.12); }
+.tg-tab:hover { color: var(--ow-accent, #59f07a); background: rgb(var(--ow-accent-rgb, 89 240 122) / 0.08); }
+.tg-tab.is-active { color: var(--ow-accent, #59f07a); border-bottom-color: var(--ow-accent, #59f07a); background: rgb(var(--ow-accent-rgb, 89 240 122) / 0.12); }
 
 .tg-tab-body {
     flex: 1 1 auto;
@@ -559,7 +559,7 @@
     max-height: calc(100% - 9rem);
     overflow-y: auto;
     background: rgba(5, 8, 10, 0.94);
-    border: 1px solid rgba(125, 255, 176, 0.45);
+    border: 1px solid rgb(var(--ow-accent-rgb, 89 240 122) / 0.45);
     font-size: var(--gws-type-xs);
     box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
 }
@@ -575,7 +575,7 @@
 .tg-panel-close {
     background: none;
     border: none;
-    color: #7dffb0;
+    color: var(--ow-accent, #59f07a);
     font-size: var(--gws-type-lg);
     line-height: 1;
     min-width: 28px;
@@ -585,7 +585,7 @@
 
 .tg-layer-group {
     padding: 0.5rem 0.6rem;
-    border-bottom: 1px solid rgba(125, 255, 176, 0.18);
+    border-bottom: 1px solid rgb(var(--ow-accent-rgb, 89 240 122) / 0.18);
 }
 
 .tg-layer-group-title { opacity: 0.7; margin-bottom: 0.35rem; letter-spacing: 0.08em; }
@@ -626,8 +626,8 @@
 }
 
 .tg-map-controls .tg-icon-btn { min-width: 38px; min-height: 38px; font-size: var(--gws-type-md); }
-.tg-map-controls .tg-toggle-focus { width: auto; height: auto; border-radius: 0; background: rgba(5, 8, 10, 0.82); color: #7dffb0; }
-.tg-map-controls .tg-toggle-focus:hover { background: rgba(125, 255, 176, 0.15); }
+.tg-map-controls .tg-toggle-focus { width: auto; height: auto; border-radius: 0; background: rgba(5, 8, 10, 0.82); color: var(--ow-accent, #59f07a); }
+.tg-map-controls .tg-toggle-focus:hover { background: rgb(var(--ow-accent-rgb, 89 240 122) / 0.15); }
 
 .tg-route-actions { padding: 0.4rem 0.6rem; }
 
@@ -659,7 +659,7 @@
 .tg-directions > summary { cursor: pointer; list-style: none; }
 .tg-directions > summary::-webkit-details-marker { display: none; }
 .tg-directions-list { list-style: none; margin: 0; padding: 0; counter-reset: tg-step; }
-.tg-directions-list li { border-bottom: 1px solid rgba(125, 255, 176, 0.15); }
+.tg-directions-list li { border-bottom: 1px solid rgb(var(--ow-accent-rgb, 89 240 122) / 0.15); }
 .tg-direction-step {
     display: grid;
     grid-template-columns: 1.4rem 1fr auto;
@@ -669,13 +669,13 @@
     padding: 0.45rem 0.6rem;
     background: none;
     border: none;
-    color: #7dffb0;
+    color: var(--ow-accent, #59f07a);
     font: inherit;
     text-align: left;
     cursor: pointer;
 }
 .tg-direction-step:hover,
-.tg-direction-step:focus-visible { background: rgba(125, 255, 176, 0.1); outline: none; }
+.tg-direction-step:focus-visible { background: rgb(var(--ow-accent-rgb, 89 240 122) / 0.1); outline: none; }
 .tg-direction-step i { font-size: var(--gws-type-base); line-height: 1.2; }
 .tg-direction-text { line-height: 1.4; }
 .tg-direction-step small { opacity: 0.75; white-space: nowrap; }
@@ -686,13 +686,13 @@
     align-items: center;
     min-height: 32px;
     padding: 0.2rem 0.5rem;
-    border: 1px solid rgba(125, 255, 176, 0.5);
+    border: 1px solid rgb(var(--ow-accent-rgb, 89 240 122) / 0.5);
     background: rgba(5, 8, 10, 0.9);
-    color: #7dffb0;
+    color: var(--ow-accent, #59f07a);
     font-size: var(--gws-type-xs);
     text-decoration: none;
 }
-.tg-link-btn:hover { background: rgba(125, 255, 176, 0.15); color: #7dffb0; }
+.tg-link-btn:hover { background: rgb(var(--ow-accent-rgb, 89 240 122) / 0.15); color: var(--ow-accent, #59f07a); }
 
 /* Street view panel and the "click the map" banner. */
 .tg-streetview-panel { width: min(420px, calc(100% - 1.6rem)); }
@@ -751,7 +751,7 @@
     outline: none;
 }
 .tg-sv-canvas.is-dragging { cursor: grabbing; }
-.tg-sv-canvas:focus-visible { box-shadow: inset 0 0 0 2px #7dffb0; }
+.tg-sv-canvas:focus-visible { box-shadow: inset 0 0 0 2px var(--ow-accent, #59f07a); }
 .tg-sv-arrows { position: absolute; inset: 0; pointer-events: none; }
 .tg-sv-hud {
     position: absolute;
@@ -771,7 +771,7 @@
     gap: 0.2rem 0.8rem;
     padding: 0.35rem 0.6rem;
     background: rgba(5, 8, 10, 0.75);
-    border: 1px solid rgba(125, 255, 176, 0.4);
+    border: 1px solid rgb(var(--ow-accent-rgb, 89 240 122) / 0.4);
     font-size: var(--gws-type-xs);
 }
 .tg-sv-compass {
@@ -782,7 +782,7 @@
     height: 52px;
     border-radius: 50%;
     background: rgba(5, 8, 10, 0.75);
-    border: 1px solid rgba(125, 255, 176, 0.5);
+    border: 1px solid rgb(var(--ow-accent-rgb, 89 240 122) / 0.5);
 }
 .tg-sv-compass-needle {
     position: absolute;
@@ -801,7 +801,7 @@
     transform: translate(-50%, -50%);
     padding: 0.5rem 0.9rem;
     background: rgba(5, 8, 10, 0.85);
-    border: 1px solid rgba(125, 255, 176, 0.5);
+    border: 1px solid rgb(var(--ow-accent-rgb, 89 240 122) / 0.5);
     font-size: var(--gws-type-sm);
 }
 .tg-sv-credit {
@@ -839,9 +839,9 @@
 .tg-depart-bar.is-fair span { background: #ffd166; }
 .tg-depart-bar.is-poor span { background: #ff6b6b; }
 .tg-depart-bar.is-chosen span { outline: 2px solid #fff; outline-offset: 1px; }
-.tg-depart-bar:focus-visible { outline: 2px solid #7dffb0; }
+.tg-depart-bar:focus-visible { outline: 2px solid var(--ow-accent, #59f07a); }
 .tg-depart-axis { display: flex; justify-content: space-between; padding: 0.15rem 0.6rem 0.3rem; opacity: 0.7; font-size: max(0.68rem, 12px); }
-.tg-depart-detail { padding: 0.35rem 0.6rem; border-top: 1px solid rgba(125, 255, 176, 0.18); }
+.tg-depart-detail { padding: 0.35rem 0.6rem; border-top: 1px solid rgb(var(--ow-accent-rgb, 89 240 122) / 0.18); }
 .tg-depart-detail ul { margin: 0.3rem 0; padding-left: 1.1rem; }
 
 /* Camera watch detection: before/after frames side by side. */
@@ -860,11 +860,11 @@
     width: min(720px, calc(100% - 7rem));
     padding: 0.5rem 0.7rem;
     background: rgba(5, 8, 10, 0.9);
-    border: 1px solid #7dffb0;
+    border: 1px solid var(--ow-accent, #59f07a);
     font-size: var(--gws-type-xs);
 }
 .tg-tm-row { display: flex; align-items: center; gap: 0.5rem; }
-.tg-tm-slider { flex: 1 1 auto; min-width: 0; accent-color: #7dffb0; }
+.tg-tm-slider { flex: 1 1 auto; min-width: 0; accent-color: var(--ow-accent, #59f07a); }
 .tg-tm-label { display: flex; flex-wrap: wrap; gap: 0.2rem 0.6rem; margin-top: 0.35rem; }
 .tg-tm-note { color: #ffd166; }
 .tg-tm-cameras { top: auto; bottom: 6.5rem; width: min(380px, calc(100% - 1.6rem)); }
@@ -894,11 +894,11 @@
     overflow-y: auto;
     padding: 0.6rem 0.7rem;
     background: rgba(5, 8, 10, 0.94);
-    border: 1px solid #7dffb0;
+    border: 1px solid var(--ow-accent, #59f07a);
     font-size: var(--gws-type-sm);
 }
 .tg-drive-next { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.2rem 0.6rem; font-size: var(--gws-type-base); }
-.tg-drive-next strong { color: #7dffb0; font-size: var(--gws-type-xl); }
+.tg-drive-next strong { color: var(--ow-accent, #59f07a); font-size: var(--gws-type-xl); }
 .tg-drive-meta { margin-top: 0.3rem; opacity: 0.85; }
 .tg-drive-warning { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.4rem; margin-top: 0.4rem; padding: 0.3rem 0.4rem; border: 1px solid #ff9f1c; color: #ff9f1c; }
 .tg-drive-ahead { margin-top: 0.3rem; color: #ffd166; overflow-wrap: anywhere; }
@@ -912,8 +912,8 @@
 .tg-briefing-panel .tg-route-row select {
     min-height: 2.25rem;
     padding: 0.15rem 0.5rem;
-    background: rgba(125, 255, 176, 0.15);
-    border: 1px solid rgba(125, 255, 176, 0.6);
+    background: rgb(var(--ow-accent-rgb, 89 240 122) / 0.15);
+    border: 1px solid rgb(var(--ow-accent-rgb, 89 240 122) / 0.6);
     color: #9fd0ff;
     font: inherit;
     cursor: pointer;
@@ -921,7 +921,7 @@
 .tg-briefing-panel .tg-route-row { padding: 0.4rem 0.6rem; }
 .tg-briefing-panel .tg-route-row select { flex: 1 1 auto; min-width: 0; background: rgba(5, 8, 10, 0.9); }
 .tg-drive button:hover,
-.tg-briefing-panel .tg-route-row button:hover { background: rgba(125, 255, 176, 0.3); }
+.tg-briefing-panel .tg-route-row button:hover { background: rgb(var(--ow-accent-rgb, 89 240 122) / 0.3); }
 .tg-drive button:disabled,
 .tg-briefing-panel .tg-route-row button:disabled { opacity: 0.55; cursor: default; }
 .tg-drive-warning button { border-color: #ff9f1c; color: #ff9f1c; background: rgba(255, 159, 28, 0.15); }
@@ -934,9 +934,9 @@
 .tg-note-body {
     min-height: 4rem;
     resize: vertical;
-    border: 1px solid rgba(125, 255, 176, 0.5);
+    border: 1px solid rgb(var(--ow-accent-rgb, 89 240 122) / 0.5);
     background: rgba(5, 8, 10, 0.9);
-    color: #7dffb0;
+    color: var(--ow-accent, #59f07a);
     font: inherit;
     padding: 0.3rem 0.4rem;
 }
@@ -947,9 +947,9 @@
 .tg-note-new button, .tg-route-form .tg-area-actions button {
     min-height: 2.25rem;
     padding: 0.15rem 0.6rem;
-    background: rgba(125, 255, 176, 0.15);
-    border: 1px solid rgba(125, 255, 176, 0.5);
-    color: #7dffb0;
+    background: rgb(var(--ow-accent-rgb, 89 240 122) / 0.15);
+    border: 1px solid rgb(var(--ow-accent-rgb, 89 240 122) / 0.5);
+    color: var(--ow-accent, #59f07a);
     font: inherit;
     cursor: pointer;
 }
