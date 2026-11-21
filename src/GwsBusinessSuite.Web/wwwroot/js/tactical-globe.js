@@ -91,6 +91,63 @@ window.tacticalGlobe = (function () {
         return Math.max(0, Math.min(1, (HOLO.streetsBelowMetres - heightMetres) / (HOLO.streetsBelowMetres - HOLO.streetsFullMetres)));
     }
 
+    // Night Ops zoom stages (20-11-26; OverwatchMapLook.Stage on the Mac).
+    const STAGES = { orbitAboveMetres: 2000000, regionalAboveMetres: 50000, approachAboveMetres: 5000 };
+    // The sun for the HUD (Night Ops phase 4, 20-11-26; OverwatchMapLook.SunPosition on the Mac).
+    function sunPosition(date, lat, lon) {
+        const rad = Math.PI / 180, d = date.getTime() / 86400000 - 10957.5;
+        const g = (357.529 + 0.98560028 * d) * rad, q = 280.459 + 0.98564736 * d;
+        const L = (q + 1.915 * Math.sin(g) + 0.020 * Math.sin(2 * g)) * rad, e = (23.439 - 0.00000036 * d) * rad;
+        const ra = Math.atan2(Math.cos(e) * Math.sin(L), Math.cos(L)), dec = Math.asin(Math.sin(e) * Math.sin(L));
+        const gmst = ((18.697374558 + 24.06570982441908 * d) % 24 + 24) % 24, ha = (gmst * 15 + lon) * rad - ra, la = lat * rad;
+        const el = Math.asin(Math.sin(la) * Math.sin(dec) + Math.cos(la) * Math.cos(dec) * Math.cos(ha));
+        const az = Math.atan2(-Math.sin(ha), Math.tan(dec) * Math.cos(la) - Math.sin(la) * Math.cos(ha));
+        return { az: (az / rad + 360) % 360, el: el / rad };
+    }
+
+    // One HUD line from the camera: heading, tilt, altitude, ground height and place at the centre of
+    // the view, and the sun there. At most every 150 ms; called from the holo look's camera handler.
+    let lastReadout = 0;
+    function updateReadout(viewer, height) {
+        const now = Date.now();
+        if (now - lastReadout < 150) return;
+        lastReadout = now;
+        const out = document.getElementById('tg-readout');
+        if (!out) return;
+        const camera = viewer.camera, canvas = viewer.scene.canvas;
+        const heading = Math.round((Cesium.Math.toDegrees(camera.heading) + 360) % 360);
+        const tilt = Math.round(90 + Cesium.Math.toDegrees(camera.pitch));
+        let lat = Cesium.Math.toDegrees(camera.positionCartographic.latitude), lon = Cesium.Math.toDegrees(camera.positionCartographic.longitude), ground = null;
+        const centre = camera.pickEllipsoid(new Cesium.Cartesian2(canvas.clientWidth / 2, canvas.clientHeight / 2), viewer.scene.globe.ellipsoid);
+        if (centre) {
+            const place = Cesium.Cartographic.fromCartesian(centre);
+            lat = Cesium.Math.toDegrees(place.latitude);
+            lon = Cesium.Math.toDegrees(place.longitude);
+            const h = viewer.scene.globe.getHeight(place);
+            if (typeof h === 'number' && isFinite(h)) ground = Math.round(h);
+        }
+        const alt = height >= 10000 ? (height / 1000).toFixed(height >= 100000 ? 0 : 1) + ' km' : Math.round(height) + ' m';
+        const sun = sunPosition(new Date(), lat, lon);
+        const parts = ['HDG ' + String(heading).padStart(3, '0') + '°'];
+        if (tilt > 5) parts.push('TILT ' + tilt + '°');
+        parts.push('ALT ' + alt);
+        if (ground !== null) parts.push('GND ' + ground + ' m');
+        parts.push(Math.abs(lat).toFixed(3) + (lat >= 0 ? ' N ' : ' S ') + Math.abs(lon).toFixed(3) + (lon >= 0 ? ' E' : ' W'));
+        parts.push('SUN ' + Math.round(sun.az) + '°/' + Math.round(sun.el) + '°');
+        out.textContent = parts.join(' · ');
+        // Night mode (phase 5): below civil twilight at the centre of the view, the map dims and the
+        // grain strengthens (CSS on data-ow-night). No lighting shader: WebKit can't compile it.
+        const shell = out.closest('.tg-shell');
+        if (shell) shell.dataset.owNight = sun.el < -6 ? 'night' : sun.el < 0 ? 'dusk' : 'day';
+    }
+
+    function zoomStage(heightMetres) {
+        if (heightMetres > STAGES.orbitAboveMetres) return 'orbit';
+        if (heightMetres > STAGES.regionalAboveMetres) return 'regional';
+        if (heightMetres > STAGES.approachAboveMetres) return 'approach';
+        return 'ground';
+    }
+
     // Focus one layer (19-11-26; OverwatchFocus.cs): every other 'tg-' layer dims to a quarter,
     // the same as the Mac map. spec: { web: ['tg-world-news', ...], native: [...] }, or null to end it.
     // Each dimmed entity keeps its own colours (_tgUndim) so ending the focus puts them back, and
@@ -209,8 +266,17 @@ window.tacticalGlobe = (function () {
                 arcType: Cesium.ArcType.RHUMB, material: green.withAlpha(HOLO.gridAlpha) } });
         }
         await viewer.dataSources.add(land);
+        const shell = viewer.container && viewer.container.closest ? viewer.container.closest('.tg-shell') : null;
+        const stageName = document.getElementById('tg-stage-name');
         const fade = function () {
-            const share = holoStreetShare(viewer.camera.positionCartographic.height);
+            const height = viewer.camera.positionCartographic.height;
+            const share = holoStreetShare(height);
+            const stage = zoomStage(height);
+            if (shell && shell.dataset.owStage !== stage) {
+                shell.dataset.owStage = stage;
+                if (stageName) stageName.textContent = stage.toUpperCase();
+            }
+            updateReadout(viewer, height);
             if (streets) streets.alpha = share * HOLO.streetAlpha;
             if (wash) wash.alpha = share * HOLO.washAlpha;
             land.show = share < 0.98;
@@ -857,6 +923,16 @@ window.tacticalGlobe = (function () {
         // later globe/material variant. Cesium reports that path through Scene.renderError; it
         // is not guaranteed to become an uncaught window error.
         const onRenderError = function (scene, error) {
+            // Terrain shading (contours, slope) is the one optional globe shader: when a browser
+            // can't draw it, only the shading goes, never the globe (Night Ops phase 3, 20-11-26).
+            if (scene.globe && scene.globe.material) {
+                scene.globe.material = undefined;
+                const shaded = viewers.get(containerId);
+                if (shaded) shaded.terrainShadingFailed = true;
+                console.warn('Overwatch: terrain shading isn\'t supported in this browser; it was switched off.', error);
+                scene.requestRender();
+                return;
+            }
             if (handleShaderFailure(containerId, error)) {
                 console.warn('Overwatch 3D globe unavailable on this GPU/browser; falling back to a non-3D placeholder.', error);
                 return;
@@ -1972,6 +2048,12 @@ window.tacticalGlobe = (function () {
     const AIRCRAFT_COLOUR = '#59f07a';
     const AIRCRAFT_PATH_COLOUR = '#b8ffd6';
 
+    // A plane's reported altitude in metres (feet in the feed), or 0 when it has none.
+    function aircraftAltitudeMetres(plane) {
+        const feet = Number(plane && plane.altitudeFeet);
+        return Number.isFinite(feet) && feet > 0 ? feet * 0.3048 : 0;
+    }
+
     // Recolours the clicked plane straight away rather than waiting for the next minute's refresh.
     function highlightAircraft(entry, id, on) {
         const billboards = entry.aircraftPrimitives && entry.aircraftPrimitives.billboards;
@@ -2120,7 +2202,7 @@ window.tacticalGlobe = (function () {
         shell.appendChild(panel);
         makeDraggableAndResizable(panel, panel.querySelector('.tg-stream-panel-header'));
         aircraftPanel = panel;
-        entry.aircraftPath = { id: plane.id, current: [Number(plane.lon), Number(plane.lat)], track: [], origin: null, destination: null, entities: [] };
+        entry.aircraftPath = { id: plane.id, current: [Number(plane.lon), Number(plane.lat)], altitudeMetres: aircraftAltitudeMetres(plane), track: [], origin: null, destination: null, entities: [] };
         highlightAircraft(entry, plane.id, true);
 
         const token = ++aircraftRequestToken;
@@ -2194,6 +2276,22 @@ window.tacticalGlobe = (function () {
                 material: dashed ? new Cesium.PolylineDashMaterialProperty({ color: colour, dashLength: 12 }) : colour.withAlpha(0.9)
             } });
         };
+        // Night Ops drop line (phase 4, 20-11-26): in 3D the selected plane's real height, a dashed line
+        // from the ground up to a point at its altitude, labelled with it.
+        if (entry.threeDOn && path.altitudeMetres > 0) {
+            add({ polyline: {
+                positions: Cesium.Cartesian3.fromDegreesArrayHeights([path.current[0], path.current[1], 0, path.current[0], path.current[1], path.altitudeMetres]),
+                width: 1.5, arcType: Cesium.ArcType.NONE,
+                material: new Cesium.PolylineDashMaterialProperty({ color: Cesium.Color.fromCssColorString('#66e0c8'), dashLength: 10 })
+            } });
+            add({
+                position: Cesium.Cartesian3.fromDegrees(path.current[0], path.current[1], path.altitudeMetres),
+                point: { pixelSize: 7, color: Cesium.Color.fromCssColorString('#66e0c8'), outlineColor: Cesium.Color.BLACK, outlineWidth: 1 },
+                label: { text: Math.round(path.altitudeMetres * 3.28084 / 100) * 100 + ' FT', font: '11px monospace', fillColor: Cesium.Color.fromCssColorString('#66e0c8'),
+                    outlineColor: Cesium.Color.BLACK, outlineWidth: 3, style: Cesium.LabelStyle.FILL_AND_OUTLINE, pixelOffset: new Cesium.Cartesian2(12, 0),
+                    horizontalOrigin: Cesium.HorizontalOrigin.LEFT }
+            });
+        }
         if (path.track.length > 0) line(path.track.concat([path.current]), false);
         else if (path.origin) line([[path.origin.longitude, path.origin.latitude], path.current], true);
         if (path.destination) line([path.current, [path.destination.longitude, path.destination.latitude]], true);
@@ -2224,6 +2322,7 @@ window.tacticalGlobe = (function () {
     function updateSelectedAircraft(entry, plane) {
         const path = entry.aircraftPath;
         path.current = [Number(plane.lon), Number(plane.lat)];
+        path.altitudeMetres = aircraftAltitudeMetres(plane);
         drawAircraftPath(entry);
         if (!aircraftPanel) return;
         const readings = formatAircraftReadings(plane);
@@ -2684,12 +2783,68 @@ window.tacticalGlobe = (function () {
         });
     }
 
+    // Night Ops terrain shading (20-11-26): contour lines every 20 m (bold every 100 m) or slope
+    // shading, on the 3D terrain only. Cesium's own ElevationContour and SlopeRamp globe materials;
+    // onRenderError removes them if a browser can't compile them. Returns 'off', 'contours',
+    // 'slope', or 'failed: ...'.
+    const TERRAIN_SHADING = { contourSpacingMetres: 20, contourWidth: 1.2, contourAlpha: 0.55, slopeAlpha: 0.55 };
+
+    function slopeRampImage() {
+        const canvas = document.createElement('canvas');
+        canvas.width = 128;
+        canvas.height = 1;
+        const ctx = canvas.getContext('2d');
+        const ramp = ctx.createLinearGradient(0, 0, 128, 0);
+        ramp.addColorStop(0, 'rgba(89, 240, 122, 0)');
+        ramp.addColorStop(0.35, 'rgba(89, 240, 122, ' + TERRAIN_SHADING.slopeAlpha * 0.4 + ')');
+        ramp.addColorStop(0.6, 'rgba(232, 255, 77, ' + TERRAIN_SHADING.slopeAlpha + ')');
+        ramp.addColorStop(1, 'rgba(255, 90, 60, ' + TERRAIN_SHADING.slopeAlpha + ')');
+        ctx.fillStyle = ramp;
+        ctx.fillRect(0, 0, 128, 1);
+        return canvas;
+    }
+
+    function setTerrainShading(containerId, mode) {
+        const entry = viewers.get(containerId || 'tg-viewport');
+        if (!entry) return 'failed: no globe';
+        const globe = entry.viewer.scene.globe;
+        try {
+            if (mode !== 'contours' && mode !== 'slope') {
+                globe.material = undefined;
+                entry.terrainShading = 'off';
+            } else if (!entry.threeDOn) {
+                return 'failed: turn on 3D terrain first';
+            } else if (entry.terrainShadingFailed) {
+                return 'failed: this browser can\'t draw terrain shading';
+            } else if (mode === 'contours') {
+                globe.material = Cesium.Material.fromType('ElevationContour', {
+                    color: Cesium.Color.fromCssColorString(HOLO.green).withAlpha(TERRAIN_SHADING.contourAlpha),
+                    spacing: TERRAIN_SHADING.contourSpacingMetres,
+                    width: TERRAIN_SHADING.contourWidth
+                });
+                entry.terrainShading = 'contours';
+            } else {
+                globe.material = Cesium.Material.fromType('SlopeRamp', { image: slopeRampImage() });
+                entry.terrainShading = 'slope';
+            }
+            entry.viewer.scene.requestRender();
+            return entry.terrainShading;
+        } catch (error) {
+            globe.material = undefined;
+            entry.terrainShading = 'off';
+            return 'failed: ' + (error && error.message ? error.message : String(error));
+        }
+    }
+
     async function setThreeD(containerId, on) {
         const entry = viewers.get(containerId || 'tg-viewport');
         if (!entry) return 'failed: no globe';
         const viewer = entry.viewer;
+        entry.threeDOn = false;
         try {
             if (!on) {
+                viewer.scene.globe.material = undefined;
+                entry.terrainShading = 'off';
                 viewer.terrainProvider = new Cesium.EllipsoidTerrainProvider();
                 if (entry.threeD && entry.threeD.buildings) entry.threeD.buildings.show = false;
                 return 'off';
@@ -2699,15 +2854,19 @@ window.tacticalGlobe = (function () {
             }
             if (!entry.threeD) {
                 Cesium.Ion.defaultAccessToken = entry.ionToken;
-                const terrain = await Cesium.CesiumTerrainProvider.fromIonAssetId(ION_TERRAIN_ASSET);
+                // Vertex normals so slope shading has something to measure.
+                const terrain = await Cesium.CesiumTerrainProvider.fromIonAssetId(ION_TERRAIN_ASSET, { requestVertexNormals: true });
                 const buildings = await Cesium.Cesium3DTileset.fromIonAssetId(ION_OSM_BUILDINGS_ASSET);
                 // Pale green-grey blocks fit the tactical look and keep camera pins readable.
-                buildings.style = new Cesium.Cesium3DTileStyle({ color: "color('#b9cbbf', 0.9)" });
+                // Night Ops (phase 5, 20-11-26): green-tinted, a little see-through, so pins and
+                // routes behind stay readable.
+                buildings.style = new Cesium.Cesium3DTileStyle({ color: "color('#7fe39a', 0.78)" });
                 viewer.scene.primitives.add(buildings);
                 entry.threeD = { terrain: terrain, buildings: buildings };
             }
             viewer.terrainProvider = entry.threeD.terrain;
             if (entry.threeD.buildings) entry.threeD.buildings.show = true;
+            entry.threeDOn = true;
             return 'on';
         } catch (error) {
             viewer.terrainProvider = new Cesium.EllipsoidTerrainProvider();
@@ -4764,9 +4923,28 @@ window.tacticalGlobe = (function () {
         panel.style.top = Math.max(0, (backdropRect.height - panelRect.height) / 2) + 'px';
 
         const header = panel.querySelector('.tg-stream-panel-header');
-        if (header) makeDraggableAndResizable(panel, header);
+        if (header) {
+            makeDraggableAndResizable(panel, header);
+            addStatusLine(panel, header);
+        }
 
         return backdrop;
+    }
+
+    // Night Ops status line (phase 1, 20-11-26): under every panel's title, what it is, the time it
+    // opened and its state, e.g. "CAMERA ▸ 14:05 · LIVE". The kind is the panel's data-ow-kind when a
+    // builder sets one, else the title's first word.
+    function addStatusLine(panel, header) {
+        if (panel.querySelector('.tg-status-line')) return;
+        const title = (header.textContent || '').trim();
+        const kind = (panel.dataset.owKind || title.split(/[\s·:]+/)[0] || 'PANEL').toUpperCase().slice(0, 24);
+        const now = new Date();
+        const time = String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0');
+        const line = document.createElement('div');
+        line.className = 'tg-status-line';
+        line.setAttribute('aria-hidden', 'true');
+        line.textContent = kind + ' ▸ ' + time + ' · ' + (panel.dataset.owState || 'LIVE');
+        header.insertAdjacentElement('afterend', line);
     }
 
     function openIncidentPanel(incident) {
@@ -5413,6 +5591,7 @@ window.tacticalGlobe = (function () {
         setRoadTraffic: setRoadTraffic,
         setTrafficFlow: setTrafficFlow,
         setThreeD: setThreeD,
+        setTerrainShading: setTerrainShading,
         flyToStreetLevel: flyToStreetLevel,
         stopDrive: stopDrive,
         setDriveFollow: setDriveFollow,
@@ -5684,7 +5863,7 @@ window.tacticalGlobe = (function () {
 
         const nativeOperations = new Set([
             'flyTo', 'flyToBounds', 'flyToStreetLevel', 'zoom', 'home', 'dispose',
-            'setTimeMachine', 'clearTimeMachine', 'setMapNotes', 'setThreeD', 'setNightLights', 'setSatelliteScene', 'clearSatelliteScene', 'setMeasure', 'clearMeasure', 'setAircraft', 'setShips',
+            'setTimeMachine', 'clearTimeMachine', 'setMapNotes', 'setThreeD', 'setTerrainShading', 'setNightLights', 'setSatelliteScene', 'clearSatelliteScene', 'setMeasure', 'clearMeasure', 'setAircraft', 'setShips',
             'setAirQuality', 'setPowerOutages', 'setRoadTraffic', 'setTrafficFlow', 'setDriveFollow',
             'setStreetViewMarker', 'clearStreetViewMarker', 'setCameraPins', 'setSelectModeEnabled',
             'setRadarVisible', 'setRadarTimeline', 'setHourlyForecast', 'setWeatherAlerts',

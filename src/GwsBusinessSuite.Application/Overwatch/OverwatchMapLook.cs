@@ -24,6 +24,40 @@ public static class OverwatchMapLook
     public const double StreetBrightness = 1.6;
     public const double WashAlpha = 0.32;
 
+    // Night Ops zoom stages (20-11-26): orbit, regional, approach, ground (zoomStage in tactical-globe.js).
+    public const double OrbitAboveMetres = 2_000_000;
+    public const double RegionalAboveMetres = 50_000;
+    public const double ApproachAboveMetres = 5_000;
+
+    public static string Stage(double heightMetres) => heightMetres switch
+    {
+        > OrbitAboveMetres => "orbit",
+        > RegionalAboveMetres => "regional",
+        > ApproachAboveMetres => "approach",
+        _ => "ground",
+    };
+
+    // The sun's azimuth and elevation in degrees at a place and time, for the HUD (Night Ops phase 4,
+    // 20-11-26; sunPosition in tactical-globe.js). The usual low-precision formula, within about a
+    // degree, which is all a readout needs.
+    public static (double Azimuth, double Elevation) SunPosition(DateTimeOffset when, double latitude, double longitude)
+    {
+        const double Rad = Math.PI / 180;
+        var d = when.ToUnixTimeMilliseconds() / 86400000.0 - 10957.5;
+        var g = (357.529 + 0.98560028 * d) * Rad;
+        var q = 280.459 + 0.98564736 * d;
+        var l = (q + 1.915 * Math.Sin(g) + 0.020 * Math.Sin(2 * g)) * Rad;
+        var e = (23.439 - 0.00000036 * d) * Rad;
+        var ra = Math.Atan2(Math.Cos(e) * Math.Sin(l), Math.Cos(l));
+        var dec = Math.Asin(Math.Sin(e) * Math.Sin(l));
+        var gmst = ((18.697374558 + 24.06570982441908 * d) % 24 + 24) % 24;
+        var ha = (gmst * 15 + longitude) * Rad - ra;
+        var la = latitude * Rad;
+        var el = Math.Asin(Math.Sin(la) * Math.Sin(dec) + Math.Cos(la) * Math.Cos(dec) * Math.Cos(ha));
+        var az = Math.Atan2(-Math.Sin(ha), Math.Tan(dec) * Math.Cos(la) - Math.Sin(la) * Math.Cos(ha));
+        return ((az / Rad + 360) % 360, el / Rad);
+    }
+
     // How much of the street map shows at a camera height: none above StreetsBelowMetres, all of it
     // below StreetsFullMetres (holoStreetShare in tactical-globe.js).
     public static double StreetShare(double heightMetres) =>

@@ -87,6 +87,10 @@
     <div class="tg-viewport" id="tg-viewport"></div>
     <div class="tg-scanlines"></div>
     <div class="tg-vignette"></div>
+    @* Night Ops (20-11-26): tube grain that strengthens as the camera comes down, and the zoom stage. *@
+    <div class="tg-grain" aria-hidden="true"></div>
+    <div class="tg-stage" aria-live="off"><span class="tg-stage-label">STAGE</span> <span id="tg-stage-name">ORBIT</span></div>
+    <div class="tg-readout" id="tg-readout" aria-label="Heading, tilt, altitude, ground height, position and sun"></div>
 
     @* Top bar: panel toggle + search on the left, status and the Layers/info/help buttons on the
        right (Google Maps-style). The search ids are wired up by tactical-globe.js. *@
@@ -163,6 +167,24 @@
                 @if (_threeDError is not null)
                 {
                     <div class="tg-favorites-empty" role="status">@_threeDError</div>
+                }
+                @if (_threeDOn)
+                {
+                    @* Night Ops terrain shading (20-11-26): contour lines or slope, on the 3D terrain only. *@
+                    <div class="tg-hud-toggles" role="group" aria-label="Terrain shading">
+                        <button type="button" data-tg-toggle="contours" class="tg-toggle @(_terrainShading == "contours" ? "tg-toggle-on" : "")"
+                                title="Contour lines every 20 m, on the 3D terrain" @onclick='() => SetTerrainShadingAsync(_terrainShading == "contours" ? "off" : "contours")'>
+                            CONTOURS [@(_terrainShading == "contours" ? "ON" : "OFF")]
+                        </button>
+                        <button type="button" data-tg-toggle="slope" class="tg-toggle @(_terrainShading == "slope" ? "tg-toggle-on" : "")"
+                                title="Steep ground tinted yellow to red" @onclick='() => SetTerrainShadingAsync(_terrainShading == "slope" ? "off" : "slope")'>
+                            SLOPE [@(_terrainShading == "slope" ? "ON" : "OFF")]
+                        </button>
+                    </div>
+                    @if (_terrainShadingError is not null)
+                    {
+                        <div class="tg-favorites-empty" role="status">@_terrainShadingError</div>
+                    }
                 }
                 <button type="button" data-tg-toggle="roadtemps" class="tg-toggle @(_roadWeatherOn ? "tg-toggle-on" : "")"
                         title="Road surface temperature and ice risk from roadside weather stations (Montana, South Dakota)" @onclick="ToggleRoadWeatherAsync">
@@ -3892,6 +3914,7 @@
     {
         var status = await JS.InvokeAsync<string>("tacticalGlobe.setThreeD", "tg-viewport", on);
         _threeDOn = status == "on";
+        if (!_threeDOn) _terrainShading = "off";
         _threeDError = status.StartsWith("failed", StringComparison.Ordinal)
             ? (IonToken is null ? "3D terrain couldn't load. The flat globe is still working."
                 : "3D cities couldn't load (check the Cesium ion token and its allowed URLs). The flat globe is still working.")
@@ -3900,6 +3923,18 @@
     }
 
     private Task ToggleThreeDAsync() => SetThreeDAsync(!_threeDOn);
+
+    // Night Ops terrain shading (20-11-26): "off", "contours" or "slope".
+    private string _terrainShading = "off";
+    private string? _terrainShadingError;
+
+    private async Task SetTerrainShadingAsync(string mode)
+    {
+        // The Mac app forwards it to the native map and gets nothing back.
+        var status = await JS.InvokeAsync<string?>("tacticalGlobe.setTerrainShading", "tg-viewport", mode) ?? "off";
+        _terrainShadingError = status.StartsWith("failed: ", StringComparison.Ordinal) ? "Terrain shading: " + status["failed: ".Length..] + "." : null;
+        _terrainShading = _terrainShadingError is null ? status : "off";
+    }
 
     private async Task ToggleRoadWeatherAsync()
     {

@@ -59,4 +59,21 @@ public sealed class OverwatchCesiumVersionTests
         tacticalGlobe.Should().Contain("viewer.scene.logarithmicDepthBuffer = false",
             "the portable WebKit renderer must avoid logarithmic-depth shader variants");
     }
+
+    // Night Ops phase 3 (20-11-26): terrain shading is the one optional globe shader. A browser that
+    // can't compile it must lose only the shading, never the globe (Safari and the Mac app's WebKit).
+    [Fact]
+    public void TerrainShading_ShouldFailSoftBeforeTheGlobeFallback()
+    {
+        var js = File.ReadAllText(Path.Combine(RepoRoot, "src/GwsBusinessSuite.Web/wwwroot/js/tactical-globe.js"));
+        var handler = js.IndexOf("const onRenderError = function (scene, error) {", StringComparison.Ordinal);
+        var soft = js.IndexOf("scene.globe.material = undefined;", handler, StringComparison.Ordinal);
+        var hard = js.IndexOf("handleShaderFailure(containerId, error)", handler, StringComparison.Ordinal);
+        Assert.True(handler > 0 && soft > handler && hard > soft, "the shading is removed before the globe's own shader fallback runs");
+        Assert.Contains("Cesium.Material.fromType('ElevationContour'", js);
+        Assert.Contains("Cesium.Material.fromType('SlopeRamp'", js);
+        Assert.Contains("return 'failed: turn on 3D terrain first';", js);
+        Assert.Contains("setTerrainShading: setTerrainShading,", js);
+        Assert.Contains("viewer.scene.postProcessStages.enabled = false", js);
+    }
 }

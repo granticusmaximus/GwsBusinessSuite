@@ -941,3 +941,48 @@
     font-family: var(--ow-display, "Chakra Petch", system-ui, sans-serif);
     letter-spacing: 0.06em;
 }
+
+/* Night Ops cut corners (phase 1, 20-11-26): the top-right and bottom-left corners are cut at 10 px,
+   with a diagonal edge drawn in the accent (the line sits 5 px off each 15 px box's diagonal: 66.7% and 33.3%). Top-left stays square for the drag header and bottom-right
+   for the resize handle. clip-path also clips the outer shadow; the dimmed backdrop does that job. */
+.tg-stream-panel,
+.tg-watch-wall-panel {
+    clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 10px 100%, 0 calc(100% - 10px));
+}
+
+.tg-stream-panel::before,
+.tg-stream-panel::after,
+.tg-watch-wall-panel::before,
+.tg-watch-wall-panel::after {
+    content: "";
+    position: absolute;
+    width: 15px;
+    height: 15px;
+    pointer-events: none;
+    z-index: 3;
+}
+
+.tg-stream-panel::before,
+.tg-watch-wall-panel::before {
+    top: 0;
+    right: 0;
+    background: linear-gradient(45deg, transparent calc(66.7% - 0.75px), rgb(var(--ow-accent-rgb, 89 240 122) / 0.6) calc(66.7% - 0.75px), rgb(var(--ow-accent-rgb, 89 240 122) / 0.6) calc(66.7% + 0.75px), transparent calc(66.7% + 0.75px));
+}
+
+.tg-stream-panel::after,
+.tg-watch-wall-panel::after {
+    bottom: 0;
+    left: 0;
+    background: linear-gradient(45deg, transparent calc(33.3% - 0.75px), rgb(var(--ow-accent-rgb, 89 240 122) / 0.6) calc(33.3% - 0.75px), rgb(var(--ow-accent-rgb, 89 240 122) / 0.6) calc(33.3% + 0.75px), transparent calc(33.3% + 0.75px));
+}
+
+/* Night Ops status line under each panel title (phase 1, 20-11-26; addStatusLine in tactical-globe.js). */
+.tg-status-line {
+    padding: 0.15rem 0.75rem 0.3rem;
+    border-bottom: 1px solid rgb(var(--ow-accent-rgb, 89 240 122) / 0.25);
+    font-family: var(--ow-mono, "IBM Plex Mono", ui-monospace, Menlo, monospace);
+    font-size: max(0.68rem, 12px);
+    letter-spacing: 0.1em;
+    color: var(--ow-muted, #5f9a68);
+    font-variant-numeric: tabular-nums;
+}

@@ -238,6 +238,19 @@ public sealed class NativeShapesTests
         Assert.Equal(1, OverwatchMapLook.StreetShare(10_000));
         Assert.Equal(0.5, OverwatchMapLook.StreetShare(230_000), 3);
 
+        // Night Ops zoom stages (20-11-26): one set of heights for both maps.
+        Assert.Contains($"orbitAboveMetres: {N(OverwatchMapLook.OrbitAboveMetres)}, regionalAboveMetres: {N(OverwatchMapLook.RegionalAboveMetres)}, approachAboveMetres: {N(OverwatchMapLook.ApproachAboveMetres)}", js);
+        Assert.Equal(["orbit", "regional", "approach", "ground"], new[] { 9_000_000d, 400_000, 20_000, 1_200 }.Select(OverwatchMapLook.Stage));
+
+        // The HUD's sun (phase 4): one formula in both places, close to the real sky. At the June
+        // solstice noon on the equator and prime meridian the sun is due north at about 66.6 degrees.
+        Assert.Contains("const g = (357.529 + 0.98560028 * d) * rad, q = 280.459 + 0.98564736 * d;", js);
+        Assert.Contains("24.06570982441908 * d", js);
+        var (azimuth, elevation) = OverwatchMapLook.SunPosition(new DateTimeOffset(2026, 6, 21, 12, 0, 0, TimeSpan.Zero), 0, 0);
+        Assert.InRange(elevation, 65.5, 67.5);
+        Assert.True(azimuth < 10 || azimuth > 350, $"azimuth {azimuth}");
+        Assert.True(OverwatchMapLook.SunPosition(new DateTimeOffset(2026, 6, 21, 0, 0, 0, TimeSpan.Zero), 0, 0).Elevation < -40, "midnight is below the horizon");
+
         using var land = System.Text.Json.JsonDocument.Parse(File.ReadAllText(Path.Combine(root, "src/GwsBusinessSuite.Web/wwwroot/data/overwatch-land.json")));
         Assert.True(land.RootElement.GetProperty("rings").GetArrayLength() > 200, "both maps draw the land from this one file");
     }

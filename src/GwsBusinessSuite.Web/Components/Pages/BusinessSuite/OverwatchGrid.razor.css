@@ -44,6 +44,45 @@
     box-shadow: inset 0 0 140px rgba(0, 0, 0, 0.75);
 }
 
+/* Night Ops zoom stages (20-11-26): tactical-globe.js sets data-ow-stage on .tg-shell from the camera
+   height (orbit > 2,000 km, regional > 50 km, approach > 5 km, ground below). Grain is a fixed noise
+   tile, so it costs nothing to draw and never moves (nothing to switch off for Reduce Motion). */
+.tg-grain {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 4;
+    opacity: 0;
+    transition: opacity 0.6s ease;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.7 0 0 0 0 1 0 0 0 0 0.75 0 0 0 1.4 -0.45'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+    mix-blend-mode: screen;
+}
+
+.tg-shell[data-ow-stage="regional"] .tg-grain { opacity: 0.08; }
+.tg-shell[data-ow-stage="approach"] .tg-grain { opacity: 0.12; }
+.tg-shell[data-ow-stage="ground"] .tg-grain { opacity: 0.16; }
+
+.tg-stage {
+    position: absolute;
+    left: 50%;
+    bottom: 0.6rem;
+    transform: translateX(-50%);
+    z-index: 6;
+    pointer-events: none;
+    font-family: var(--ow-mono, "IBM Plex Mono", ui-monospace, Menlo, monospace);
+    font-size: var(--gws-type-xs);
+    letter-spacing: 0.12em;
+    color: var(--ow-accent, #59f07a);
+    background: rgb(2 8 4 / 0.6);
+    border: 1px solid rgb(var(--ow-accent-rgb, 89 240 122) / 0.3);
+    padding: 0.1rem 0.6rem;
+    text-shadow: 0 0 6px rgb(var(--ow-accent-rgb, 89 240 122) / 0.5);
+}
+
+.tg-stage-label {
+    color: var(--ow-muted, #5f9a68);
+}
+
 @keyframes tg-flicker {
     0%, 96%, 100% { opacity: 1; }
     97% { opacity: 0.85; }
@@ -1022,4 +1061,71 @@
 
 .tg-coverage-item.is-unavailable {
     opacity: 0.6;
+}
+
+/* Until the globe reports a height (the Mac map does in phase 6), no stage is shown. */
+.tg-shell:not([data-ow-stage]) .tg-stage {
+    display: none;
+}
+
+/* Night Ops HUD readout (phase 4, 20-11-26): one line above the stage chip. */
+.tg-readout {
+    position: absolute;
+    left: 50%;
+    bottom: 2.3rem;
+    transform: translateX(-50%);
+    z-index: 6;
+    pointer-events: none;
+    max-width: calc(100% - 2rem);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-family: var(--ow-mono, "IBM Plex Mono", ui-monospace, Menlo, monospace);
+    font-size: var(--gws-type-xs);
+    letter-spacing: 0.06em;
+    font-variant-numeric: tabular-nums;
+    color: var(--ow-ink, #d4ffd9);
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
+}
+
+.tg-readout:empty,
+.tg-shell:not([data-ow-stage]) .tg-readout {
+    display: none;
+}
+
+/* Night mode (phase 5, 20-11-26): when the sun is down at the centre of the view the map dims and the
+   grain strengthens, like a tube turned up. Day leaves both as they were. */
+.tg-viewport {
+    transition: filter 1.2s ease;
+}
+
+.tg-shell[data-ow-night="dusk"] .tg-viewport {
+    filter: brightness(0.82);
+}
+
+.tg-shell[data-ow-night="night"] .tg-viewport {
+    filter: brightness(0.62) contrast(1.12);
+}
+
+.tg-shell[data-ow-night="night"][data-ow-stage="regional"] .tg-grain,
+.tg-shell[data-ow-night="night"][data-ow-stage="approach"] .tg-grain,
+.tg-shell[data-ow-night="night"][data-ow-stage="ground"] .tg-grain {
+    opacity: 0.24;
+}
+
+/* Night Ops on narrow screens (responsive pass, 20-11-26; Grant: fully responsive on web, PWA and the
+   Mac app's window). Below 720 px the stage chip and the HUD readout move to the bottom-left so they
+   never sit under the bottom-right controls, and the readout gives way to them (truncates). */
+@container gws-main (max-width: 720px) {
+    .tg-stage {
+        left: 0.75rem;
+        transform: none;
+    }
+
+    .tg-readout {
+        left: 0.75rem;
+        transform: none;
+        max-width: calc(100% - 9rem);
+        letter-spacing: 0.03em;
+    }
 }

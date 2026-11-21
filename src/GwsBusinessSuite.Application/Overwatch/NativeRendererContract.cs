@@ -87,6 +87,9 @@ public static class NativeOverwatchOperations
     public const string ClearNewsShading = "clearNewsShading";
     public const string SetMapNotes = "setMapNotes";
     public const string SetThreeD = "setThreeD";
+    // Contours or slope on the 3D terrain (Night Ops, 20-11-26). Apple's map can't shade terrain, so
+    // the Mac accepts it and draws nothing (NativeShapes.Handled).
+    public const string SetTerrainShading = "setTerrainShading";
     public const string SetNightLights = "setNightLights";
     public const string SetSatelliteScene = "setSatelliteScene";
     public const string ClearSatelliteScene = "clearSatelliteScene";
@@ -149,7 +152,7 @@ public static class NativeOverwatchOperations
         SetCameraPins, SetWeatherSnapshot, SetRadarVisible, SetRadarTimeline, SetHourlyForecast,
         SetWeatherAlerts, ClearWeatherAlerts, SetCameraAlertHighlights, SetTrafficIncidents,
         ClearTrafficIncidents, SetWorldNews, ClearWorldNews, SetNewsShading, ClearNewsShading,
-        SetMapNotes, SetThreeD, SetNightLights, SetSatelliteScene, ClearSatelliteScene, SetMeasure, ClearMeasure, SetDriveFollow, SetSelectModeEnabled, SetTimeMachine, ClearTimeMachine, SetRoadWeather, ClearRoadWeather,
+        SetMapNotes, SetThreeD, SetTerrainShading, SetNightLights, SetSatelliteScene, ClearSatelliteScene, SetMeasure, ClearMeasure, SetDriveFollow, SetSelectModeEnabled, SetTimeMachine, ClearTimeMachine, SetRoadWeather, ClearRoadWeather,
         SetMessageSigns, ClearMessageSigns, SetRoadTraffic, SetTrafficFlow, SetAircraft,
         SetAirQuality, SetPowerOutages, SetInternetOutages, ClearInternetOutages, SetConvergence,
         ClearConvergence, SetAirportStatus, ClearAirportStatus, SetChokepoints, ClearChokepoints, SetWeatherWarnings, ClearWeatherWarnings, SetAurora, ClearAurora,
