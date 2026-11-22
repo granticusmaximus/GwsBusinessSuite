@@ -7431,11 +7431,12 @@ a[download][aria-busy="true"] { opacity: .6; cursor: progress; }
 .media-watch-score i { margin-right: .1rem; }
 .media-watch-finished { opacity: .6; }
 
-/* ── Kit H2: Realistic Prismatic Glass layer ─────────────────
+/* ── Kit H2: Realistic Prismatic Glass layer (Site-wide) ───────
    Applies Kit H2 optical bevel grazing, subtle micro-dot telemetry backdrop, and
-   20px frosted translucency across cards, sidebar, admin bar, and modals using
-   only the existing warm-stone and amber tokens. */
-body {
+   20px frosted translucency across all shell chrome, cards, tables, drawers, popovers,
+   Sentinel, and SentinelGPT surfaces using only the existing warm-stone and amber tokens. */
+body,
+.gws-login-shell-full {
     background-image:
         radial-gradient(color-mix(in srgb, var(--gws-text-strong) 5.5%, transparent) 1px, transparent 1px),
         radial-gradient(ellipse 75% 50% at 82% 8%, color-mix(in srgb, var(--gws-sidebar-accent) 9%, transparent), transparent 62%),
@@ -7444,31 +7445,111 @@ body {
     background-attachment: fixed;
 }
 
-.gws-sidebar {
+.gws-admin-bar,
+.gws-sidebar,
+.gws-status-strip,
+.gws-bottom-bar {
     background: var(--gws-glass-sidebar-bg);
     -webkit-backdrop-filter: var(--gws-glass-filter);
     backdrop-filter: var(--gws-glass-filter);
-    border-right: 1px solid var(--gws-glass-edge-rest);
+    border-color: var(--gws-glass-edge-rest);
+}
+
+.gws-command-trigger,
+.gws-theme-toggle {
+    background: var(--gws-glass-bg);
+    -webkit-backdrop-filter: var(--gws-glass-filter);
+    backdrop-filter: var(--gws-glass-filter);
+    border-color: var(--gws-glass-edge-rest);
 }
 
 .gws-content .card:not(.card .card),
 .surface-panel:not(.card .surface-panel),
 .modal-content,
-.gws-command-dialog {
+.gws-command-dialog,
+.gws-account-popover,
+.dropdown-menu,
+.gws-context-menu,
+.gws-preview-card,
+.gws-rail-flyout,
+.gws-shortcuts-dialog,
+.kb-modal,
+.gws-content .table-responsive,
+.gws-list-table-wrap,
+.gws-busy-panel,
+.sentinel-template-card,
+.sentinel-support-panel,
+.sentinel-main > .card,
+.sentinel-db-dashboard article,
+.sentinel-db-form,
+.sentinel-db-map article,
+.sentinel-db-feed article,
+.sentinel-db-timeline > header,
+.sentinel-db-timeline-row,
+.sentinel-share-popover,
+.sentinel-command-palette,
+.sentinel-row-page-panel,
+.wiki-linked-database-card,
+.wiki-live-block,
+.wiki-inline-board-card,
+.sentinel-db-gallery-card,
+.notion-connection-choice,
+.sentinel-gpt-shell {
     position: relative;
     background: var(--gws-glass-card-bg);
     -webkit-backdrop-filter: var(--gws-glass-filter);
     backdrop-filter: var(--gws-glass-filter);
-    border: 1px solid var(--gws-glass-edge-rest);
+    border-color: var(--gws-glass-edge-rest);
     box-shadow: var(--gws-glass-bevel);
     --gws-mx: -220px;
     --gws-my: -220px;
 }
 
+.gws-toast {
+    background: var(--gws-glass-card-bg);
+    -webkit-backdrop-filter: var(--gws-glass-filter);
+    backdrop-filter: var(--gws-glass-filter);
+    border-color: var(--gws-glass-edge-rest);
+    border-left: 3px solid var(--gws-toast-tone);
+    box-shadow: var(--gws-glass-bevel);
+}
+
+.gws-hint-banner,
+.wiki-editor-suggestion-menu,
+.wiki-inline-toolbar,
+.wiki-ai-menu,
+.wiki-color-menu,
+.sentinel-local-sidebar,
+.sentinel-context-sidebar,
+.sentinel-gpt-workspace,
+.sentinel-gpt-history {
+    background: var(--gws-glass-sidebar-bg);
+    -webkit-backdrop-filter: var(--gws-glass-filter);
+    backdrop-filter: var(--gws-glass-filter);
+    border-color: var(--gws-glass-edge-rest);
+}
+
+.sentinel-document-toolbar,
+.sentinel-side-pane-header,
+.sentinel-context-heading {
+    -webkit-backdrop-filter: var(--gws-glass-filter);
+    backdrop-filter: var(--gws-glass-filter);
+}
+
 .gws-content .card:not(.card .card)::before,
 .surface-panel:not(.card .surface-panel)::before,
 .modal-content::before,
-.gws-command-dialog::before {
+.gws-command-dialog::before,
+.gws-account-popover::before,
+.gws-preview-card::before,
+.gws-rail-flyout::before,
+.gws-shortcuts-dialog::before,
+.kb-modal::before,
+.gws-content .table-responsive::before,
+.gws-list-table-wrap::before,
+.sentinel-template-card::before,
+.sentinel-support-panel::before,
+.sentinel-gpt-shell::before {
     content: "";
     position: absolute;
     inset: -1px;
@@ -7504,7 +7585,17 @@ body {
     .gws-content .card::before,
     .surface-panel::before,
     .modal-content::before,
-    .gws-command-dialog::before { display: none; }
+    .gws-command-dialog::before,
+    .gws-account-popover::before,
+    .gws-preview-card::before,
+    .gws-rail-flyout::before,
+    .gws-shortcuts-dialog::before,
+    .kb-modal::before,
+    .gws-content .table-responsive::before,
+    .gws-list-table-wrap::before,
+    .sentinel-template-card::before,
+    .sentinel-support-panel::before,
+    .sentinel-gpt-shell::before { display: none; }
     .gws-real-ripple { display: none; }
 }
 
@@ -7512,5 +7603,15 @@ body {
     .gws-content .card::before,
     .surface-panel::before,
     .modal-content::before,
-    .gws-command-dialog::before { display: none; }
+    .gws-command-dialog::before,
+    .gws-account-popover::before,
+    .gws-preview-card::before,
+    .gws-rail-flyout::before,
+    .gws-shortcuts-dialog::before,
+    .kb-modal::before,
+    .gws-content .table-responsive::before,
+    .gws-list-table-wrap::before,
+    .sentinel-template-card::before,
+    .sentinel-support-panel::before,
+    .sentinel-gpt-shell::before { display: none; }
 }

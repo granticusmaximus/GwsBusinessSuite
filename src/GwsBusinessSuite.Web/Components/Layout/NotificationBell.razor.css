@@ -53,11 +53,13 @@
     width: 360px;
     max-height: min(560px, calc(100dvh - var(--gws-admin-bar-height, 3.25rem) - 1rem));
     overflow-y: auto;
-    background: var(--gws-panel-bg, #1c1917);
+    background: var(--gws-glass-card-bg);
+    -webkit-backdrop-filter: var(--gws-glass-filter);
+    backdrop-filter: var(--gws-glass-filter);
     color: var(--gws-text-strong, #fafaf9);
-    border: 1px solid var(--gws-panel-border, #292524);
+    border: 1px solid var(--gws-glass-edge-rest);
     border-radius: var(--gws-radius-sm);
-    box-shadow: var(--gws-shadow-md, 0 12px 32px rgba(0, 0, 0, 0.45));
+    box-shadow: var(--gws-glass-bevel);
     z-index: 1000;
 }
 

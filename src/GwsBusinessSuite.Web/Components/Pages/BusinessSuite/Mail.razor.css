@@ -11,10 +11,13 @@
     grid-template-columns: 12.5rem minmax(16rem, 22rem) minmax(0, 1fr);
     height: calc(100vh - 13rem);
     min-height: 30rem;
-    border: 1px solid var(--gws-panel-border, var(--bs-border-color));
+    border: 1px solid var(--gws-glass-edge-rest);
     border-radius: var(--gws-radius-md);
     overflow: hidden;
-    background: var(--bs-body-bg);
+    background: var(--gws-glass-bg);
+    -webkit-backdrop-filter: var(--gws-glass-filter);
+    backdrop-filter: var(--gws-glass-filter);
+    box-shadow: var(--gws-glass-bevel);
 }
 
 /* Nothing open: the list takes the reading pane's room and each message is one line, as in Gmail. */
@@ -314,11 +317,13 @@
     max-height: calc(100vh - 16px);
     overflow: auto;
     padding: .35rem 0;
-    border: 1px solid var(--gws-panel-border, var(--bs-border-color));
+    border: 1px solid var(--gws-glass-edge-rest);
     border-radius: var(--gws-radius-sm);
-    background: var(--gws-panel-bg, var(--bs-body-bg));
+    background: var(--gws-glass-sidebar-bg);
+    -webkit-backdrop-filter: var(--gws-glass-filter);
+    backdrop-filter: var(--gws-glass-filter);
     color: var(--gws-text-strong, var(--bs-body-color));
-    box-shadow: var(--gws-shadow-md, 0 12px 32px rgba(0, 0, 0, .3));
+    box-shadow: var(--gws-glass-bevel);
     visibility: hidden;
 }
 

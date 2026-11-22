@@ -1519,7 +1519,30 @@ window.gwsReader = {
 
 // Kit H2: Realistic Prismatic Glass pointer bevel grazing & button ripple feedback.
 (function () {
-	var GLASS_TARGET = '.gws-content .card:not(.card .card), .surface-panel:not(.card .surface-panel), .modal-content, .gws-command-dialog';
+	var GLASS_TARGET = [
+		'.gws-content .card:not(.card .card)',
+		'.surface-panel:not(.card .surface-panel)',
+		'.modal-content',
+		'.gws-command-dialog',
+		'.gws-account-popover',
+		'.gws-preview-card',
+		'.gws-rail-flyout',
+		'.gws-shortcuts-dialog',
+		'.kb-modal',
+		'.gws-content .table-responsive',
+		'.gws-list-table-wrap',
+		'.gws-kpi-tile',
+		'.gws-assistant',
+		'.gws-record-inspector',
+		'.notif-bell-panel',
+		'.sentinel-template-card',
+		'.sentinel-support-panel',
+		'.sentinel-gpt-shell',
+		'.kb-card',
+		'.md-tile',
+		'.metric-card',
+		'.growth-panel'
+	].join(', ');
 	var lastEl = null;
 
 	function reducedMotion() {

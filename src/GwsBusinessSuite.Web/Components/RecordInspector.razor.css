@@ -10,10 +10,12 @@
     flex-direction: column;
     width: var(--gws-inspector-width, 440px);
     max-width: 100vw;
-    border-left: 1px solid var(--gws-panel-border);
-    background: var(--gws-panel-bg);
+    border-left: 1px solid var(--gws-glass-edge-rest);
+    background: var(--gws-glass-sidebar-bg);
+    -webkit-backdrop-filter: var(--gws-glass-filter);
+    backdrop-filter: var(--gws-glass-filter);
     color: var(--gws-text-strong);
-    box-shadow: var(--gws-shadow-md, 0 12px 32px rgba(0, 0, 0, .45));
+    box-shadow: var(--gws-glass-bevel);
     animation: gws-inspector-in .16s ease-out;
 }
 
