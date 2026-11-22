@@ -18,6 +18,17 @@ Grant took the defaults I proposed (30-10-26):
 3. **Order.** Sentinel pages and to-do lists, boards, site-page drafts first; then CRM and automations;
    then the rest.
 
+## 22-11-26: trustworthy completion evaluation
+
+- [x] The application now derives completion from successful persisted tool actions rather than
+      trusting the model's final prose. A mutation request with no successful action is explicitly
+      left unverified; successful and pending actions remain backed by their persisted action cards.
+- [x] Regression evaluation scenarios cover unsupported completion claims, verified creation, and
+      ordinary how-to questions that require no mutation.
+- [x] Focused tests pass (48/48). `./scripts/verify-release.sh` is `PARTIAL`: every local check
+      passed, including the Release build and full automated suite; deployed and responsive
+      targets were not supplied.
+
 Grant, mid-build (30-10-26): "I want to ask SentinelGPT to do something within the app, and I want
 SentinelGPT to research and then do." So research tools joined Phase A, and the prompt's first rule
 became "research first, then do".

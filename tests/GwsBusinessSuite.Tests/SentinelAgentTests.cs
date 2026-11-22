@@ -35,6 +35,41 @@ namespace GwsBusinessSuite.Tests;
 // Confirm, Undo, and each area's tools against a real SQLite database. The model is scripted.
 public sealed class SentinelAgentTests
 {
+    [Theory]
+    [InlineData("Create a launch board")]
+    [InlineData("Rename the page to Roadmap")]
+    [InlineData("Send the reply")]
+    public async Task Evaluation_ActionClaimWithoutASuccessfulTool_ShouldNotBeReportedAsComplete(string request)
+    {
+        await using var harness = await Harness.CreateAsync();
+        var turn = await harness.TurnAsync(Guid.NewGuid(), Admin, request, Say("Done. I made that change."));
+
+        turn.Actions.Should().BeEmpty();
+        turn.Answer.Should().Be(SentinelAgentCompletionVerifier.UnverifiedMessage);
+    }
+
+    [Fact]
+    public async Task Evaluation_SuccessfulTool_ShouldProduceAnApplicationVerifiedCompletion()
+    {
+        await using var harness = await Harness.CreateAsync();
+        var turn = await harness.TurnAsync(Guid.NewGuid(), Admin, "Create a launch checklist",
+            Call("create_todo_list", new { title = "Launch checklist" }), Say("I probably created it."));
+
+        turn.Answer.Should().Be("I probably created it.");
+        turn.Actions.Should().ContainSingle(action => action.Status == SentinelAgentActionStatuses.Done
+            && action.Summary == "Created to-do list 'Launch checklist'");
+        (await harness.PagesTitledAsync("Launch checklist")).Should().Be(1);
+    }
+
+    [Fact]
+    public async Task Evaluation_QuestionWithoutAChange_ShouldKeepTheGroundedAnswer()
+    {
+        await using var harness = await Harness.CreateAsync();
+        var turn = await harness.TurnAsync(Guid.NewGuid(), Admin, "How do I create a board?", Say("Use the Boards page."));
+
+        turn.Answer.Should().Be("Use the Boards page.");
+    }
+
     private static readonly SentinelAgentUser Admin = new("grant", [AppRoles.Admin]);
     private static readonly SentinelAgentUser Author = new("writer", [AppRoles.Author]);
 
@@ -641,7 +676,8 @@ public sealed class SentinelAgentTests
         }
 
         snapshot!.Status.Should().Be(SentinelAgentTurns.Statuses.Done);
-        snapshot.Answer.Should().Be("Added it to To do.");
+        snapshot.Answer.Should().Be(SentinelAgentCompletionVerifier.UnverifiedMessage,
+            "the relayed model claimed a card change without calling a tool");
         snapshot.Steps.Should().StartWith(["Deep Analysis: asking qwen2.5-coder:latest for a second opinion",
             "Deep Analysis: asking deepseek-r1:latest for a second opinion"]);
         lock (asked) asked.Take(3).Should().Equal("qwen2.5-coder:latest", "deepseek-r1:latest", "sentinelgpt:latest");

@@ -192,6 +192,7 @@ public sealed partial class SentinelAgentRunner(IServiceScopeFactory scopes, Tim
                 ? "Done: " + string.Join("; ", actions.Select(action => action.Summary)) + "."
                 : "I'm not sure what you'd like me to do. Could you say a bit more?";
         }
+        answer = SentinelAgentCompletionVerifier.Verify(request.Message, answer, actions);
 
         db.SentinelAiRuns.Add(new SentinelAiRun
         {
