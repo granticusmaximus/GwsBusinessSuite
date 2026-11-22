@@ -1,7 +1,11 @@
 using System.Runtime.CompilerServices;
 using FluentAssertions;
 using GwsBusinessSuite.Application.Abstractions;
+using GwsBusinessSuite.Infrastructure;
 using GwsBusinessSuite.Web.Services;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using Microsoft.JSInterop;
 
 namespace GwsBusinessSuite.Tests;
@@ -10,6 +14,64 @@ namespace GwsBusinessSuite.Tests;
 // server model, no panel uses a model on the browser's computer; local-only panels use the server's.
 public sealed class ServerModelOnlyTests
 {
+    [Fact]
+    public void CentralizedServerAi_ShouldRefuseToStartWithoutAMacPrimary()
+    {
+        var settings = new Dictionary<string, string?>
+        {
+            ["ServerAi:Mode"] = nameof(ServerAiMode.Full),
+            ["ServerAi:SingleSource"] = "true"
+        };
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(settings).Build();
+        var services = new ServiceCollection();
+        services.AddInfrastructure(configuration);
+        using var provider = services.BuildServiceProvider();
+
+        var resolve = () => provider.GetRequiredService<IOptions<ServerAiOptions>>().Value;
+
+        resolve.Should().Throw<OptionsValidationException>()
+            .WithMessage("*PrimaryOllamaUrl is required*");
+    }
+
+    [Fact]
+    public void CentralizedServerAi_ShouldAcceptAMacPrimary()
+    {
+        var settings = new Dictionary<string, string?>
+        {
+            ["ServerAi:Mode"] = nameof(ServerAiMode.Full),
+            ["ServerAi:SingleSource"] = "true",
+            ["ServerAi:PrimaryOllamaUrl"] = "http://mac.test:11434"
+        };
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(settings).Build();
+        var services = new ServiceCollection();
+        services.AddInfrastructure(configuration);
+        using var provider = services.BuildServiceProvider();
+
+        var options = provider.GetRequiredService<IOptions<ServerAiOptions>>().Value;
+
+        options.HasFailover.Should().BeTrue();
+    }
+
+    [Fact]
+    public void CentralizedServerAi_ShouldRejectANonHttpMacPrimary()
+    {
+        var settings = new Dictionary<string, string?>
+        {
+            ["ServerAi:Mode"] = nameof(ServerAiMode.Full),
+            ["ServerAi:SingleSource"] = "true",
+            ["ServerAi:PrimaryOllamaUrl"] = "file:///tmp/ollama"
+        };
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(settings).Build();
+        var services = new ServiceCollection();
+        services.AddInfrastructure(configuration);
+        using var provider = services.BuildServiceProvider();
+
+        var resolve = () => provider.GetRequiredService<IOptions<ServerAiOptions>>().Value;
+
+        resolve.Should().Throw<OptionsValidationException>()
+            .WithMessage("*absolute HTTP or HTTPS URL*");
+    }
+
     [Theory]
     [InlineData(ServerAiMode.Full, true, true)]
     [InlineData(ServerAiMode.Light, true, true)]

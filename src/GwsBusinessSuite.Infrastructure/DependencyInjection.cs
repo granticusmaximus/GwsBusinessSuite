@@ -90,7 +90,15 @@ public static class DependencyInjection
             .SetApplicationName("GwsBusinessSuite");
 
         services.Configure<ContentStudioOptions>(configuration.GetSection(ContentStudioOptions.SectionName));
-        services.Configure<ServerAiOptions>(configuration.GetSection(ServerAiOptions.SectionName));
+        services.AddOptions<ServerAiOptions>()
+            .Bind(configuration.GetSection(ServerAiOptions.SectionName))
+            .Validate(options => !options.ServerModelOnly || options.HasFailover,
+                "ServerAi:PrimaryOllamaUrl is required when SingleSource is enabled with a server model. The Mac must be the primary and the AI droplet only the fallback.")
+            .Validate(options => string.IsNullOrWhiteSpace(options.PrimaryOllamaUrl)
+                || Uri.TryCreate(options.PrimaryOllamaUrl, UriKind.Absolute, out var uri)
+                && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps),
+                "ServerAi:PrimaryOllamaUrl must be an absolute HTTP or HTTPS URL.")
+            .ValidateOnStart();
         services.AddOptions<StripeBillingOptions>()
             .Bind(configuration.GetSection(StripeBillingOptions.SectionName));
         services.AddOptions<AnalyticsGeoIpOptions>()

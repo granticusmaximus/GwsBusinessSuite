@@ -76,3 +76,14 @@ Grant: "build a way to work the Ollama droplet to do better and be available", a
   `serve` on 11434. On mains power the MacBook never sleeps (`sleep 0`, `womp 1`). On battery it
   sleeps after a minute idle, and the droplet covers those times, as designed.
 - [x] AGENTS.md rule added.
+
+## 22-11-26: prevent silent droplet-only startup
+
+- [x] Centralized server AI (`SingleSource` with `Full` or `Light`) now requires a valid
+      `ServerAi:PrimaryOllamaUrl`; startup fails clearly instead of silently registering the AI
+      droplet as the only model runtime.
+- [x] SentinelGPT's empty-state copy now states the actual policy: Mac models first, AI droplet
+      only while the Mac is unreachable.
+- [x] Focused tests pass (23/23). `./scripts/verify-release.sh` is `PARTIAL`: all local checks
+      passed, including the Release build and full automated suite; deployed and responsive
+      targets were not supplied.

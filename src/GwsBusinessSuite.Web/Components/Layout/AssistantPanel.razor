@@ -55,7 +55,7 @@
         <div class="gws-assistant-thread" @ref="_thread" aria-live="polite">
             @if (_turns.Count == 0)
             {
-                <p class="gws-assistant-intro">Ask about this page, or tell me what to do: make a to-do list, add a card to a board, draft a site page. I look things up first, then do it. Changes come with Undo; deleting and publishing wait for your Confirm. Short answers use the AI droplet; tool-based and substantial jobs prefer the larger Mac model.</p>
+                <p class="gws-assistant-intro">Ask about this page, or tell me what to do: make a to-do list, add a card to a board, draft a site page. I look things up first, then do it. Changes come with Undo; deleting and publishing wait for your Confirm. Your Mac models answer first; the AI droplet is used only while the Mac is unreachable.</p>
             }
             @foreach (var turn in _turns)
             {
