@@ -305,6 +305,62 @@ public sealed class MailServiceTests
     }
 
     [Fact]
+    public async Task ScheduledSend_ShouldStayAsAProviderDraft_ThenSendWhenDue()
+    {
+        var clock = new MailClock(new DateTimeOffset(2026, 11, 22, 15, 0, 0, TimeSpan.Zero));
+        var f = await CreateAsync(clock);
+        var account = await f.UseImapAsync();
+
+        var scheduled = await f.Service.ScheduleSendAsync("grant", account.Id,
+            new MailDraft(["sam@example.com"], [], [], "Plans", "See you then"), clock.GetUtcNow().AddHours(1));
+
+        f.Imap.Drafts.Should().ContainKey("draft-1");
+        scheduled.Subject.Should().Be("Plans");
+        (await f.Service.ProcessScheduledSendsAsync()).Should().Be(0);
+        clock.UtcNow = clock.GetUtcNow().AddHours(1);
+        (await f.Service.ProcessScheduledSendsAsync()).Should().Be(1);
+        f.Imap.Sent.Should().ContainSingle(message => message.Subject == "Plans");
+        f.Imap.DeletedDrafts.Should().Contain("draft-1");
+        (await f.Service.ListScheduledSendsAsync("grant", account.Id)).Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ScheduledSend_ShouldKeepTheDraftAndExposeAProblemForRetry()
+    {
+        var clock = new MailClock(new DateTimeOffset(2026, 11, 22, 15, 0, 0, TimeSpan.Zero));
+        var f = await CreateAsync(clock);
+        var account = await f.UseImapAsync();
+        await f.Service.ScheduleSendAsync("grant", account.Id,
+            new MailDraft(["sam@example.com"], [], [], "Plans", "See you then"), clock.GetUtcNow().AddMinutes(1));
+        clock.UtcNow = clock.GetUtcNow().AddMinutes(1);
+        f.Imap.FailSend = "SMTP is unavailable";
+
+        (await f.Service.ProcessScheduledSendsAsync()).Should().Be(0);
+
+        var queued = (await f.Service.ListScheduledSendsAsync("grant", account.Id)).Should().ContainSingle().Which;
+        queued.AttemptCount.Should().Be(1);
+        queued.LastError.Should().Contain("SMTP is unavailable");
+        f.Imap.Drafts.Should().ContainKey("draft-1");
+    }
+
+    [Fact]
+    public async Task Snooze_ShouldArchiveAndWakeThroughTheProviderUndo()
+    {
+        var f = await CreateAsync();
+        var account = await f.UseImapAsync();
+        var wake = DateTimeOffset.UtcNow.AddHours(2);
+
+        var snooze = await f.Service.SnoozeAsync("grant", account.Id,
+            [new MailSnoozeMessage("m1", "Plans", "Sam")], wake);
+
+        f.Imap.Applied.Should().ContainSingle().Which.Action.Should().Be(MailActions.Archive);
+        (await f.Service.ListSnoozesAsync("grant", account.Id)).Should().ContainSingle();
+        await f.Service.WakeSnoozeAsync("grant", account.Id, snooze.Id);
+        f.Imap.Undone.Should().ContainSingle().Which.Action.Should().Be(MailActions.Archive);
+        (await f.Service.ListSnoozesAsync("grant", account.Id)).Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task ADraft_ShouldSaveWithoutRecipients_ReplaceItself_AndGoWhenSent_KeepingItsThread()
     {
         var f = await CreateAsync();
@@ -579,7 +635,7 @@ public sealed class MailServiceTests
             "grant@icloud.com", "Grant Watson", "imap.mail.me.com", 993, "smtp.mail.me.com", 587, MailServerSecurity.StartTls, "", "pw"));
     }
 
-    private static async Task<Fixture> CreateAsync()
+    private static async Task<Fixture> CreateAsync(TimeProvider? clock = null)
     {
         var connection = new SqliteConnection("Data Source=:memory:");
         await connection.OpenAsync();
@@ -587,7 +643,7 @@ public sealed class MailServiceTests
         await db.Database.EnsureCreatedAsync();
         var imap = new FakeImap();
         var protector = new DataProtectionSecretProtector(new EphemeralDataProtectionProvider());
-        return new Fixture(db, new MailService(db, protector, [imap], TimeProvider.System), imap, protector);
+        return new Fixture(db, new MailService(db, protector, [imap], clock ?? TimeProvider.System), imap, protector);
     }
 
     private sealed class FakeImap : IMailboxBackend
@@ -600,6 +656,7 @@ public sealed class MailServiceTests
         public string? FailVerify { get; set; }
         public string? VerifyWarning { get; set; }
         public string? FailList { get; set; }
+        public string? FailSend { get; set; }
 
         public Task<string?> VerifyAsync(MailAccount account, string password, CancellationToken cancellationToken)
         {
@@ -619,6 +676,7 @@ public sealed class MailServiceTests
 
         public Task SendAsync(MailAccount account, MimeMessage message, string? threadId, CancellationToken cancellationToken)
         {
+            if (FailSend is { } failure) throw new MailException(failure);
             Sent.Add(message);
             return Task.CompletedTask;
         }
@@ -644,7 +702,8 @@ public sealed class MailServiceTests
         public Task<MailUndo?> ApplyAsync(MailAccount account, IReadOnlyList<string> ids, string action, CancellationToken cancellationToken)
         {
             Applied.Add((ids, action));
-            return Task.FromResult(action == MailActions.Trash ? new MailUndo(action, ids.Select(id => "trash-" + id).ToList(), "folder:INBOX") : null);
+            return Task.FromResult(action is MailActions.Trash or MailActions.Archive
+                ? new MailUndo(action, ids.Select(id => action + "-" + id).ToList(), "folder:INBOX") : null);
         }
 
         public Task UndoAsync(MailAccount account, MailUndo undo, CancellationToken cancellationToken)
@@ -673,6 +732,12 @@ public sealed class MailServiceTests
             Drafts.Remove(draftId);
             return Task.CompletedTask;
         }
+    }
+
+    private sealed class MailClock(DateTimeOffset now) : TimeProvider
+    {
+        public DateTimeOffset UtcNow { get; set; } = now;
+        public override DateTimeOffset GetUtcNow() => UtcNow;
     }
 
     private sealed class StubHandler(Func<HttpRequestMessage, Task<HttpResponseMessage>> responder) : HttpMessageHandler

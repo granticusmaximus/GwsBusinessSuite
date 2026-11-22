@@ -720,9 +720,22 @@
 .mail-rule-actions .form-check { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
 .mail-rules li { display: flex; align-items: center; gap: .6rem; padding: .45rem 0; border-bottom: 1px solid var(--gws-panel-border, var(--bs-border-color)); }
 .mail-rule-text { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+.mail-timed-list li {
+    display: flex;
+    align-items: center;
+    gap: .75rem;
+    padding: .65rem 0;
+    border-bottom: 1px solid var(--gws-panel-border, var(--bs-border-color));
+}
+.mail-timed-main { display: flex; flex: 1; min-width: 0; flex-direction: column; }
+.mail-timed-main > * { overflow-wrap: anywhere; }
+.mail-snooze-choices { display: grid; gap: .5rem; }
+.mail-snooze-choices > .btn { display: flex; justify-content: space-between; gap: 1rem; text-align: left; }
+.mail-snooze-choices small { color: var(--bs-secondary-color); }
 @container gws-main (max-width: 796px) {
     .mail-rule-condition { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; }
     .mail-rule-condition input { grid-column: 1 / 3; }
+    .mail-timed-list li { align-items: flex-start; flex-direction: column; }
 }
 
 /* Drag and drop (21-11-26): while a message is dragged, the tabs and folders it can go to are outlined,

@@ -148,6 +148,8 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<MailSenderTab> MailSenderTabs => Set<MailSenderTab>();
     public DbSet<MailRule> MailRules => Set<MailRule>();
     public DbSet<MailRuleSeen> MailRuleSeen => Set<MailRuleSeen>();
+    public DbSet<MailScheduledSend> MailScheduledSends => Set<MailScheduledSend>();
+    public DbSet<MailSnooze> MailSnoozes => Set<MailSnooze>();
     public DbSet<SentinelInboundEmail> SentinelInboundEmails => Set<SentinelInboundEmail>();
     public DbSet<SupportMailboxSettings> SupportMailboxSettings => Set<SupportMailboxSettings>();
     public DbSet<SupportInboundEmail> SupportInboundEmails => Set<SupportInboundEmail>();
@@ -538,6 +540,10 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         modelBuilder.Entity<MailSenderTab>().HasIndex(x => new { x.AccountId, x.Sender }).IsUnique();
         modelBuilder.Entity<MailRule>().HasIndex(x => new { x.AccountId, x.Order });
         modelBuilder.Entity<MailRuleSeen>().HasIndex(x => new { x.AccountId, x.MessageKey }).IsUnique();
+        modelBuilder.Entity<MailScheduledSend>().HasIndex(x => new { x.NextAttemptUnix, x.DueUnix });
+        modelBuilder.Entity<MailScheduledSend>().HasIndex(x => new { x.Username, x.AccountId });
+        modelBuilder.Entity<MailSnooze>().HasIndex(x => new { x.NextAttemptUnix, x.WakeUnix });
+        modelBuilder.Entity<MailSnooze>().HasIndex(x => new { x.Username, x.AccountId });
         modelBuilder.Entity<SentinelPasskey>().HasIndex(x => x.CredentialId).IsUnique();
         modelBuilder.Entity<SentinelPasskey>().HasIndex(x => x.Username);
         modelBuilder.Entity<SentinelDeviceKey>().HasIndex(x => x.Username);

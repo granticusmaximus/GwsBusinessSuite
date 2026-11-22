@@ -114,6 +114,14 @@ public sealed record MailAttachmentContent(string FileName, string ContentType, 
 // A file attached to a message being written.
 public sealed record MailAttachmentUpload(string FileName, string ContentType, byte[] Content);
 
+public sealed record MailScheduledSendView(
+    Guid Id, Guid AccountId, string Subject, string Recipients, DateTimeOffset DueAt, int AttemptCount, string? LastError);
+
+public sealed record MailSnoozeMessage(string Id, string Subject, string Sender);
+
+public sealed record MailSnoozeView(
+    Guid Id, Guid AccountId, string Subject, string Sender, int MessageCount, DateTimeOffset WakeAt, int AttemptCount, string? LastError);
+
 // A new message, or a reply/forward of ReplyToMessageId (its threading headers and, for a
 // forward, its attachments are carried over). Body is Markdown: it's sent as plain text and as
 // the HTML it formats to. DraftId: the saved draft this was opened from - saving replaces it,
@@ -211,6 +219,20 @@ public interface IMailService
     Task SendAsync(string username, Guid accountId, MailDraft draft, CancellationToken cancellationToken = default);
     // Saves (or replaces draft.DraftId) in Drafts; returns the saved draft's message id.
     Task<string> SaveDraftAsync(string username, Guid accountId, MailDraft draft, CancellationToken cancellationToken = default);
+    Task<MailScheduledSendView> ScheduleSendAsync(string username, Guid accountId, MailDraft draft, DateTimeOffset dueAt,
+        CancellationToken cancellationToken = default) => throw new NotSupportedException();
+    Task<IReadOnlyList<MailScheduledSendView>> ListScheduledSendsAsync(string username, Guid accountId,
+        CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<MailScheduledSendView>>([]);
+    // Cancelling leaves the provider draft in Drafts so it can be edited or sent normally.
+    Task CancelScheduledSendAsync(string username, Guid accountId, Guid scheduledId, CancellationToken cancellationToken = default) =>
+        Task.CompletedTask;
+    Task<int> ProcessScheduledSendsAsync(CancellationToken cancellationToken = default) => Task.FromResult(0);
+    Task<MailSnoozeView> SnoozeAsync(string username, Guid accountId, IReadOnlyList<MailSnoozeMessage> messages, DateTimeOffset wakeAt,
+        CancellationToken cancellationToken = default) => throw new NotSupportedException();
+    Task<IReadOnlyList<MailSnoozeView>> ListSnoozesAsync(string username, Guid accountId,
+        CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<MailSnoozeView>>([]);
+    Task WakeSnoozeAsync(string username, Guid accountId, Guid snoozeId, CancellationToken cancellationToken = default) => Task.CompletedTask;
+    Task<int> ProcessSnoozesAsync(CancellationToken cancellationToken = default) => Task.FromResult(0);
     Task SetReadAsync(string username, Guid accountId, string messageId, bool read, CancellationToken cancellationToken = default);
     Task SetStarredAsync(string username, Guid accountId, string messageId, bool starred, CancellationToken cancellationToken = default);
     Task ArchiveAsync(string username, Guid accountId, string messageId, CancellationToken cancellationToken = default);

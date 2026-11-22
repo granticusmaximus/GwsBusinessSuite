@@ -7,6 +7,7 @@ using MailKit.Security;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using MimeKit;
+using System.Text.Json;
 
 namespace GwsBusinessSuite.Infrastructure.Services;
 
@@ -111,6 +112,8 @@ public sealed class MailService(
     {
         if (await FindAsync(username, accountId, cancellationToken) is not { } account) return;
         await RemoveCredentialAsync(account.CredentialId, cancellationToken);
+        db.MailScheduledSends.RemoveRange(await db.MailScheduledSends.Where(row => row.AccountId == accountId).ToListAsync(cancellationToken));
+        db.MailSnoozes.RemoveRange(await db.MailSnoozes.Where(row => row.AccountId == accountId).ToListAsync(cancellationToken));
         db.MailAccounts.Remove(account);
         await db.SaveChangesAsync(cancellationToken);
     }
@@ -499,6 +502,175 @@ public sealed class MailService(
             var (message, threadId) = await BuildAsync(backend, account, draft, sending: false, cancellationToken);
             return await backend.SaveDraftAsync(account, message, draft.DraftId, draft.Forward ? null : threadId, cancellationToken);
         }, cancellationToken);
+
+    public async Task<MailScheduledSendView> ScheduleSendAsync(string username, Guid accountId, MailDraft draft, DateTimeOffset dueAt,
+        CancellationToken cancellationToken = default)
+    {
+        var now = timeProvider.GetUtcNow();
+        var due = dueAt.ToUniversalTime();
+        if (due < now.AddMinutes(1)) throw new MailException("Choose a send time at least one minute from now.");
+        if (due > now.AddDays(365)) throw new MailException("Scheduled mail can be up to one year ahead.");
+        var draftId = await SaveDraftAsync(username, accountId, draft, cancellationToken);
+        var row = new MailScheduledSend
+        {
+            AccountId = accountId, Username = username, DraftId = draftId,
+            Subject = Display(draft.Subject, 300), Recipients = Display(string.Join(", ", draft.To.Concat(draft.Cc).Concat(draft.Bcc)), 500),
+            DueUnix = due.ToUnixTimeSeconds(), NextAttemptUnix = due.ToUnixTimeSeconds(), CreatedAt = now, CreatedBy = username
+        };
+        db.MailScheduledSends.Add(row);
+        await db.SaveChangesAsync(cancellationToken);
+        return ScheduledView(row);
+    }
+
+    public async Task<IReadOnlyList<MailScheduledSendView>> ListScheduledSendsAsync(string username, Guid accountId,
+        CancellationToken cancellationToken = default)
+    {
+        if (await FindAsync(username, accountId, cancellationToken) is null) return [];
+        return (await db.MailScheduledSends.AsNoTracking().Where(row => row.Username == username && row.AccountId == accountId)
+                .OrderBy(row => row.DueUnix).ToListAsync(cancellationToken)).Select(ScheduledView).ToList();
+    }
+
+    public async Task CancelScheduledSendAsync(string username, Guid accountId, Guid scheduledId, CancellationToken cancellationToken = default)
+    {
+        if (await db.MailScheduledSends.FirstOrDefaultAsync(row => row.Id == scheduledId && row.AccountId == accountId && row.Username == username,
+                cancellationToken) is not { } row) return;
+        db.MailScheduledSends.Remove(row);
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task<int> ProcessScheduledSendsAsync(CancellationToken cancellationToken = default)
+    {
+        var now = timeProvider.GetUtcNow();
+        var nowUnix = now.ToUnixTimeSeconds();
+        var due = await db.MailScheduledSends.Where(row => row.DueUnix <= nowUnix && row.NextAttemptUnix <= nowUnix)
+            .OrderBy(row => row.DueUnix).Take(20).ToListAsync(cancellationToken);
+        var sent = 0;
+        foreach (var row in due)
+        {
+            row.AttemptCount++;
+            row.NextAttemptUnix = now.Add(RetryAfter(row.AttemptCount)).ToUnixTimeSeconds();
+            await db.SaveChangesAsync(cancellationToken);
+            try
+            {
+                await RunAsync(row.Username, row.AccountId, async (backend, account) =>
+                {
+                    await backend.SendDraftAsync(account, row.DraftId, cancellationToken);
+                    return true;
+                }, cancellationToken);
+                db.MailScheduledSends.Remove(row);
+                sent++;
+            }
+            catch (MailException ex)
+            {
+                row.LastError = Display(ex.Message, 500);
+                logger?.LogWarning("Scheduled mail {ScheduledId} attempt {Attempt} failed: {Message}", row.Id, row.AttemptCount, ex.Message);
+            }
+            await db.SaveChangesAsync(cancellationToken);
+        }
+        return sent;
+    }
+
+    public async Task<MailSnoozeView> SnoozeAsync(string username, Guid accountId, IReadOnlyList<MailSnoozeMessage> messages,
+        DateTimeOffset wakeAt, CancellationToken cancellationToken = default)
+    {
+        if (messages.Count == 0) throw new MailException("Choose at least one message to snooze.");
+        var now = timeProvider.GetUtcNow();
+        var wake = wakeAt.ToUniversalTime();
+        if (wake < now.AddMinutes(1)) throw new MailException("Choose a wake time at least one minute from now.");
+        if (wake > now.AddDays(365)) throw new MailException("Mail can be snoozed for up to one year.");
+        var ids = messages.Select(message => message.Id).Distinct(StringComparer.Ordinal).ToList();
+        var undo = await RunAsync(username, accountId, (backend, account) => backend.ApplyAsync(account, ids, MailActions.Archive, cancellationToken), cancellationToken)
+            ?? throw new MailException("This mailbox can't reliably restore snoozed mail.");
+        var first = messages[0];
+        var row = new MailSnooze
+        {
+            AccountId = accountId, Username = username, UndoJson = JsonSerializer.Serialize(undo),
+            Subject = Display(first.Subject, 300), Sender = Display(first.Sender, 300), MessageCount = ids.Count,
+            WakeUnix = wake.ToUnixTimeSeconds(), NextAttemptUnix = wake.ToUnixTimeSeconds(), CreatedAt = now, CreatedBy = username
+        };
+        db.MailSnoozes.Add(row);
+        await db.SaveChangesAsync(cancellationToken);
+        inboxCache?.Invalidate(accountId);
+        return SnoozeView(row);
+    }
+
+    public async Task<IReadOnlyList<MailSnoozeView>> ListSnoozesAsync(string username, Guid accountId, CancellationToken cancellationToken = default)
+    {
+        if (await FindAsync(username, accountId, cancellationToken) is null) return [];
+        return (await db.MailSnoozes.AsNoTracking().Where(row => row.Username == username && row.AccountId == accountId)
+                .OrderBy(row => row.WakeUnix).ToListAsync(cancellationToken)).Select(SnoozeView).ToList();
+    }
+
+    public async Task WakeSnoozeAsync(string username, Guid accountId, Guid snoozeId, CancellationToken cancellationToken = default)
+    {
+        if (await db.MailSnoozes.FirstOrDefaultAsync(row => row.Id == snoozeId && row.AccountId == accountId && row.Username == username,
+                cancellationToken) is not { } row) return;
+        await RestoreSnoozeAsync(row, cancellationToken);
+        db.MailSnoozes.Remove(row);
+        await db.SaveChangesAsync(cancellationToken);
+        inboxCache?.Invalidate(accountId);
+    }
+
+    public async Task<int> ProcessSnoozesAsync(CancellationToken cancellationToken = default)
+    {
+        var now = timeProvider.GetUtcNow();
+        var nowUnix = now.ToUnixTimeSeconds();
+        var due = await db.MailSnoozes.Where(row => row.WakeUnix <= nowUnix && row.NextAttemptUnix <= nowUnix)
+            .OrderBy(row => row.WakeUnix).Take(20).ToListAsync(cancellationToken);
+        var restored = 0;
+        foreach (var row in due)
+        {
+            row.AttemptCount++;
+            row.NextAttemptUnix = now.Add(RetryAfter(row.AttemptCount)).ToUnixTimeSeconds();
+            await db.SaveChangesAsync(cancellationToken);
+            try
+            {
+                await RestoreSnoozeAsync(row, cancellationToken);
+                db.MailSnoozes.Remove(row);
+                restored++;
+                inboxCache?.Invalidate(row.AccountId);
+            }
+            catch (MailException ex)
+            {
+                row.LastError = Display(ex.Message, 500);
+                logger?.LogWarning("Snoozed mail {SnoozeId} attempt {Attempt} failed: {Message}", row.Id, row.AttemptCount, ex.Message);
+            }
+            await db.SaveChangesAsync(cancellationToken);
+        }
+        return restored;
+    }
+
+    private Task RestoreSnoozeAsync(MailSnooze row, CancellationToken cancellationToken)
+    {
+        var undo = JsonSerializer.Deserialize<MailUndo>(row.UndoJson) ?? throw new MailException("The snooze restore information is damaged.");
+        return RunAsync(row.Username, row.AccountId, async (backend, account) =>
+        {
+            await backend.UndoAsync(account, undo, cancellationToken);
+            return true;
+        }, cancellationToken);
+    }
+
+    private static MailScheduledSendView ScheduledView(MailScheduledSend row) =>
+        new(row.Id, row.AccountId, row.Subject, row.Recipients, DateTimeOffset.FromUnixTimeSeconds(row.DueUnix), row.AttemptCount,
+            string.IsNullOrEmpty(row.LastError) ? null : row.LastError);
+
+    private static MailSnoozeView SnoozeView(MailSnooze row) =>
+        new(row.Id, row.AccountId, row.Subject, row.Sender, row.MessageCount, DateTimeOffset.FromUnixTimeSeconds(row.WakeUnix), row.AttemptCount,
+            string.IsNullOrEmpty(row.LastError) ? null : row.LastError);
+
+    private static TimeSpan RetryAfter(int attempt) => attempt switch
+    {
+        <= 1 => TimeSpan.FromMinutes(1),
+        2 => TimeSpan.FromMinutes(5),
+        3 => TimeSpan.FromMinutes(15),
+        _ => TimeSpan.FromHours(1)
+    };
+
+    private static string Display(string? value, int max)
+    {
+        var clean = (value ?? string.Empty).Trim();
+        return clean.Length > max ? clean[..max] : clean;
+    }
 
     public Task SetReadAsync(string username, Guid accountId, string messageId, bool read, CancellationToken cancellationToken = default) =>
         Changing(accountId, RunAsync(username, accountId, (backend, account) => backend.SetReadAsync(account, messageId, read, cancellationToken), cancellationToken));

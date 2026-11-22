@@ -47,6 +47,21 @@ privacy model.
   as a queue/reminder unit rather than simulated with browser timers. Confidential-mode semantics,
   read receipts and cloud-link attachments are provider-specific and need separate product decisions.
 
+## Durable scheduling and snooze unit (22-11-26)
+
+1. Save scheduled outgoing mail as a real provider draft; keep only its provider ID, ownership,
+   subject/recipient display metadata, due time and retry state in GWS.
+2. Run a durable background dispatcher with bounded retries. Let the person list scheduled mail,
+   cancel it back to Drafts, and see a delivery problem without losing the draft.
+3. Snooze inbox mail by archiving it with the provider's undo token, then restore it at the chosen
+   time. Let the person list and wake snoozed mail early.
+4. Add accessible desktop/phone controls, migrations, service/background tests, guide updates,
+   focused browser proof and the full release gate.
+
+Provider-specific items remain explicit: Gmail confidential mode, Microsoft sensitivity/recall,
+provider read receipts and cloud-drive link permissions cannot be made reliable through generic
+IMAP/SMTP. They will not be represented by controls that silently do nothing on some accounts.
+
 ## Progress
 
 - [x] Current feature inventory completed from the page, services and regression tests.
@@ -63,3 +78,6 @@ privacy model.
   horizontal chips, the account switcher collapses to its avatar, inbox tabs remain an equal
   five-column grid, and signature/attachment confirmations are validated as true modal overlays.
   Final phone proof: `output/playwright/mail-market-parity-phone-final.png`.
+- [ ] Durable scheduled-send queue and management UI.
+- [ ] Durable snooze/wake queue and management UI.
+- [ ] Queue tests, migration, guide, responsive proof and release gate.

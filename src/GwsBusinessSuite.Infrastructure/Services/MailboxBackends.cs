@@ -58,6 +58,12 @@ public interface IMailboxBackend
     // Puts the message in Drafts, replacing the draft replacesDraftId; returns the new draft's id.
     Task<string> SaveDraftAsync(MailAccount account, MimeMessage message, string? replacesDraftId, string? threadId, CancellationToken cancellationToken);
     Task DeleteDraftAsync(MailAccount account, string draftId, CancellationToken cancellationToken);
+    async Task SendDraftAsync(MailAccount account, string draftId, CancellationToken cancellationToken)
+    {
+        var draft = await GetAsync(account, draftId, markRead: false, cancellationToken);
+        await SendAsync(account, draft.Message, draft.ThreadId, cancellationToken);
+        await DeleteDraftAsync(account, draftId, cancellationToken);
+    }
 }
 
 // Gmail through Google's API with the person's own Google sign-in (MailAccount.TokenProtected).

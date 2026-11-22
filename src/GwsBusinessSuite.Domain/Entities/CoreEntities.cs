@@ -1100,6 +1100,37 @@ public sealed class MailRuleSeen : AuditableEntity
     public required string MessageKey { get; set; }
 }
 
+// A message waiting to be sent (22-11-26). Its body and attachments remain in the mailbox's own
+// Drafts folder; GWS keeps only the provider draft id and enough metadata to show/manage the queue.
+public sealed class MailScheduledSend : AuditableEntity
+{
+    public Guid AccountId { get; set; }
+    public required string Username { get; set; }
+    public required string DraftId { get; set; }
+    public string Subject { get; set; } = string.Empty;
+    public string Recipients { get; set; } = string.Empty;
+    public long DueUnix { get; set; }
+    public long NextAttemptUnix { get; set; }
+    public int AttemptCount { get; set; }
+    public string LastError { get; set; } = string.Empty;
+}
+
+// Snoozed inbox mail is archived at its provider and restored with that provider's undo token.
+// Subject/sender are display metadata only; no message body is stored.
+public sealed class MailSnooze : AuditableEntity
+{
+    public Guid AccountId { get; set; }
+    public required string Username { get; set; }
+    public required string UndoJson { get; set; }
+    public string Subject { get; set; } = string.Empty;
+    public string Sender { get; set; } = string.Empty;
+    public int MessageCount { get; set; }
+    public long WakeUnix { get; set; }
+    public long NextAttemptUnix { get; set; }
+    public int AttemptCount { get; set; }
+    public string LastError { get; set; } = string.Empty;
+}
+
 // A sender the person moved to a tab: their mail goes to that tab from then on (Mail tabs, 21-11-26).
 public sealed class MailSenderTab : AuditableEntity
 {

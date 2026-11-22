@@ -182,6 +182,14 @@ else
                     }
                 </button>
             }
+            <button type="button" class="mail-folder" title="Scheduled" @onclick="OpenScheduledAsync">
+                <i class="bi bi-send-clock mail-folder-icon" aria-hidden="true"></i><span class="mail-folder-name">Scheduled</span>
+                @if (_scheduled.Count > 0) { <span class="mail-count">@_scheduled.Count</span> }
+            </button>
+            <button type="button" class="mail-folder" title="Snoozed" @onclick="OpenSnoozedAsync">
+                <i class="bi bi-clock-history mail-folder-icon" aria-hidden="true"></i><span class="mail-folder-name">Snoozed</span>
+                @if (_snoozes.Count > 0) { <span class="mail-count">@_snoozes.Count</span> }
+            </button>
             <button type="button" class="mail-folder mail-more" aria-expanded="@(_moreOpen ? "true" : "false")" title="@(_moreOpen ? "Less" : "More")"
                     @onclick="() => _moreOpen = !_moreOpen">
                 <i class="bi @(_moreOpen ? "bi-chevron-up" : "bi-chevron-down") mail-folder-icon" aria-hidden="true"></i><span class="mail-folder-name">@(_moreOpen ? "Less" : "More")</span>
@@ -271,6 +279,12 @@ else
                             @onclick="() => ApplyAsync(selected, selected.Any(m => !m.Starred) ? MailActions.Star : MailActions.Unstar)">
                         <i class="bi @(selected.Any(m => !m.Starred) ? "bi-star" : "bi-star-fill")" aria-hidden="true"></i>
                     </button>
+                    @if (MailTabs.IsInbox(_folder))
+                    {
+                        <button type="button" class="mail-tool" title="Snooze" aria-label="Snooze selected" @onclick="() => OpenSnooze(selected)">
+                            <i class="bi bi-clock-history" aria-hidden="true"></i>
+                        </button>
+                    }
                 }
             </div>
             </div>
@@ -456,9 +470,12 @@ else
                             </span>
                         }
                     </div>
-                    <div class="d-flex gap-2 mt-2">
+                    <div class="d-flex flex-wrap gap-2 mt-2">
                         <button type="submit" class="btn btn-primary btn-sm" disabled="@(_busy || string.IsNullOrWhiteSpace(_compose.To + _compose.Cc + _compose.Bcc))">
                             <i class="bi bi-send me-1" aria-hidden="true"></i>@(_busy ? "Sending…" : "Send")
+                        </button>
+                        <button type="button" class="btn btn-outline-primary btn-sm" disabled="@(_busy || string.IsNullOrWhiteSpace(_compose.To + _compose.Cc + _compose.Bcc))" @onclick="OpenSchedulePicker">
+                            <i class="bi bi-send-clock me-1" aria-hidden="true"></i>Schedule
                         </button>
                         <button type="button" class="btn btn-outline-secondary btn-sm" disabled="@_busy" @onclick="SaveDraftAsync"><i class="bi bi-file-earmark me-1" aria-hidden="true"></i>Save draft</button>
                         <button type="button" class="btn btn-outline-secondary btn-sm" disabled="@_busy" @onclick="() => _compose = null">@(_compose.DraftId is null ? "Discard" : "Close")</button>
@@ -489,6 +506,10 @@ else
                         <button type="button" class="btn btn-outline-secondary" title="Archive" aria-label="Archive" disabled="@_busy" @onclick="ArchiveAsync"><i class="bi bi-archive" aria-hidden="true"></i></button>
                         <button type="button" class="btn btn-outline-secondary" title="@(InTrash ? "Delete forever" : "Delete (#)")" aria-label="@(InTrash ? "Delete forever" : "Delete")" disabled="@_busy" @onclick="TrashAsync"><i class="bi bi-trash" aria-hidden="true"></i></button>
                         <button type="button" class="btn btn-outline-secondary" title="Mark unread" aria-label="Mark unread" disabled="@_busy" @onclick="MarkUnreadAsync"><i class="bi bi-envelope" aria-hidden="true"></i></button>
+                        @if (MailTabs.IsInbox(_folder) && OpenSummary is { } summary)
+                        {
+                            <button type="button" class="btn btn-outline-secondary" title="Snooze" aria-label="Snooze" disabled="@_busy" @onclick="() => OpenSnooze([summary])"><i class="bi bi-clock-history" aria-hidden="true"></i></button>
+                        }
                     </div>
                 </div>
                 <h2 class="mail-reader-subject">@(string.IsNullOrWhiteSpace(_detail.Subject) ? "(no subject)" : _detail.Subject)</h2>
@@ -680,7 +701,7 @@ else
                   OnConfirm="DisconnectAsync" OnCancel="() => _confirmRemove = false" />
     <ConfirmModal Show="_confirmMissingAttachment" Title="Send without the attachment?" ConfirmText="Send anyway"
                   Message="The message mentions an attachment, but no file is attached."
-                  OnConfirm="ConfirmSendWithoutAttachmentAsync" OnCancel="() => _confirmMissingAttachment = false" />
+                  OnConfirm="ConfirmSendWithoutAttachmentAsync" OnCancel="CancelMissingAttachment" />
 
     @if (_editingSignature)
     {
@@ -699,6 +720,68 @@ else
                 <div class="modal-footer">
                     <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="CloseSignature">Cancel</button>
                     <button type="button" class="btn btn-sm btn-primary" disabled="@_busy" @onclick="SaveSignatureAsync">Save signature</button>
+                </div>
+            </div></div>
+        </div>
+    }
+
+    @if (_showSchedulePicker && _compose is not null)
+    {
+        <div class="modal-backdrop fade show"></div>
+        <div class="modal d-block" tabindex="-1" role="dialog" aria-modal="true" aria-labelledby="mail-schedule-title">
+            <div class="modal-dialog modal-dialog-centered"><div class="modal-content">
+                <div class="modal-header"><h2 class="modal-title h5" id="mail-schedule-title">Schedule send</h2><button type="button" class="btn-close" aria-label="Close" @onclick="CloseSchedulePicker"></button></div>
+                <div class="modal-body">
+                    <label class="form-label" for="mail-schedule-at">Send on</label>
+                    <input id="mail-schedule-at" type="datetime-local" class="form-control" @bind="_scheduleLocal" @bind:format="yyyy-MM-ddTHH:mm" />
+                    <div class="form-text">The message stays in this mailbox's Drafts until GWS sends it.</div>
+                    @if (_scheduleError is not null) { <p class="text-danger small mt-2 mb-0" role="alert">@_scheduleError</p> }
+                </div>
+                <div class="modal-footer"><button type="button" class="btn btn-sm btn-outline-secondary" @onclick="CloseSchedulePicker">Cancel</button><button type="button" class="btn btn-sm btn-primary" disabled="@_busy" @onclick="ScheduleSendAsync">Schedule send</button></div>
+            </div></div>
+        </div>
+    }
+
+    @if (_showScheduled)
+    {
+        <div class="modal-backdrop fade show"></div>
+        <div class="modal d-block" tabindex="-1" role="dialog" aria-modal="true" aria-labelledby="mail-scheduled-title">
+            <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable"><div class="modal-content">
+                <div class="modal-header"><h2 class="modal-title h5" id="mail-scheduled-title">Scheduled messages</h2><button type="button" class="btn-close" aria-label="Close" @onclick="() => _showScheduled = false"></button></div>
+                <div class="modal-body">
+                    @if (_scheduled.Count == 0) { <p class="text-secondary mb-0">Nothing is scheduled from this mailbox.</p> }
+                    else { <ul class="list-unstyled mail-timed-list mb-0">@foreach (var item in _scheduled) { <li><span class="mail-timed-main"><strong>@(string.IsNullOrWhiteSpace(item.Subject) ? "(no subject)" : item.Subject)</strong><span class="small text-secondary">To @item.Recipients · @item.DueAt.ToLocalGwsDateTime()</span>@if (item.LastError is not null) { <span class="small text-danger">Last attempt: @item.LastError</span> }</span><button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => CancelScheduledAsync(item)">Cancel to Drafts</button></li> }</ul> }
+                </div>
+            </div></div>
+        </div>
+    }
+
+    @if (_snoozeTargets is not null)
+    {
+        <div class="modal-backdrop fade show"></div>
+        <div class="modal d-block" tabindex="-1" role="dialog" aria-modal="true" aria-labelledby="mail-snooze-title">
+            <div class="modal-dialog modal-dialog-centered"><div class="modal-content">
+                <div class="modal-header"><h2 class="modal-title h5" id="mail-snooze-title">Snooze @Count(_snoozeTargets.Count, "message")</h2><button type="button" class="btn-close" aria-label="Close" @onclick="CloseSnooze"></button></div>
+                <div class="modal-body mail-snooze-choices">
+                    <button type="button" class="btn btn-outline-secondary" @onclick="() => SnoozeUntilAsync(TomorrowAt(8))"><span>Tomorrow morning</span><small>@TomorrowAt(8).ToLocalGwsDateTime()</small></button>
+                    <button type="button" class="btn btn-outline-secondary" @onclick="() => SnoozeUntilAsync(TomorrowAt(13))"><span>Tomorrow afternoon</span><small>@TomorrowAt(13).ToLocalGwsDateTime()</small></button>
+                    <button type="button" class="btn btn-outline-secondary" @onclick="() => SnoozeUntilAsync(NextWeek())"><span>Next week</span><small>@NextWeek().ToLocalGwsDateTime()</small></button>
+                    <label class="form-label mt-2 mb-1" for="mail-snooze-at">Choose date and time</label><div class="input-group"><input id="mail-snooze-at" type="datetime-local" class="form-control" @bind="_snoozeLocal" @bind:format="yyyy-MM-ddTHH:mm" /><button type="button" class="btn btn-primary" @onclick="SnoozeCustomAsync">Snooze</button></div>
+                    @if (_snoozeError is not null) { <p class="text-danger small mt-2 mb-0" role="alert">@_snoozeError</p> }
+                </div>
+            </div></div>
+        </div>
+    }
+
+    @if (_showSnoozed)
+    {
+        <div class="modal-backdrop fade show"></div>
+        <div class="modal d-block" tabindex="-1" role="dialog" aria-modal="true" aria-labelledby="mail-snoozed-title">
+            <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable"><div class="modal-content">
+                <div class="modal-header"><h2 class="modal-title h5" id="mail-snoozed-title">Snoozed messages</h2><button type="button" class="btn-close" aria-label="Close" @onclick="() => _showSnoozed = false"></button></div>
+                <div class="modal-body">
+                    @if (_snoozes.Count == 0) { <p class="text-secondary mb-0">Nothing is snoozed from this mailbox.</p> }
+                    else { <ul class="list-unstyled mail-timed-list mb-0">@foreach (var item in _snoozes) { <li><span class="mail-timed-main"><strong>@(item.MessageCount == 1 ? item.Subject : $"{item.MessageCount} messages")</strong><span class="small text-secondary">@(item.MessageCount == 1 ? item.Sender + " · " : string.Empty)Wakes @item.WakeAt.ToLocalGwsDateTime()</span>@if (item.LastError is not null) { <span class="small text-danger">Last attempt: @item.LastError</span> }</span><button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => WakeNowAsync(item)">Wake now</button></li> }</ul> }
                 </div>
             </div></div>
         </div>
@@ -981,6 +1064,17 @@ else
     private string _signatureDraft = string.Empty;
     private bool _confirmMissingAttachment;
     private bool _sendWithoutAttachmentConfirmed;
+    private bool _scheduleAfterAttachmentConfirmation;
+    private List<MailScheduledSendView> _scheduled = [];
+    private List<MailSnoozeView> _snoozes = [];
+    private bool _showSchedulePicker;
+    private bool _showScheduled;
+    private DateTime _scheduleLocal;
+    private string? _scheduleError;
+    private IReadOnlyList<MailMessageSummary>? _snoozeTargets;
+    private bool _showSnoozed;
+    private DateTime _snoozeLocal;
+    private string? _snoozeError;
     private string? _error;
     private string? _status;
     // Survives the mailbox loading (RunAsync clears _error): connected, but sending is blocked.
@@ -2100,9 +2194,137 @@ else
     private async Task ConfirmSendWithoutAttachmentAsync()
     {
         _confirmMissingAttachment = false;
+        if (_scheduleAfterAttachmentConfirmation)
+        {
+            _scheduleAfterAttachmentConfirmation = false;
+            ShowSchedulePicker();
+            return;
+        }
         _sendWithoutAttachmentConfirmed = true;
         await SendAsync();
     }
+
+    private void CancelMissingAttachment()
+    {
+        _confirmMissingAttachment = false;
+        _scheduleAfterAttachmentConfirmation = false;
+    }
+
+    private bool MissingAttachment(ComposeState compose) => compose.Files.Count == 0
+        && !(compose.Kind == ComposeKind.Forward && _detail?.Attachments.Count > 0)
+        && MailComposeGuard.MentionsAttachment(compose.Subject, compose.Body);
+
+    private void OpenSchedulePicker()
+    {
+        if (_compose is null) return;
+        if (MissingAttachment(_compose))
+        {
+            _scheduleAfterAttachmentConfirmation = true;
+            _confirmMissingAttachment = true;
+            return;
+        }
+        ShowSchedulePicker();
+    }
+
+    private void ShowSchedulePicker()
+    {
+        _scheduleLocal = DateTime.Now.AddHours(1);
+        _scheduleError = null;
+        _showSchedulePicker = true;
+    }
+
+    private void CloseSchedulePicker() => _showSchedulePicker = false;
+
+    private async Task ScheduleSendAsync()
+    {
+        if (_compose is null)
+        {
+            _scheduleError = "Choose a valid local date and time.";
+            return;
+        }
+        var due = LocalOffset(_scheduleLocal);
+        var compose = _compose;
+        await RunAsync(async () =>
+        {
+            await MailService.ScheduleSendAsync(_username, ComposeAccount(compose), DraftOf(compose), due);
+            _compose = null;
+            _showSchedulePicker = false;
+            if (_account is not null) _scheduled = (await MailService.ListScheduledSendsAsync(_username, AccountId)).ToList();
+        }, $"Scheduled for {due.ToLocalGwsDateTime()}.");
+        if (_error is not null) _scheduleError = _error;
+    }
+
+    private async Task OpenScheduledAsync()
+    {
+        if (_account is null) return;
+        _scheduled = (await MailService.ListScheduledSendsAsync(_username, AccountId)).ToList();
+        _showScheduled = true;
+    }
+
+    private async Task CancelScheduledAsync(MailScheduledSendView item)
+    {
+        await RunAsync(() => MailService.CancelScheduledSendAsync(_username, AccountId, item.Id), "Cancelled; the message is in Drafts.");
+        _scheduled.RemoveAll(row => row.Id == item.Id);
+    }
+
+    private void OpenSnooze(IReadOnlyList<MailMessageSummary> targets)
+    {
+        if (targets.Count == 0) return;
+        _snoozeTargets = targets;
+        _snoozeLocal = DateTime.Now.AddDays(1).Date.AddHours(8);
+        _snoozeError = null;
+        CloseMenus();
+    }
+
+    private void CloseSnooze() => _snoozeTargets = null;
+
+    private async Task SnoozeCustomAsync()
+    {
+        await SnoozeUntilAsync(LocalOffset(_snoozeLocal));
+    }
+
+    private async Task SnoozeUntilAsync(DateTimeOffset wake)
+    {
+        if (_snoozeTargets is not { Count: > 0 } targets) return;
+        var request = targets.Select(message => new MailSnoozeMessage(message.Id, message.Subject, Name(message.From))).ToList();
+        await RunAsync(async () =>
+        {
+            var snooze = await MailService.SnoozeAsync(_username, AccountId, request, wake);
+            _snoozes.Add(snooze);
+            _messages.RemoveAll(message => targets.Any(target => target.Id == message.Id));
+            _checked.Clear();
+            _snoozeTargets = null;
+            CloseReader();
+        }, $"Snoozed until {wake.ToLocalGwsDateTime()}.");
+        if (_error is not null) _snoozeError = _error;
+    }
+
+    private async Task OpenSnoozedAsync()
+    {
+        if (_account is null) return;
+        _snoozes = (await MailService.ListSnoozesAsync(_username, AccountId)).ToList();
+        _showSnoozed = true;
+    }
+
+    private async Task WakeNowAsync(MailSnoozeView item)
+    {
+        await RunAsync(() => MailService.WakeSnoozeAsync(_username, AccountId, item.Id), "Message returned to the inbox.");
+        if (_error is not null) return;
+        _snoozes.RemoveAll(row => row.Id == item.Id);
+        if (MailTabs.IsInbox(_folder)) await LoadListAsync(reset: true);
+    }
+
+    private static DateTimeOffset TomorrowAt(int hour) => new(DateTime.Today.AddDays(1).AddHours(hour), TimeZoneInfo.Local.GetUtcOffset(DateTime.Today.AddDays(1).AddHours(hour)));
+
+    private static DateTimeOffset NextWeek()
+    {
+        var days = ((int)DayOfWeek.Monday - (int)DateTime.Today.DayOfWeek + 7) % 7;
+        if (days == 0) days = 7;
+        var local = DateTime.Today.AddDays(days).AddHours(8);
+        return new DateTimeOffset(local, TimeZoneInfo.Local.GetUtcOffset(local));
+    }
+
+    private static DateTimeOffset LocalOffset(DateTime local) => new(local, TimeZoneInfo.Local.GetUtcOffset(local));
 
     private async Task SaveDraftAsync()
     {
@@ -2285,6 +2507,8 @@ else
         if (account is null) return;
         if (account.LastError is { } lastError && _error is null) _error = $"Last time: {lastError}";
         await LoadListAsync(reset: true);
+        _scheduled = (await MailService.ListScheduledSendsAsync(_username, account.Id)).ToList();
+        _snoozes = (await MailService.ListSnoozesAsync(_username, account.Id)).ToList();
         try
         {
             _customFolders = await GatedAsync(() => MailService.ListFoldersAsync(_username, account.Id));

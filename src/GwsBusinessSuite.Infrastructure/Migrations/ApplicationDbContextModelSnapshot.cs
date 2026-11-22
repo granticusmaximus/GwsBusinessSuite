@@ -5169,6 +5169,66 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
                     b.ToTable("MailRuleSeen");
                 });
 
+            modelBuilder.Entity("GwsBusinessSuite.Domain.Entities.MailScheduledSend", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("AccountId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("AttemptCount")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DraftId")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("DueUnix")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("LastError")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("NextAttemptUnix")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Recipients")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Subject")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Username")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("NextAttemptUnix", "DueUnix");
+
+                    b.HasIndex("Username", "AccountId");
+
+                    b.ToTable("MailScheduledSends");
+                });
+
             modelBuilder.Entity("GwsBusinessSuite.Domain.Entities.MailSenderTab", b =>
                 {
                     b.Property<Guid>("Id")
@@ -5255,6 +5315,69 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
                     b.HasKey("Id");
 
                     b.ToTable("MailServerSettings");
+                });
+
+            modelBuilder.Entity("GwsBusinessSuite.Domain.Entities.MailSnooze", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("AccountId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("AttemptCount")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("LastError")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("MessageCount")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("NextAttemptUnix")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Sender")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Subject")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("UndoJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Username")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("WakeUnix")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("NextAttemptUnix", "WakeUnix");
+
+                    b.HasIndex("Username", "AccountId");
+
+                    b.ToTable("MailSnoozes");
                 });
 
             modelBuilder.Entity("GwsBusinessSuite.Domain.Entities.MediaAsset", b =>

@@ -340,6 +340,7 @@ public static class DependencyInjection
         services.AddScoped<MailTabAiService>();
         services.AddHostedService<MailTabAiBackgroundService>();
         services.AddHostedService<MailRulesBackgroundService>();
+        services.AddHostedService<MailScheduleBackgroundService>();
         services.AddSingleton<MailUnreadCounter>();
         services.AddScoped<GwsBusinessSuite.Application.Operations.IMailServerSettingsService, MailServerSettingsService>();
         services.AddSingleton<IMailTransport, MailTransport>();
