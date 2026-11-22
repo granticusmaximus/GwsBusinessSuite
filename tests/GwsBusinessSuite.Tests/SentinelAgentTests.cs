@@ -35,6 +35,31 @@ namespace GwsBusinessSuite.Tests;
 // Confirm, Undo, and each area's tools against a real SQLite database. The model is scripted.
 public sealed class SentinelAgentTests
 {
+    [Fact]
+    public async Task ConversationPolicy_ShouldBeNaturalAdaptiveAndKeepActionReceiptsOutOfTheProse()
+    {
+        await using var harness = await Harness.CreateAsync();
+        var model = new ScriptedModel(messages =>
+        {
+            var system = messages[0].Content;
+            system.Should().Contain("thoughtful colleague").And.Contain("Lead with the useful answer")
+                .And.Contain("at most one focused clarifying question")
+                .And.Contain("Shape the answer for the request")
+                .And.Contain("numbered steps for a procedure")
+                .And.Contain("source links beside the claims")
+                .And.Contain("what failed, what remained unchanged and the next useful action")
+                .And.Contain("action cards own Open, Undo and Confirm");
+            system.Should().NotContain("answer in one to three short sentences");
+            return Say("The launch board is ready.");
+        });
+
+        var turn = await harness.Runner.RunAsync(
+            new SentinelAgentRequest(Guid.NewGuid(), Admin, "Is the launch board ready?", null, model, "test"),
+            _ => Task.CompletedTask, default);
+
+        turn.Answer.Should().Be("The launch board is ready.");
+    }
+
     [Theory]
     [InlineData("Create a launch board")]
     [InlineData("Rename the page to Roadmap")]
