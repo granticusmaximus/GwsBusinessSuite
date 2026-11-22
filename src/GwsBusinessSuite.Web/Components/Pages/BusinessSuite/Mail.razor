@@ -274,6 +274,15 @@ else
                 }
             </div>
             </div>
+            <div class="mail-filters" role="group" aria-label="Filter messages">
+                @foreach (var (key, label, icon) in ViewFilters)
+                {
+                    <button type="button" class="mail-filter @(_viewFilter == key ? "active" : string.Empty)"
+                            aria-pressed="@(_viewFilter == key ? "true" : "false")" @onclick="() => SetViewFilter(key)">
+                        <i class="bi @icon" aria-hidden="true"></i><span>@label</span>
+                    </button>
+                }
+            </div>
             @if (ShowTabs)
             {
                 @* Gmail's inbox tabs (21-11-26): each one's unread count and newest senders, as Gmail shows them. *@
@@ -306,14 +315,14 @@ else
             {
                 <LoadingIndicator Message="Getting your mail…" />
             }
-            else if (_messages.Count == 0)
+            else if (FilteredMessages.Count == 0)
             {
-                <p class="text-secondary small p-3 mb-0">@(string.IsNullOrWhiteSpace(_search) ? "Nothing here." : "No messages match.")</p>
+                <p class="text-secondary small p-3 mb-0">@(_messages.Count == 0 ? (string.IsNullOrWhiteSpace(_search) ? "Nothing here." : "No messages match.") : "No loaded messages match this filter.")</p>
             }
             else
             {
                 <ul class="mail-items list-unstyled mb-0">
-                    @foreach (var message in _messages)
+                    @foreach (var message in FilteredMessages)
                     {
                         var isChecked = _checked.Contains(message.Id);
                         <li class="mail-item @(message.Unread ? "unread" : string.Empty) @(message.Id == _selectedId ? "selected" : string.Empty) @(isChecked ? "checked" : string.Empty) @(message.Id == _cursorId ? "cursor" : string.Empty)"
@@ -653,6 +662,7 @@ else
                 <button type="button" role="menuitem" class="mail-menu-item" @onclick="OpenSenderTabsAsync"><i class="bi bi-person-lines-fill" aria-hidden="true"></i>Senders sorted into tabs</button>
                 <button type="button" role="menuitem" class="mail-menu-item" @onclick="() => OpenRulesAsync(null)"><i class="bi bi-funnel" aria-hidden="true"></i>Mail rules</button>
             }
+            <button type="button" role="menuitem" class="mail-menu-item" @onclick="OpenSignature"><i class="bi bi-pen" aria-hidden="true"></i>Signature</button>
             <button type="button" role="menuitem" class="mail-menu-item mail-menu-item--danger" @onclick="() => { _accountMenuOpen = false; _confirmRemove = true; }">
                 <i class="bi bi-box-arrow-right" aria-hidden="true"></i><span class="text-truncate">Remove @_account.Address</span>
             </button>
@@ -668,6 +678,31 @@ else
     <ConfirmModal Show="_confirmRemove" Title="Remove this mailbox?" ConfirmText="Remove"
                   Message="@($"{_account.Address} leaves Mail. Nothing from it is kept in the app, and you can connect it again any time.")"
                   OnConfirm="DisconnectAsync" OnCancel="() => _confirmRemove = false" />
+    <ConfirmModal Show="_confirmMissingAttachment" Title="Send without the attachment?" ConfirmText="Send anyway"
+                  Message="The message mentions an attachment, but no file is attached."
+                  OnConfirm="ConfirmSendWithoutAttachmentAsync" OnCancel="() => _confirmMissingAttachment = false" />
+
+    @if (_editingSignature)
+    {
+        <div class="modal-backdrop fade show"></div>
+        <div class="modal d-block" tabindex="-1" role="dialog" aria-modal="true" aria-labelledby="mail-signature-title">
+            <div class="modal-dialog modal-dialog-centered"><div class="modal-content">
+                <div class="modal-header">
+                    <h2 class="modal-title h5" id="mail-signature-title">Signature for @_account.Address</h2>
+                    <button type="button" class="btn-close" aria-label="Close" @onclick="CloseSignature"></button>
+                </div>
+                <div class="modal-body">
+                    <label class="form-label small" for="mail-signature">Added to new messages, replies and forwards</label>
+                    <textarea id="mail-signature" class="form-control" rows="6" maxlength="2000" @bind="_signatureDraft" @bind:event="oninput"></textarea>
+                    <div class="form-text">Plain text, up to 2,000 characters. Remove all text to turn it off.</div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="CloseSignature">Cancel</button>
+                    <button type="button" class="btn btn-sm btn-primary" disabled="@_busy" @onclick="SaveSignatureAsync">Save signature</button>
+                </div>
+            </div></div>
+        </div>
+    }
 
     @if (_rules is { } rules)
     {
@@ -929,6 +964,12 @@ else
     private string _folder = MailFolders.Inbox;
     private string _search = string.Empty;
     private readonly List<MailMessageSummary> _messages = [];
+    private string _viewFilter = "all";
+    private static readonly (string Key, string Label, string Icon)[] ViewFilters =
+    [
+        ("all", "All", "bi-inbox"), ("unread", "Unread", "bi-envelope"),
+        ("starred", "Starred", "bi-star"), ("attachments", "Attachments", "bi-paperclip")
+    ];
     private string? _nextPage;
     private bool _loadingList;
     private string? _selectedId;
@@ -936,6 +977,10 @@ else
     private bool _loadingDetail;
     private ComposeState? _compose;
     private bool _busy;
+    private bool _editingSignature;
+    private string _signatureDraft = string.Empty;
+    private bool _confirmMissingAttachment;
+    private bool _sendWithoutAttachmentConfirmed;
     private string? _error;
     private string? _status;
     // Survives the mailbox loading (RunAsync clears _error): connected, but sending is blocked.
@@ -1171,10 +1216,30 @@ else
 
     private bool InTrash => _folder == MailFolders.Trash;
     private bool Reading => _compose is not null || _detail is not null || _loadingDetail;
+    private List<MailMessageSummary> FilteredMessages => _messages.Where(MatchesViewFilter).ToList();
     private List<MailMessageSummary> Checked => _messages.Where(m => _checked.Contains(m.Id)).ToList();
     private MailMessageSummary? Cursor => _messages.FirstOrDefault(m => m.Id == _cursorId);
-    private string SelectAllState => _checked.Count == 0 ? "false" : _messages.All(m => _checked.Contains(m.Id)) ? "true" : "mixed";
-    private string ListCount => _messages.Count == 0 ? string.Empty : $"{_messages.Count}{(_nextPage is null ? string.Empty : "+")} {(_messages.Count == 1 && _nextPage is null ? "message" : "messages")}";
+    private string SelectAllState => _checked.Count == 0 ? "false" : FilteredMessages.All(m => _checked.Contains(m.Id)) ? "true" : "mixed";
+    private string ListCount => _messages.Count == 0
+        ? string.Empty
+        : _viewFilter == "all"
+            ? $"{_messages.Count}{(_nextPage is null ? string.Empty : "+")} {(_messages.Count == 1 && _nextPage is null ? "message" : "messages")}"
+            : $"{FilteredMessages.Count} of {_messages.Count}{(_nextPage is null ? string.Empty : "+")}";
+
+    private bool MatchesViewFilter(MailMessageSummary message) => _viewFilter switch
+    {
+        "unread" => message.Unread,
+        "starred" => message.Starred,
+        "attachments" => message.HasAttachments,
+        _ => true
+    };
+
+    private void SetViewFilter(string filter)
+    {
+        if (ViewFilters.All(item => item.Key != filter)) return;
+        _viewFilter = filter;
+        _checked.RemoveWhere(id => _messages.FirstOrDefault(message => message.Id == id) is not { } message || !MatchesViewFilter(message));
+    }
 
     // Shows the change at once, then asks the mailbox; puts it back if the mailbox refuses. Archive
     // and Delete leave an Undo bar. Deleting from Trash is for good, so it asks first. True when done.
@@ -1364,14 +1429,14 @@ else
     private void ToggleSelectAll()
     {
         if (_checked.Count > 0) _checked.Clear();
-        else _checked.UnionWith(_messages.Select(m => m.Id));
+        else _checked.UnionWith(FilteredMessages.Select(m => m.Id));
     }
 
     private void SelectWhere(Func<MailMessageSummary, bool> which)
     {
         CloseMenus();
         _checked.Clear();
-        _checked.UnionWith(_messages.Where(which).Select(m => m.Id));
+        _checked.UnionWith(FilteredMessages.Where(which).Select(m => m.Id));
     }
 
     // ---- Menus: right-click on a message, the select menu and the mailbox switcher.
@@ -1419,6 +1484,28 @@ else
         _menu = null;
         _selectMenuOpen = false;
         _accountMenuOpen = false;
+    }
+
+    private void OpenSignature()
+    {
+        CloseMenus();
+        _signatureDraft = _account?.Signature ?? string.Empty;
+        _editingSignature = true;
+    }
+
+    private void CloseSignature() => _editingSignature = false;
+
+    private async Task SaveSignatureAsync()
+    {
+        if (_account is not { } account) return;
+        await RunAsync(async () =>
+        {
+            var saved = await MailService.SaveSignatureAsync(_username, account.Id, _signatureDraft);
+            var index = _accounts.FindIndex(item => item.Id == saved.Id);
+            if (index >= 0) _accounts[index] = saved;
+            _account = saved;
+            _editingSignature = false;
+        }, "Signature saved.");
     }
 
     private void OnMenuKeyDown(KeyboardEventArgs e)
@@ -1948,7 +2035,7 @@ else
     {
         if (kind == ComposeKind.New || _detail is null)
         {
-            _compose = new ComposeState();
+            _compose = new ComposeState { Body = MailComposeGuard.WithSignature(string.Empty, _account?.Signature) };
             return;
         }
         var detail = _detail;
@@ -1972,7 +2059,8 @@ else
             {
                 Kind = kind, Title = "Forward", ReplyToMessageId = detail.Id,
                 Subject = subject.StartsWith("Fwd:", StringComparison.OrdinalIgnoreCase) ? subject : $"Fwd: {subject}",
-                Body = $"\n\n---------- Forwarded message ----------\nFrom: {detail.From.Display}\nDate: {detail.Date.ToLocalGwsDateTime()}\n"
+                Body = MailComposeGuard.WithSignature(string.Empty, _account?.Signature)
+                    + $"\n\n---------- Forwarded message ----------\nFrom: {detail.From.Display}\nDate: {detail.Date.ToLocalGwsDateTime()}\n"
                     + $"Subject: {subject}\nTo: {string.Join(", ", detail.To.Select(a => a.Display))}\n\n{detail.TextBody}"
             },
             _ => new ComposeState
@@ -1983,7 +2071,8 @@ else
                 Cc = kind == ComposeKind.ReplyAll ? string.Join(", ", detail.Cc.Where(NotMe).Select(a => a.Address)) : string.Empty,
                 ShowCc = kind == ComposeKind.ReplyAll && detail.Cc.Any(NotMe),
                 Subject = subject.StartsWith("Re:", StringComparison.OrdinalIgnoreCase) ? subject : $"Re: {subject}",
-                Body = $"\n\nOn {detail.Date.ToLocalGwsDateTime()}, {detail.From.Display} wrote:\n"
+                Body = MailComposeGuard.WithSignature(string.Empty, _account?.Signature)
+                    + $"\n\nOn {detail.Date.ToLocalGwsDateTime()}, {detail.From.Display} wrote:\n"
                     + string.Join("\n", detail.TextBody.Split('\n').Select(line => "> " + line.TrimEnd('\r')))
             }
         };
@@ -1993,11 +2082,26 @@ else
     {
         if (_compose is null) return;
         var compose = _compose;
+        var forwardedAttachments = compose.Kind == ComposeKind.Forward && _detail?.Attachments.Count > 0;
+        if (!_sendWithoutAttachmentConfirmed && compose.Files.Count == 0 && !forwardedAttachments
+            && MailComposeGuard.MentionsAttachment(compose.Subject, compose.Body))
+        {
+            _confirmMissingAttachment = true;
+            return;
+        }
+        _sendWithoutAttachmentConfirmed = false;
         var sentFromDraft = compose.DraftId is not null;
         await RunAsync(() => MailService.SendAsync(_username, ComposeAccount(compose), DraftOf(compose)), "Sent.");
         if (_error is not null) return;
         _compose = null;
         if (sentFromDraft && _folder == MailFolders.Drafts) await LoadListAsync(reset: true);
+    }
+
+    private async Task ConfirmSendWithoutAttachmentAsync()
+    {
+        _confirmMissingAttachment = false;
+        _sendWithoutAttachmentConfirmed = true;
+        await SendAsync();
     }
 
     private async Task SaveDraftAsync()

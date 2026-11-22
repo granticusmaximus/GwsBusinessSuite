@@ -1048,6 +1048,9 @@ public sealed class MailAccount : AuditableEntity
     public string SmtpSecurity { get; set; } = "StartTls";
     public string LoginUsername { get; set; } = string.Empty;
     public string PasswordProtected { get; set; } = string.Empty;
+    // Plain text by design: it is the person's reusable sign-off, not a credential. It is appended
+    // to outgoing drafts in the browser and never sent to a model or another mailbox.
+    public string Signature { get; set; } = string.Empty;
     public DateTimeOffset? LastUsedAt { get; set; }
     public string? LastError { get; set; }
 }

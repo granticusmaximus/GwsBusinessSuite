@@ -115,6 +115,19 @@ public sealed class MailService(
         await db.SaveChangesAsync(cancellationToken);
     }
 
+    public async Task<MailAccountView> SaveSignatureAsync(string username, Guid accountId, string signature, CancellationToken cancellationToken = default)
+    {
+        var account = await FindAsync(username, accountId, cancellationToken)
+            ?? throw new MailException("That mailbox is no longer connected.");
+        var clean = (signature ?? string.Empty).Trim();
+        if (clean.Length > 2_000) throw new MailException("A signature can be up to 2,000 characters.");
+        account.Signature = clean;
+        account.UpdatedAt = timeProvider.GetUtcNow();
+        account.UpdatedBy = username;
+        await db.SaveChangesAsync(cancellationToken);
+        return ToView(account);
+    }
+
     public Task<IReadOnlyList<MailFolderView>> ListFoldersAsync(string username, Guid accountId, CancellationToken cancellationToken = default) =>
         RunAsync(username, accountId, (backend, account) => backend.ListFoldersAsync(account, cancellationToken), cancellationToken);
 
@@ -726,5 +739,6 @@ public sealed class MailService(
     }
 
     private static MailAccountView ToView(MailAccount account) =>
-        new(account.Id, account.Provider, account.Address, account.DisplayName, account.LastError, account.LastUsedAt, HasInboxTabs: true);
+        new(account.Id, account.Provider, account.Address, account.DisplayName, account.LastError, account.LastUsedAt,
+            HasInboxTabs: true, Signature: account.Signature);
 }

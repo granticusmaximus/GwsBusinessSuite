@@ -291,6 +291,20 @@ public sealed class MailServiceTests
     }
 
     [Fact]
+    public async Task Signature_ShouldBelongToItsMailbox_AndRejectAnotherOwner()
+    {
+        var f = await CreateAsync();
+        var account = await f.UseImapAsync();
+
+        var saved = await f.Service.SaveSignatureAsync("grant", account.Id, " Grant Watson\nGWS ");
+
+        saved.Signature.Should().Be("Grant Watson\nGWS");
+        (await f.Service.ListAccountsAsync("grant")).Single().Signature.Should().Be("Grant Watson\nGWS");
+        var otherOwner = () => f.Service.SaveSignatureAsync("someone-else", account.Id, "Nope");
+        await otherOwner.Should().ThrowAsync<MailException>().WithMessage("*no longer connected*");
+    }
+
+    [Fact]
     public async Task ADraft_ShouldSaveWithoutRecipients_ReplaceItself_AndGoWhenSent_KeepingItsThread()
     {
         var f = await CreateAsync();

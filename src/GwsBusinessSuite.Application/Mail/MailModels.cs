@@ -80,7 +80,7 @@ public sealed record MailFolderView(string Key, string Label, string? Color = nu
 // Warning: only on the view SaveImapAccountAsync returns - the mailbox connected for reading,
 // but this server can't reach its SMTP port, so sending won't work until the port opens.
 public sealed record MailAccountView(Guid Id, string Provider, string Address, string DisplayName, string? LastError, DateTimeOffset? LastUsedAt, string? Warning = null,
-    bool HasInboxTabs = false);
+    bool HasInboxTabs = false, string Signature = "");
 
 // Other providers: the IMAP server mail is read from and the SMTP server it's sent through.
 public sealed record MailImapAccountInput(
@@ -171,6 +171,8 @@ public interface IMailService
     // the account. Connecting the same Gmail address again updates that mailbox.
     Task<MailAccountView> SaveGoogleAccountAsync(string username, string tokenJson, string address, CancellationToken cancellationToken = default);
     Task RemoveAccountAsync(string username, Guid accountId, CancellationToken cancellationToken = default);
+    Task<MailAccountView> SaveSignatureAsync(string username, Guid accountId, string signature, CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException();
 
     // The provider's folders and labels beyond the standard ones.
     Task<IReadOnlyList<MailFolderView>> ListFoldersAsync(string username, Guid accountId, CancellationToken cancellationToken = default);

@@ -172,6 +172,44 @@
 .mail-selected { margin: 0 .5rem 0 .25rem; font-weight: 600; }
 .mail-list-count { margin-left: auto; padding-right: .5rem; }
 
+.mail-filters {
+    display: flex;
+    gap: .35rem;
+    overflow-x: auto;
+    padding: .35rem .55rem;
+    border-bottom: 1px solid var(--gws-panel-border, var(--bs-border-color));
+    scrollbar-width: none;
+}
+
+.mail-filters::-webkit-scrollbar { display: none; }
+
+.mail-filter {
+    display: inline-flex;
+    align-items: center;
+    gap: .35rem;
+    flex: 0 0 auto;
+    min-height: 2rem;
+    padding: .25rem .65rem;
+    border: 1px solid var(--gws-panel-border, var(--bs-border-color));
+    border-radius: var(--gws-radius-pill);
+    background: var(--gws-neu-surface, var(--bs-body-bg));
+    color: var(--bs-secondary-color);
+    font-size: var(--gws-type-xs);
+}
+
+.mail-filter:hover { color: var(--bs-body-color); }
+.mail-filter.active {
+    border-color: var(--bs-primary);
+    background: var(--bs-primary-bg-subtle);
+    color: var(--bs-primary-text-emphasis);
+    font-weight: 600;
+}
+
+@container mail-list (max-width: 520px) {
+    .mail-filter { min-width: 2.25rem; justify-content: center; padding-inline: .55rem; }
+    .mail-filter span { display: none; }
+}
+
 /* A message: its swipe actions sit behind the row, which moves with the fingers. */
 .mail-item {
     position: relative;
@@ -513,16 +551,35 @@
 
     .mail-folders {
         flex-direction: row;
+        align-items: center;
+        gap: .25rem;
+        min-height: 3.25rem;
+        padding: .4rem .5rem;
         overflow-x: auto;
+        overflow-y: hidden;
         border-right: 0;
         border-bottom: 1px solid var(--gws-panel-border, var(--bs-border-color));
+        scrollbar-width: thin;
     }
 
+    .mail-folders > *,
+    .mail-folders-head,
+    .mail-folders-top,
+    .mail-folder-row { flex: 0 0 auto; align-self: center; }
     .mail-account-button { width: auto; flex-shrink: 0; margin: 0 .35rem 0 0; }
     .mail-account-address { max-width: 10rem; }
     .mail-compose-button, .mail-shortcuts-link { display: none; }
     .mail-header-compose { display: inline-block; }
-    .mail-folder { border-radius: var(--gws-radius-lg); }
+    .mail-folder {
+        flex: 0 0 auto;
+        width: auto;
+        min-height: 2.3rem;
+        padding: .4rem .65rem;
+        border-radius: var(--gws-radius-lg);
+    }
+    .mail-folder-row > .mail-folder { flex: 0 0 auto; }
+    .mail-folders-heading { display: none; }
+    .mail-folder-actions { display: none !important; }
     .mail-list { border-right: 0; }
     .mail-shell--list .mail-item-open {
         grid-template-columns: minmax(0, 1fr) auto;
@@ -627,8 +684,7 @@
     .mail-rail-toggle { display: none; }
     .mail-more { flex-shrink: 0; border-radius: var(--gws-radius-lg); }
     .mail-shell--rail, .mail-shell--rail.mail-shell--list { grid-template-columns: minmax(0, 1fr); }
-    .mail-tabs { display: flex; overflow-x: auto; }
-    .mail-tab { flex: 0 0 auto; }
+    .mail-tabs { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); overflow: visible; }
     .mail-tab-senders { display: none; }
 }
 
@@ -714,4 +770,10 @@
 }
 @container gws-main (max-width: 796px) {
     .mail-folders-head { position: static; flex-direction: row; align-items: center; margin: 0; padding: 0; background: none; }
+}
+
+@container gws-main (max-width: 520px) {
+    .mail-account-address, .mail-account-chevron { display: none; }
+    .mail-account-button { padding: .2rem; border: 0; }
+    .mail-folders { min-height: 3rem; }
 }

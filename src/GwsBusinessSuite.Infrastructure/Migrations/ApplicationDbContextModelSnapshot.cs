@@ -4989,6 +4989,10 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("Signature")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("SmtpHost")
                         .IsRequired()
                         .HasColumnType("TEXT");
