@@ -2,30 +2,19 @@
 .md-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); gap: var(--gws-step-3); margin-bottom: var(--gws-step-5); }
 
 .md-tile {
-    position: relative;
     display: grid;
     grid-template-columns: auto 1fr;
     grid-template-rows: auto auto;
     column-gap: var(--gws-step-2);
     align-items: center;
     padding: var(--gws-step-3) var(--gws-step-4);
-    border: 1px solid var(--gws-glass-edge-rest);
-    box-shadow: var(--gws-glass-bevel);
+    border: 0;
+    box-shadow: var(--gws-neu-raised-shadow-sm);
     border-radius: var(--gws-radius-md);
     color: var(--gws-text-strong);
-    background: var(--gws-glass-card-bg);
-    -webkit-backdrop-filter: var(--gws-glass-filter);
-    backdrop-filter: var(--gws-glass-filter);
+    background: linear-gradient(145deg, var(--gws-neu-raised), var(--gws-neu-surface));
     text-decoration: none;
 }
-.md-tile::before {
-    content: ""; position: absolute; inset: 0; border-radius: inherit; padding: 1px;
-    background: radial-gradient(280px circle at var(--gws-mx, 50%) var(--gws-my, 0%), var(--gws-glass-edge-highlight), var(--gws-glass-edge-amber) 36%, transparent 64%);
-    -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-    -webkit-mask-composite: xor; mask-composite: exclude; pointer-events: none; opacity: 0.4;
-    transition: opacity .2s ease;
-}
-.md-tile:hover::before { opacity: 1; }
 
 .md-tile:hover { border-color: var(--gws-sidebar-accent); }
 .md-tile i { grid-row: span 2; font-size: var(--gws-type-xl); color: var(--gws-sidebar-accent); }
@@ -45,12 +34,10 @@
     align-items: center;
     gap: var(--gws-step-2) var(--gws-step-3);
     padding: var(--gws-step-2) var(--gws-step-3);
-    border: 1px solid var(--gws-glass-edge-rest);
-    box-shadow: var(--gws-glass-bevel);
+    border: 0;
+    box-shadow: var(--gws-neu-raised-shadow-sm);
     border-radius: var(--gws-radius-sm);
-    background: var(--gws-glass-card-bg);
-    -webkit-backdrop-filter: var(--gws-glass-filter);
-    backdrop-filter: var(--gws-glass-filter);
+    background: linear-gradient(145deg, var(--gws-neu-raised), var(--gws-neu-surface));
     transition: opacity .2s ease;
 }
 

@@ -25,11 +25,6 @@
   --neu-raised-shadow: inset 0 1px 0 var(--neu-highlight), 0 10px 26px -10px var(--neu-shadow), 0 2px 6px -2px var(--neu-inset);
   --neu-raised-shadow-sm: inset 0 1px 0 var(--neu-highlight), 0 3px 10px -4px var(--neu-shadow);
   --neu-inset-shadow: inset 0 1px 3px var(--neu-inset), inset 0 -1px 0 var(--neu-highlight);
-  --glass-filter: saturate(165%) blur(20px);
-  --glass-edge-highlight: rgba(250, 250, 249, 0.35);
-  --glass-edge-amber: rgba(245, 158, 11, 0.45);
-  --glass-edge-rest: rgba(250, 250, 249, 0.08);
-  --glass-bevel: inset 0 1px 0 rgba(250, 250, 249, 0.12), inset 0 -1px 0 rgba(0, 0, 0, 0.28), 0 10px 30px rgba(0, 0, 0, 0.42);
 
   --font-serif: 'Playfair Display', Georgia, 'Times New Roman', serif;
   --font-sans:  'Inter', system-ui, -apple-system, sans-serif;
@@ -44,11 +39,7 @@
 html { scroll-behavior: smooth; }
 body {
   font-family: var(--font-sans);
-  background:
-    radial-gradient(circle at 85% 0%, rgba(245, 158, 11, 0.06), transparent 42rem),
-    radial-gradient(rgba(250, 250, 249, 0.03) 1px, transparent 1px),
-    var(--bg);
-  background-size: auto, 24px 24px, auto;
+  background: var(--bg);
   color: var(--text-1);
   min-height: 100vh;
   min-height: 100dvh;
@@ -2011,50 +2002,10 @@ span.footer-group-heading { font-size: 0.8rem; }
     .gws-callout, .gws-posts-grid-item, .gws-posts-grid-list-item, .gws-related-posts-item,
     .gws-toc, .contact-thank-you-card, .gws-consent, .nav-dropdown-menu,
     .gws-portfolio-lightbox-panel) {
-  position: relative;
-  border-color: var(--glass-edge-rest);
+  border-color: color-mix(in srgb, var(--border) 58%, transparent);
   border-radius: calc(var(--radius) + 5px);
-  background: linear-gradient(165deg, color-mix(in srgb, var(--neu-raised) 76%, transparent), color-mix(in srgb, var(--bg-surface) 70%, transparent));
-  -webkit-backdrop-filter: var(--glass-filter);
-  backdrop-filter: var(--glass-filter);
-  box-shadow: var(--glass-bevel);
-}
-:is(.article-card, .gws-card, .gws-pricing-card, .gws-testimonial, .gws-accordion-item,
-    .gws-callout, .gws-posts-grid-item, .gws-posts-grid-list-item, .gws-related-posts-item,
-    .gws-toc, .contact-thank-you-card, .gws-portfolio-lightbox-panel)::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  padding: 1px;
-  background: radial-gradient(360px circle at var(--gws-mx, 50%) var(--gws-my, 0%), var(--glass-edge-highlight), var(--glass-edge-amber) 36%, transparent 64%);
-  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-  -webkit-mask-composite: xor;
-  mask-composite: exclude;
-  pointer-events: none;
-  opacity: 0.45;
-  transition: opacity 0.25s ease;
-}
-:is(.article-card, .gws-card, .gws-pricing-card, .gws-testimonial, .gws-accordion-item,
-    .gws-callout, .gws-posts-grid-item, .gws-posts-grid-list-item, .gws-related-posts-item,
-    .gws-toc, .contact-thank-you-card, .gws-portfolio-lightbox-panel):hover::before {
-  opacity: 1;
-}
-
-.btn, .comment-form-submit, .gws-form-submit {
-  position: relative;
-  overflow: hidden;
-}
-.gws-real-ripple {
-  position: absolute;
-  border-radius: 50%;
-  background: radial-gradient(circle, rgba(250, 250, 249, 0.38) 0%, rgba(245, 158, 11, 0.22) 55%, transparent 72%);
-  transform: scale(0);
-  animation: gwsRealRipple 0.55s cubic-bezier(0.22, 1, 0.36, 1) forwards;
-  pointer-events: none;
-}
-@keyframes gwsRealRipple {
-  to { transform: scale(2.8); opacity: 0; }
+  background: linear-gradient(145deg, color-mix(in srgb, var(--neu-raised) 96%, white), var(--neu-raised));
+  box-shadow: var(--neu-raised-shadow);
 }
 
 :is(.article-card, .gws-card, .gws-posts-grid-item, .gws-posts-grid-list-item,

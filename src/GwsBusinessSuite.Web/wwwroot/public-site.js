@@ -130,31 +130,3 @@
     document.querySelectorAll('[data-gws-menu-toggle][aria-expanded="true"]').forEach(function (b) { b.click(); b.focus(); });
   });
 }());
-
-// Kit H2 (Realistic Prismatic Glass): pointer bevel grazing & physical button ripples on public site.
-(function () {
-  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-  var glassSelector = '.article-card, .gws-card, .gws-pricing-card, .gws-testimonial, .gws-accordion-item, .gws-callout, .gws-posts-grid-item, .gws-posts-grid-list-item, .gws-related-posts-item, .gws-toc, .contact-thank-you-card, .gws-portfolio-lightbox-panel';
-
-  document.addEventListener('pointermove', function (e) {
-    var el = e.target && e.target.closest && e.target.closest(glassSelector);
-    if (!el) return;
-    var r = el.getBoundingClientRect();
-    el.style.setProperty('--gws-mx', (e.clientX - r.left) + 'px');
-    el.style.setProperty('--gws-my', (e.clientY - r.top) + 'px');
-  }, { passive: true });
-
-  document.addEventListener('pointerdown', function (e) {
-    var btn = e.target && e.target.closest && e.target.closest('.btn, .comment-form-submit, .gws-form-submit');
-    if (!btn) return;
-    var r = btn.getBoundingClientRect();
-    var size = Math.max(r.width, r.height) * 1.4;
-    var ripple = document.createElement('span');
-    ripple.className = 'gws-real-ripple';
-    ripple.style.width = ripple.style.height = size + 'px';
-    ripple.style.left = (e.clientX - r.left - size / 2) + 'px';
-    ripple.style.top = (e.clientY - r.top - size / 2) + 'px';
-    btn.appendChild(ripple);
-    setTimeout(function () { ripple.remove(); }, 600);
-  }, { passive: true });
-}());

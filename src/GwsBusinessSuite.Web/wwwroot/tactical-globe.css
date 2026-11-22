@@ -16,7 +16,7 @@
     --ow-figures: "SF Mono", ui-monospace, "IBM Plex Mono", Menlo, Consolas, monospace;
     --ow-glass: rgb(4 14 8 / 0.5);
     --ow-glass-solid: #06110a;
-    --ow-glass-blur: saturate(165%) blur(20px);
+    --ow-glass-blur: blur(18px) saturate(140%);
     --ow-edge: rgb(var(--ow-accent-rgb) / 0.45);
     --ow-cut: 12px;
     --ow-glow: 0 0 6px rgb(var(--ow-accent-rgb) / 0.5);
@@ -24,7 +24,7 @@
     --ow-knob: var(--ow-ink);
     /* Shadows for the Apple-structure chrome (21-11-26), shared so the design guard's count stays put. */
     --ow-shadow-vignette: inset 0 0 90px rgba(0, 0, 0, 0.35);
-    --ow-shadow-edge: inset 0 1px 0 rgba(255, 255, 255, 0.14), inset 0 0 0 1px var(--ow-edge, rgb(89 240 122 / 0.45));
+    --ow-shadow-edge: inset 0 0 0 1px var(--ow-edge, rgb(89 240 122 / 0.45));
     --ow-shadow-edge-strong: inset 0 0 0 1px rgb(var(--ow-accent-rgb, 89 240 122) / 0.55);
     --ow-shadow-edge-contrast: inset 0 0 0 1px var(--ow-ink, #d4ffd9);
     --ow-shadow-knob: 0 1px 3px rgba(0, 0, 0, 0.45);
