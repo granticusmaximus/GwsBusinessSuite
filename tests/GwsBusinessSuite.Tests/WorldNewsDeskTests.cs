@@ -531,7 +531,8 @@ public sealed class WorldNewsDeskTests : IDisposable
         Assert.Contains(hits, h => h.Kind == "verdict" && h.EventId == "e1");
         Assert.Contains(hits, h => h.Kind == "contact" && h.Title == "Harbour master");
         Assert.DoesNotContain(hits, h => h.Kind == "contact" && h.Title == "Harbour pilot");
-        Assert.Equal("report", Assert.Single(store.SearchDesk("quayside", "ana")).Kind);
+        var quaysideHits = store.SearchDesk("quayside", "ana");
+        Assert.Contains(quaysideHits, h => h.Kind == "report" && h.Title == "Quayside incident");
         Assert.Single(store.SearchDesk("06:40", "ana"));
     }
 

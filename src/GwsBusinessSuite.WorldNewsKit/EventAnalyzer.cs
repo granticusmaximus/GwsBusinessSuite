@@ -70,7 +70,7 @@ public static partial class EventAnalyzer
 
     public const string SystemPrompt = """
         You are SentinelGPT, analysing the news coverage of one event for a reader who wants to compare the sources.
-        You get each outlet's headline and description and, for some outlets, an excerpt of the article itself. The outlets write in many languages; answer in English.
+        You get each outlet's headline and description and, for some outlets, an excerpt of the article itself. The outlets write in many languages; translate everything into natural English and write every section (CLAIM, SUMMARY, AGREED, DIFFERENCES, DISPUTES) strictly in English with no non-English sentences.
         Rules:
         - Use only what these reports say. Add no outside knowledge, and never guess a number, name, date or motive.
         - Name outlets exactly as they are given.
@@ -122,7 +122,7 @@ public static partial class EventAnalyzer
 
     // True when there's no analysis yet, or coverage has grown enough since to write it again.
     public static bool IsDue(EventAnalysis? analysis, EventOverview e) =>
-        analysis is null || e.ArticleCount >= analysis.ArticleCount * GrowthBeforeRewrite;
+        analysis is null || string.IsNullOrWhiteSpace(analysis.Claim) || string.IsNullOrWhiteSpace(analysis.Summary) || e.ArticleCount >= analysis.ArticleCount * GrowthBeforeRewrite;
 
     // The reports as SentinelGPT reads them: one per outlet. The articles that could be read come
     // first, an excerpt each; then a line for every other outlet's report, languages taking turns
@@ -151,8 +151,10 @@ public static partial class EventAnalyzer
             foreach (var source in read)
             {
                 var a = source.Report;
-                var block = $"### {a.Outlet} ({a.Country}, {a.Language}, {formatTime(a.SeenAt)})\nHeadline: {Flat(a.Title)}\n" +
-                    (a.Snippet is { } snippet ? $"Description: {Clip(snippet, 300)}\n" : string.Empty) +
+                var headline = a.English?.Headline ?? a.Title;
+                var description = a.English?.Description ?? a.Snippet;
+                var block = $"### {a.Outlet} ({a.Country}, {a.Language}, {formatTime(a.SeenAt)})\nHeadline: {Flat(headline)}\n" +
+                    (description is { } snippet ? $"Description: {Clip(snippet, 300)}\n" : string.Empty) +
                     $"Article: {Clip(excerpts[a.Id], MaxExcerptChars)}\n";
                 // The other outlets get at least a third of the room.
                 if (text.Length + block.Length > maxChars * 2 / 3) break;
@@ -175,7 +177,9 @@ public static partial class EventAnalyzer
                 foreach (var queue in queues.Where(queue => queue.Count > 0))
                 {
                     var a = queue.Dequeue().Report;
-                    var line = $"- {a.Outlet} ({a.Country}, {a.Language}): {Flat(a.Title)}" + (a.Snippet is { } snippet ? $" | {Clip(snippet, 220)}" : string.Empty);
+                    var headline = a.English?.Headline ?? a.Title;
+                    var description = a.English?.Description ?? a.Snippet;
+                    var line = $"- {a.Outlet} ({a.Country}, {a.Language}): {Flat(headline)}" + (description is { } snippet ? $" | {Clip(snippet, 220)}" : string.Empty);
                     if (line.Length + 1 > budget) continue;
                     chosen.Add((new DocumentSource(a, []), line));
                     budget -= line.Length + 1;
@@ -189,7 +193,7 @@ public static partial class EventAnalyzer
     // The four parts of the answer, tolerating markdown bold, headings and a reasoning model's <think>
     // block. A difference is kept with its outlet only when that outlet is one of the event's (a
     // small model can put a point on the wrong outlet); otherwise it's kept as a general point.
-    // Null when there's neither a claim nor a summary.
+    // Null when either the claim or the summary is missing or too short.
     public static (string Claim, string Summary, IReadOnlyList<AgreedFact> Agreed, IReadOnlyList<OutletDifference> Differences)? Parse(
         string raw, IReadOnlyCollection<string> outlets)
     {
@@ -205,7 +209,7 @@ public static partial class EventAnalyzer
         }
         var claim = Flat(Bullet().Replace(Section("CLAIM").Trim(), string.Empty));
         var summary = Flat(Section("SUMMARY"));
-        if (claim.Length < 20 && summary.Length < 40) return null;
+        if (claim.Length < 20 || summary.Length < 40) return null;
         var agreed = Bullets(Section("AGREED")).Select(line => Fact(line, outlets)).Where(fact => fact.Text.Length >= 8).Take(MaxAgreed).ToList();
         var differences = Bullets(Section("DIFFERENCES"))
             .Select(line => Difference(line, outlets))

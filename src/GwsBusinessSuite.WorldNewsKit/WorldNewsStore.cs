@@ -1563,9 +1563,9 @@ public sealed partial class WorldNewsStore
         var pending = new List<(string Username, string SituationId, int Before, int Current, string Title)>();
         using (var command = connection.CreateCommand())
         {
-            command.CommandText = """
+            command.CommandText = $"""
                 SELECT w.username, w.situation_id, w.event_count, COUNT(e.id),
-                       COALESCE((SELECT e2.title FROM events e2 WHERE e2.situation_id = w.situation_id ORDER BY e2.last_seen DESC LIMIT 1), 'Developing story')
+                       COALESCE((SELECT COALESCE({EnglishEventHeadline.Replace("e.", "e2.")}, e2.title) FROM events e2 WHERE e2.situation_id = w.situation_id ORDER BY e2.last_seen DESC LIMIT 1), 'Developing story')
                 FROM situation_watches w LEFT JOIN events e ON e.situation_id = w.situation_id
                 GROUP BY w.username, w.situation_id, w.event_count HAVING COUNT(e.id) > w.event_count
                 """;

@@ -737,7 +737,7 @@ public sealed partial class WorldNewsService : IDisposable
             situation = new WorldNewsSearchSituation(biggest.Headline ?? biggest.Title,
                 SituationLinker.IsActive(linked.Max(x => x.LastSeen), DateTimeOffset.UtcNow), linked.Count);
         }
-        return new WorldNewsSearchItem(e.Headline ?? e.Title, e.Headline is null ? null : e.Title, summary?.Text, e.OutletCount, e.ArticleCount,
+        return new WorldNewsSearchItem(e.Headline ?? e.Title, null, summary?.Text, e.OutletCount, e.ArticleCount,
             e.Countries, e.Languages, e.FirstSeen, e.LastSeen, situation, WorldNewsSearch.Sources(Store.ArticlesForEvent(eventId)));
     }
 

@@ -1053,7 +1053,7 @@ public sealed class WorldNewsKitTests : IDisposable
 
         var summary = new EventSummary("e1", 2, "Istanbul floods kill eight", "Eight people died.", "llama3.2", 4, Now);
         var md = EventDocument.ToMarkdown(e, [nhk, dawn, hindu, spiegel], summary, Format);
-        md.Should().StartWith("# Istanbul floods kill eight").And.Contain("Original headline: Floods kill eight in Istanbul")
+        md.Should().StartWith("# Istanbul floods kill eight").And.NotContain("Original headline")
             .And.Contain("4 outlets · 4 reports · 3 languages · 1 country · first seen 20-10-26 11:00, latest 20-10-26 14:00")
             .And.Contain("## The story\n\n_SentinelGPT hasn't analysed this coverage yet.")
             .And.Contain("Eight people died.\n\n_A short summary from the headlines alone._")
@@ -1063,7 +1063,7 @@ public sealed class WorldNewsKitTests : IDisposable
             .And.Contain("Also carried by: Dawn").And.NotContain("Eight dead as floods hit Istanbul");
         // The wire copy also sits under the outlet that ran it second, saying who published it first.
         md.Should().Contain("### Dawn: Somewhere, English, 1 report\n\n[Floods kill eight in Istanbul](https://example.com/hindu) · 20-10-26 12:00 · first published by The Hindu");
-        md.IndexOf("Flut in Istanbul", StringComparison.Ordinal).Should().BeLessThan(md.IndexOf("イスタンブール", StringComparison.Ordinal));
+        md.Should().NotContain("Flut in Istanbul").And.NotContain("イスタンブール");
 
         // Five English sources and room for three lines: English, German and Japanese each get one.
         var english = Enumerable.Range(1, 5).Select(i => Article($"en{i}", $"English report {i}", "English", Now.AddHours(-3).AddMinutes(i))
@@ -1211,7 +1211,7 @@ public sealed class WorldNewsKitTests : IDisposable
             .And.Contain("- The claim changed. It was: Floods killed 64 in Istanbul.")
             .And.Contain("- Now agreed: Officials blame a dam breach.")
             .And.Contain($"[Floods in Istanbul]({nhk.Url})")
-            .And.Contain("Original headline (Japanese): イスタンブールで洪水");
+            .And.NotContain("Original headline").And.NotContain("イスタンブールで洪水");
         md.IndexOf("## What changed", StringComparison.Ordinal).Should().BeLessThan(md.IndexOf("## The story", StringComparison.Ordinal));
     }
 

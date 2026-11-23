@@ -863,8 +863,8 @@ public sealed partial class WorldNewsStore
         Search("SELECT 'live' AS kind, event_id, status AS title, COALESCE(corrected_text, text) AS text, username, COALESCE(corrected_at, created_at) AS at, text || ' ' || COALESCE(corrected_text, '') AS haystack FROM live_updates");
         Search("SELECT 'correction' AS kind, event_id, title, text, username, at, title || ' ' || text AS haystack FROM corrections");
         Search("SELECT 'dossier' AS kind, event_id, title, detail AS text, added_by AS username, at, title || ' ' || detail AS haystack FROM dossier_items");
-        Search("SELECT 'verdict' AS kind, s.event_id, COALESCE(e.title, 'Story') AS title, s.level || ': ' || s.reason AS text, NULL AS username, s.taken_at AS at, COALESCE(e.title, '') || ' ' || s.level || ' ' || s.reason AS haystack FROM label_snapshots s LEFT JOIN events e ON e.id = s.event_id");
-        Search("SELECT 'approval' AS kind, s.event_id, COALESCE(e.title, 'Story') AS title, s.kind || ': ' || s.label_level AS text, s.username, s.at, COALESCE(e.title, '') || ' ' || s.kind || ' ' || s.label_level || ' ' || s.username AS haystack FROM sign_offs s LEFT JOIN events e ON e.id = s.event_id");
+        Search($"SELECT 'verdict' AS kind, s.event_id, COALESCE({EnglishEventHeadline}, e.title, 'Story') AS title, s.level || ': ' || s.reason AS text, NULL AS username, s.taken_at AS at, COALESCE({EnglishEventHeadline}, e.title, '') || ' ' || s.level || ' ' || s.reason AS haystack FROM label_snapshots s LEFT JOIN events e ON e.id = s.event_id");
+        Search($"SELECT 'approval' AS kind, s.event_id, COALESCE({EnglishEventHeadline}, e.title, 'Story') AS title, s.kind || ': ' || s.label_level AS text, s.username, s.at, COALESCE({EnglishEventHeadline}, e.title, '') || ' ' || s.kind || ' ' || s.label_level || ' ' || s.username AS haystack FROM sign_offs s LEFT JOIN events e ON e.id = s.event_id");
         Search("SELECT 'contact' AS kind, '' AS event_id, c.name AS title, c.organisation || ' · ' || c.notes AS text, NULL AS username, c.created_at AS at, c.name || ' ' || c.organisation || ' ' || c.notes || ' ' || COALESCE(u.note, '') AS haystack FROM source_contacts c LEFT JOIN source_uses u ON u.source_id = c.id WHERE c.owner = $owner", NormalizeUsername(username));
         Search("SELECT 'source-use' AS kind, u.event_id, c.name AS title, u.outcome || ': ' || u.note AS text, NULL AS username, u.at, c.name || ' ' || c.organisation || ' ' || u.outcome || ' ' || u.note AS haystack FROM source_uses u JOIN source_contacts c ON c.id = u.source_id WHERE c.owner = $owner", NormalizeUsername(username));
         SearchReports(connection, text, limit, hits);
@@ -879,17 +879,29 @@ public sealed partial class WorldNewsStore
         string match;
         if (FullTextReady() && fullText is not null)
         {
-            match = $"(a.rowid IN (SELECT rowid FROM articles_fts WHERE articles_fts MATCH $query) OR {EnglishTextMatch("a", "$query", true)})";
+            match = $"((lower(a.language) = 'english' AND a.rowid IN (SELECT rowid FROM articles_fts WHERE articles_fts MATCH $query)) OR {EnglishTextMatch("a", "$query", true)})";
             command.Parameters.AddWithValue("$query", fullText);
         }
         else
         {
-            match = $"(instr(lower(a.title || ' ' || COALESCE(a.snippet, '')), lower($query)) > 0 OR {EnglishTextMatch("a", "$query", false)})";
+            match = $"((lower(a.language) = 'english' AND instr(lower(a.title || ' ' || COALESCE(a.snippet, '')), lower($query)) > 0) OR {EnglishTextMatch("a", "$query", false)})";
             command.Parameters.AddWithValue("$query", text.Trim());
         }
         command.CommandText = $"""
-            SELECT a.event_id, a.title, COALESCE(a.snippet, ''), a.seen_at
+            SELECT a.event_id,
+                   CASE
+                       WHEN lower(a.language) = 'english' THEN COALESCE(NULLIF(t.english, ''), a.title)
+                       WHEN t.english IS NOT NULL AND t.english <> '' AND (t.source_title IS NULL OR ({CurrentEnglish})) THEN t.english
+                       ELSE 'English translation pending'
+                   END,
+                   CASE
+                       WHEN lower(a.language) = 'english' THEN COALESCE(NULLIF(t.description, ''), a.snippet, '')
+                       WHEN t.english IS NOT NULL AND t.english <> '' AND (t.source_title IS NULL OR ({CurrentEnglish})) THEN COALESCE(t.description, '')
+                       ELSE ''
+                   END,
+                   a.seen_at
             FROM articles a
+            LEFT JOIN article_translations t ON t.article_id = a.id
             WHERE a.event_id IS NOT NULL AND {match}
             ORDER BY a.seen_at DESC, a.id LIMIT $limit
             """;
