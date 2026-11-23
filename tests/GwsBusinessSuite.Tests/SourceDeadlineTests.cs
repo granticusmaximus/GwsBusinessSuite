@@ -17,7 +17,9 @@ public sealed class SourceDeadlineTests
         var started = System.Diagnostics.Stopwatch.StartNew();
 
         var results = await SourceDeadline.GatherAsync(
-            [("fast", After(10, 1, 2)), ("hung", hung.Task), ("quick", After(30, 3))],
+            [("fast", Task.FromResult<IReadOnlyList<int>>([1, 2])),
+             ("hung", hung.Task),
+             ("quick", Task.FromResult<IReadOnlyList<int>>([3]))],
             TimeSpan.FromMilliseconds(400), NullLogger.Instance, "incidents");
 
         Assert.True(started.Elapsed < TimeSpan.FromSeconds(3));

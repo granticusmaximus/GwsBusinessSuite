@@ -188,7 +188,9 @@ public sealed class PlaywrightBrowserFixture : IAsyncLifetime
         // fresh machine (mirrors the Docker build's --install-playwright-browsers hook),
         // though it won't install missing OS-level shared libraries the way
         // `--with-deps` does, so a fresh Linux CI runner still needs that step too.
-        // Three collections start their browsers at once (12-11-26), so the install runs once.
+        // The browser collections initialize separately; the Overwatch collections are serialized
+        // below because two software-rendered Cesium instances competing in CI caused rotating,
+        // non-reproducible click and WaitForFunction timeouts (23-11-26).
         var browserName = Environment.GetEnvironmentVariable("GWS_PLAYWRIGHT_BROWSER")?.Trim().ToLowerInvariant();
         _ = browserName == "webkit" ? WebKitInstalled.Value : ChromiumInstalled.Value;
         Playwright = await Microsoft.Playwright.Playwright.CreateAsync();
@@ -208,11 +210,11 @@ public sealed class PlaywrightBrowserFixture : IAsyncLifetime
 [CollectionDefinition("Playwright")]
 public sealed class PlaywrightCollection : ICollectionFixture<PlaywrightBrowserFixture>;
 
-// Overwatch's browser tests start Cesium on software rendering, about 3 s each: 160 s in one
-// chain. In two collections of their own (each with its own browser) they run beside each other
-// and beside the rest of the browser tests, instead of after them (12-11-26).
-[CollectionDefinition("PlaywrightOverwatchA")]
+// Overwatch's browser tests start Cesium on software rendering. Keep the two fixture boundaries,
+// but do not run them concurrently: multiple software-rendered globes starved Chromium's renderer
+// on local and GitHub runners, while every timed-out test passed immediately in isolation.
+[CollectionDefinition("PlaywrightOverwatchA", DisableParallelization = true)]
 public sealed class PlaywrightOverwatchCollectionA : ICollectionFixture<PlaywrightBrowserFixture>;
 
-[CollectionDefinition("PlaywrightOverwatchB")]
+[CollectionDefinition("PlaywrightOverwatchB", DisableParallelization = true)]
 public sealed class PlaywrightOverwatchCollectionB : ICollectionFixture<PlaywrightBrowserFixture>;
