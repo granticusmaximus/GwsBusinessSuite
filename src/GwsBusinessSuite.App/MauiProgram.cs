@@ -66,7 +66,6 @@ public static class MauiProgram
 			new DeviceSecretStore(Path.Combine(FileSystem.Current.AppDataDirectory, "sentinelgpt-device-secret.txt")));
 		builder.Services.AddSingleton(_ => new HttpClient(new HttpClientHandler { UseCookies = false }));
 		builder.Services.AddSingleton<NativeAppAuthService>();
-		builder.Services.AddSingleton<NativeFallbackChatService>();
 		builder.Services.AddTransient<MainPage>();
 		builder.Services.AddSingleton<NativeSessionClient>();
 		builder.Services.AddSingleton<NativeOverwatchContractClient>();
@@ -84,7 +83,6 @@ public static class MauiProgram
 		builder.Services.AddSingleton<WorldNewsEmbedRelay>();
 		// SentinelGPT's agent: lets a browser on another computer think with this Mac's model.
 		builder.Services.AddSingleton<SentinelAgentMacRelay>();
-		builder.Services.AddSingleton<LocalAiPowerPolicyService>();
 		// "Approve on my Mac": browsers sign in with this Mac's Touch ID.
 		builder.Services.AddSingleton<SignInApprovalRelay>();
 		// Page lock / sign in with Touch ID.

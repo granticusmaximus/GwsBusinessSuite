@@ -74,15 +74,6 @@
                 </Grid>
                 <Label x:Name="SkillsHintLabel" Grid.Row="2" Grid.ColumnSpan="2" Margin="0,6,0,0" FontSize="11" TextColor="#78716C"
                        Text="Add skills as .md files - one file is one skill." />
-                <Grid Grid.Row="3" Grid.ColumnSpan="2" Margin="0,12,0,0" ColumnDefinitions="*,220" ColumnSpacing="12">
-                    <VerticalStackLayout Grid.Column="0" Spacing="3">
-                        <Label Text="Local AI on battery" TextColor="#D6D3D1" FontSize="12" FontAttributes="Bold" />
-                        <Label x:Name="BatteryPolicyStatusLabel" TextColor="#78716C" FontSize="11"
-                               Text="Balanced keeps this Mac available above 20% battery; the display may still sleep." />
-                    </VerticalStackLayout>
-                    <Picker x:Name="BatteryPolicyPicker" Grid.Column="1" TextColor="#FAFAF9" VerticalOptions="Center"
-                            SelectedIndexChanged="OnBatteryPolicyChanged" />
-                </Grid>
             </Grid>
 
             <Grid x:Name="WorkspaceRow" Grid.Row="2" Padding="16,10" ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8"
@@ -155,8 +146,6 @@
                             </Border>
 
                             <VerticalStackLayout IsVisible="{Binding IsAssistant}" Spacing="4">
-                                <Label Text="via server (local Ollama unavailable)" IsVisible="{Binding IsFromServerFallback}"
-                                       TextColor="#F59E0B" FontSize="11" FontAttributes="Bold" Margin="4,0,0,0" />
                                 <Border Padding="14,9" HorizontalOptions="Start" MaximumWidthRequest="560"
                                         BackgroundColor="{Binding BubbleColor}"
                                         Stroke="Transparent" StrokeShape="RoundRectangle 18">

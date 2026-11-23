@@ -18,17 +18,14 @@ public partial class SentinelGptPage : ContentPage
     private readonly SecureApiKeyStore _apiKeyStore;
     private readonly WorkspaceBookmarkStore _workspaceBookmarks;
     private readonly DeepAnalysisAdvisor _deepAnalysis;
-    private readonly NativeFallbackChatService _fallbackChat;
-    private readonly DeviceSecretStore _deviceSecretStore;
     private readonly OllamaModelInstaller _modelInstaller;
-    private readonly LocalAiPowerPolicyService _localAiPower;
 
     // A few minutes, not DeepAnalysisAdvisor's 2-minute sub-advisor bound - this is the primary
     // chat turn, and CPU-bound local inference can legitimately take longer on slower hardware
     // (the server's own SentinelGptDefaults.DefaultTimeoutMinutes is 15, tuned for the same CPU
     // prefill reality). Long enough that a healthy-but-slow local answer isn't cut off and
-    // needlessly routed to the server; short enough that a genuinely stuck/unreachable local
-    // Ollama doesn't leave the user waiting indefinitely before the fallback kicks in.
+    // short enough that a genuinely stuck/unreachable local Ollama produces a useful local-only
+    // error instead of leaving the user waiting indefinitely.
     private static readonly TimeSpan LocalTurnTimeout = TimeSpan.FromMinutes(5);
 
     private readonly ObservableCollection<ChatMessageViewModel> _messages = [];
@@ -78,11 +75,8 @@ public partial class SentinelGptPage : ContentPage
         SecureApiKeyStore apiKeyStore,
         WorkspaceBookmarkStore workspaceBookmarks,
         DeepAnalysisAdvisor deepAnalysis,
-        NativeFallbackChatService fallbackChat,
-        DeviceSecretStore deviceSecretStore,
         OllamaModelInstaller modelInstaller,
-        NativeSessionClient session,
-        LocalAiPowerPolicyService localAiPower)
+        NativeSessionClient session)
     {
         _ollama = ollama;
         _toolExecutor = toolExecutor;
@@ -91,11 +85,8 @@ public partial class SentinelGptPage : ContentPage
         _apiKeyStore = apiKeyStore;
         _workspaceBookmarks = workspaceBookmarks;
         _deepAnalysis = deepAnalysis;
-        _fallbackChat = fallbackChat;
-        _deviceSecretStore = deviceSecretStore;
         _modelInstaller = modelInstaller;
         _session = session;
-        _localAiPower = localAiPower;
 
         InitializeComponent();
         Transcript.ItemsSource = _messages;
@@ -103,8 +94,6 @@ public partial class SentinelGptPage : ContentPage
         ModelLibrary.ItemsSource = _modelLibrary;
         PersonaPicker.ItemsSource = AgentPersonas.All.Select(persona => persona.Name).ToList();
         PersonaPicker.SelectedIndex = AgentPersonas.All.ToList().IndexOf(AgentPersonas.Default);
-        BatteryPolicyPicker.ItemsSource = Enum.GetNames<GwsBusinessSuite.Application.Abstractions.LocalAiBatteryMode>();
-        BatteryPolicyPicker.SelectedIndex = (int)_localAiPower.Mode;
         // Enter sends, Shift+Enter inserts a newline. OnSendClicked already guards re-entry via
         // _sending, so a fast double Enter can't start two turns.
         PromptEditor.SendRequested += (_, _) => OnSendClicked(this, EventArgs.Empty);
@@ -516,21 +505,8 @@ public partial class SentinelGptPage : ContentPage
         if (!SettingsRow.IsVisible) return;
         _ = LoadApiKeyIntoFieldAsync();
         RefreshSkills();
-        RefreshBatteryPolicyStatus();
-    }
-
-    private void OnBatteryPolicyChanged(object? sender, EventArgs e)
-    {
-        if (BatteryPolicyPicker.SelectedIndex < 0) return;
-        _localAiPower.SetMode((GwsBusinessSuite.Application.Abstractions.LocalAiBatteryMode)BatteryPolicyPicker.SelectedIndex);
-        RefreshBatteryPolicyStatus();
-    }
-
-    private void RefreshBatteryPolicyStatus()
-    {
-        _localAiPower.Refresh();
-        BatteryPolicyStatusLabel.Text = _localAiPower.Decision.Reason +
-            " The display may sleep; closing the lid still sleeps a MacBook.";
+        // Native inference is local-only. Power management remains macOS's responsibility: this
+        // app neither prevents idle sleep nor silently moves a failed local request to a server.
     }
 
     // Rebuilt on open and whenever the attached folder changes, so a repo's own skills appear
@@ -803,7 +779,12 @@ public partial class SentinelGptPage : ContentPage
             var localSucceeded = (_devTools is null && await TryRunAppAgentTurnAsync(prompt, answer, _turnCts.Token, advisory))
                 || (_agent is not null && await TryRunLocalTurnAsync(prompt, answer, _turnCts.Token, advisory));
             if (!localSucceeded)
-                await RunFallbackTurnAsync(prompt, answer, _turnCts.Token);
+            {
+                answer.Text = "This Mac's local Ollama couldn't answer. Make sure Ollama is running and the selected model is installed, then retry. The macOS app never sends AI work to the AI droplet.";
+                answer.IsError = true;
+                answer.IsComplete = true;
+                answer.RetryPrompt = prompt;
+            }
         }
         catch (OperationCanceledException)
         {
@@ -1026,8 +1007,8 @@ public partial class SentinelGptPage : ContentPage
         catch (Exception ex) when (ex is HttpRequestException or InvalidOperationException or TaskCanceledException or OperationCanceledException)
         {
             // Ollama unreachable, the model errored, or LocalTurnTimeout fired (a bare
-            // OperationCanceledException here, since turnToken itself wasn't cancelled) - fall
-            // back to the server instead of leaving this as a dead end.
+            // OperationCanceledException here, since turnToken itself wasn't cancelled). The
+            // macOS app fails locally; it never moves native inference to the AI droplet.
             return false;
         }
     }
@@ -1038,40 +1019,6 @@ public partial class SentinelGptPage : ContentPage
     // rather than on the daemon's wording, which varies by model and version.
     private static bool IsLocalModelRejection(InvalidOperationException exception) =>
         exception.Message.Contains("Ollama returned HTTP 4", StringComparison.Ordinal);
-
-    // The fallback deliberately never touches _agent/_sessions - it bypasses the local agent
-    // entirely (no tool-calling, no conversation continuity with it), so folding its answer into
-    // local session state would misrepresent what the local model actually said if this
-    // conversation is ever resumed locally. It's a one-off answer for this turn only.
-    private async Task RunFallbackTurnAsync(string prompt, ChatMessageViewModel answer, CancellationToken turnToken)
-    {
-        var deviceSecret = await _deviceSecretStore.GetAsync();
-        if (string.IsNullOrWhiteSpace(deviceSecret))
-        {
-            answer.Text = "Local Ollama couldn't answer this one, and no device secret is configured for the " +
-                "server fallback. Start Ollama on this Mac (or install the model), or set one up via the lock " +
-                "icon in the toolbar.";
-            answer.IsError = true;
-            answer.IsComplete = true;
-            answer.RetryPrompt = prompt;
-            return;
-        }
-
-        answer.Text = "Local Ollama couldn't answer this one - trying the server instead...";
-        var result = await _fallbackChat.CompleteAsync(deviceSecret, prompt, turnToken);
-        if (!result.Succeeded || string.IsNullOrWhiteSpace(result.Completion))
-        {
-            answer.Text = $"Local Ollama failed, and the server fallback also failed: {result.ErrorMessage ?? "no response"}";
-            answer.IsError = true;
-            answer.IsComplete = true;
-            answer.RetryPrompt = prompt;
-            return;
-        }
-
-        answer.Text = result.Completion;
-        answer.IsFromServerFallback = true;
-        answer.IsComplete = true;
-    }
 
     private string PickerModel() => SelectedModel?.Name ?? PreferredModel;
 

@@ -418,10 +418,6 @@ builder.Services.AddRateLimiter(options =>
                 QueueLimit           = 0,
             }));
 
-    // The native macOS app's SentinelGPT fallback chat - fires per turn whenever local Ollama
-    // struggles, so "login"'s 5-per-15-minutes budget is far too tight for real conversational
-    // use. Still bounded (this reaches production Ollama), just sized for a real chat session
-    // rather than an occasional login attempt.
     // Web clipper calls (Sentinel item 8): a person clipping by hand, so a generous per-IP cap
     // that still stops a leaked token from flooding the workspace.
     options.AddPolicy("sentinel-clip", context =>
@@ -431,17 +427,6 @@ builder.Services.AddRateLimiter(options =>
             {
                 Window               = TimeSpan.FromMinutes(1),
                 PermitLimit          = 30,
-                QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
-                QueueLimit           = 0,
-            }));
-
-    options.AddPolicy("native-fallback-chat", context =>
-        RateLimitPartition.GetFixedWindowLimiter(
-            partitionKey: context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
-            factory: _ => new FixedWindowRateLimiterOptions
-            {
-                Window               = TimeSpan.FromMinutes(5),
-                PermitLimit          = 20,
                 QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
                 QueueLimit           = 0,
             }));
@@ -2334,71 +2319,6 @@ app.MapGet("/auth/device-login/web", async (string? code, HttpContext httpContex
         httpContext.Connection.RemoteIpAddress?.ToString(), user.Username));
     return Results.LocalRedirect("/admin");
 }).AllowAnonymous().RequireRateLimiting("login-key");
-
-// Compatibility endpoint for native clients that previously used server AI as a fallback. In
-// ServerAi=None it returns an explicit unavailable response after authenticating the device; it
-// never attempts inference. Full/light development deployments retain the old fallback. Gated by the same
-// NativeApp:DeviceSecret trust boundary as /auth/device-login above - this is not a user login,
-// just proof the caller is the user's own trusted device, so no username/password/cookie is
-// involved. Deliberately a single plain completion (no tool-calling, no wiki grounding, no
-// write-proposal capability like the admin SentinelGPT has) - the fallback is meant to be
-// smaller than the local experience, not a silent full-featured swap. Always targets this
-// server's own canonical "sentinelgpt" model (see ollama-init.sh) regardless of whatever model
-// name the client sends, since a model installed locally has no guaranteed match on this server.
-app.MapPost("/native/fallback-chat", async (
-    HttpContext httpContext,
-    IConfiguration configuration,
-    IOllamaService ollamaService,
-    Microsoft.Extensions.Options.IOptions<ServerAiOptions> serverAi,
-    ISecurityAuditService securityAudit) =>
-{
-    var form = await httpContext.Request.ReadFormAsync();
-    var providedSecret = form["deviceSecret"].ToString();
-    var prompt = form["prompt"].ToString().Trim();
-    var configuredSecret = configuration["NativeApp:DeviceSecret"] ?? string.Empty;
-
-    if (!NativeAppSecretGate.IsValid(providedSecret, configuredSecret))
-    {
-        await securityAudit.RecordAsync(new SecurityAuditInput(
-            SecurityAuditCategories.Authentication, "NativeFallbackChat", SecurityAuditOutcomes.Denied,
-            SecurityAuditSeverities.High, Details: new Dictionary<string, string?> { ["reason"] = "InvalidDeviceSecret" },
-            NetworkAddress: httpContext.Connection.RemoteIpAddress?.ToString()));
-        return Results.Json(new { error = "invalid_credentials" }, statusCode: StatusCodes.Status401Unauthorized);
-    }
-
-    if (string.IsNullOrEmpty(prompt))
-    {
-        return Results.Json(new { error = "empty_prompt" }, statusCode: StatusCodes.Status400BadRequest);
-    }
-
-    if (serverAi.Value.IsDisabled)
-    {
-        return Results.Json(
-            new { error = "local_compute_required" },
-            statusCode: StatusCodes.Status503ServiceUnavailable);
-    }
-
-    using var timeoutCts = new CancellationTokenSource(TimeSpan.FromMinutes(SentinelGptDefaults.DefaultTimeoutMinutes));
-    using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(httpContext.RequestAborted, timeoutCts.Token);
-    try
-    {
-        var completion = await ollamaService.GenerateAsync(
-            "sentinelgpt",
-            "You are SentinelGPT, a helpful assistant. The user's own local Ollama instance was unavailable, so this request was routed to the server as a fallback.",
-            prompt,
-            linkedCts.Token);
-
-        await securityAudit.RecordAsync(new SecurityAuditInput(
-            SecurityAuditCategories.Authentication, "NativeFallbackChat", SecurityAuditOutcomes.Succeeded,
-            Severity: SecurityAuditSeverities.High,
-            NetworkAddress: httpContext.Connection.RemoteIpAddress?.ToString()));
-        return Results.Json(new { completion });
-    }
-    catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested)
-    {
-        return Results.Json(new { error = "timeout" }, statusCode: StatusCodes.Status504GatewayTimeout);
-    }
-}).AllowAnonymous().RequireRateLimiting("native-fallback-chat");
 
 app.MapPost("/auth/mfa/verify", async (
     HttpContext httpContext,
