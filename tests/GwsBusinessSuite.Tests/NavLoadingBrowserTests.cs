@@ -18,10 +18,13 @@ public sealed class NavLoadingBrowserTests(PlaywrightBrowserFixture fixture)
     {
         await using var page = await OpenAsync();
         await ClickAsync(page, "world-news");
-        await page.Clock.RunForAsync(100);
+        // Stay well clear of the 150 ms boundary. On a loaded CI runner the old 100 ms sample
+        // occasionally crossed it while Playwright completed the click/timer microtasks, making
+        // the production behavior pass but this timing assertion fail.
+        await page.Clock.RunForAsync(25);
         (await StateAsync(page)).Should().Be("none", "a page that arrives quickly never flashes it");
 
-        await page.Clock.RunForAsync(100);
+        await page.Clock.RunForAsync(200);
         (await StateAsync(page)).Should().Be("shown");
         (await page.Locator(".gws-boot-overlay").InnerTextAsync()).Should().Contain("INITIALIZING TACTICAL UPLINK...").And.Contain("STANDBY");
         var box = await page.EvaluateAsync<double[]>("() => { const r = document.querySelector('.gws-boot-overlay').getBoundingClientRect(); return [r.left, r.width]; }");
