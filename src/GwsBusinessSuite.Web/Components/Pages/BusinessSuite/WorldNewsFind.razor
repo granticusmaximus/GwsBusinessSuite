@@ -130,7 +130,7 @@ else if (_result is { } result)
                     @foreach (var hit in worldwide.Reports.Take(_worldwideShown))
                     {
                         <li @key="hit.Report.Id">
-                            <a href="@hit.Report.Url" target="_blank" rel="noopener noreferrer nofollow">@hit.Report.Title</a>
+                            <a href="@hit.Report.Url" target="_blank" rel="noopener noreferrer nofollow">@hit.Report.DisplayTitle</a>
                             <span class="find-meta">
                                 <span>@hit.Report.Outlet</span>
                                 @if (hit.Report.Language.Length > 0) { <span>@hit.Report.Language</span> }

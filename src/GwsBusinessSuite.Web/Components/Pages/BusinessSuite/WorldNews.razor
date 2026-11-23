@@ -108,7 +108,7 @@
 </PageHeader>
 
 <p class="small text-secondary">
-    <strong>English news:</strong> @News.EnglishStatus Originals remain available under each report.
+    <strong>English news:</strong> @News.EnglishStatus
 </p>
 
 @if (_silences.Count > 0)
@@ -644,13 +644,6 @@ else
                     }
                 </div>
                 <h2 class="world-news-detail-title">@(_selected.Headline ?? _selected.Title)</h2>
-                @if (_selected.Headline is not null)
-                {
-                    <details class="world-news-original">
-                        <summary>Original headline</summary>
-                        <p>@_selected.Title</p>
-                    </details>
-                }
                 <p class="world-news-detail-meta">
                     @WorldNewsBrowse.Seen(_selected.OutletCount, _selected.Languages.Count) · @WorldNewsBrowse.Count(_selected.ArticleCount, "report") ·
                     first @Time(_selected.FirstSeen), latest @Time(_selected.LastSeen)

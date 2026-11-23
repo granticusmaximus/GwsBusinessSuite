@@ -1509,6 +1509,8 @@ public sealed class WorldNewsKitTests : IDisposable
             new OutletDifference("", "The Daily Planet: says the dam broke."),
             new OutletDifference("", "Coverage in Japanese leaves out the toll."));
         EventAnalyzer.Parse("<think>CLAIM: hidden</think>No labels at all, just a sentence.", ["BBC"]).Should().BeNull();
+        EventAnalyzer.Parse("Präsident Donald Trump hat angekündigt, dass das FBI in Ermittlungen über einen Cyberangriff verwickelt ist und weitere Details folgen bald.", ["BBC"])
+            .Should().BeNull("an unlabelled paragraph without CLAIM/SUMMARY structure must not be saved as a partial analysis");
     }
 
     [Fact]
@@ -1531,6 +1533,8 @@ public sealed class WorldNewsKitTests : IDisposable
         var due = new EventAnalysis("e1", "c", "s", [], [], "m", 30, 1, Now);
         EventAnalyzer.IsDue(null, e).Should().BeTrue();
         EventAnalyzer.IsDue(due, e).Should().BeFalse();
+        EventAnalyzer.IsDue(due with { Claim = "" }, e).Should().BeTrue("a broken analysis with no claim is re-run automatically");
+        EventAnalyzer.IsDue(due with { Summary = "" }, e).Should().BeTrue("a broken analysis with no summary is re-run automatically");
         EventAnalyzer.IsDue(due with { ArticleCount = 20 }, e).Should().BeTrue("coverage grew by half");
     }
 

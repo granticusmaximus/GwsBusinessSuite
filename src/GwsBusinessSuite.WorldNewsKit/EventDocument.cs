@@ -79,7 +79,6 @@ public static class EventDocument
         var summary = story.Summary;
         var md = new StringBuilder();
         md.AppendLine($"# {Inline(e.Headline ?? e.Title)}").AppendLine();
-        if (e.Headline is not null) md.AppendLine($"Original headline: {Inline(e.Title)}").AppendLine();
         md.AppendLine(KeyNumbers(e, formatTime)).AppendLine();
 
         if (story.Changes is { Any: true } changes)
@@ -218,11 +217,6 @@ public static class EventDocument
             if (a.English?.Summary is { } englishSummary)
                 md.AppendLine($"**English report summary (AI-written, not independent verification):** {Inline(englishSummary)}").AppendLine();
             else md.AppendLine("_English translation or summary pending._").AppendLine();
-            if (!HeadlineTranslator.IsEnglish(a.Language) || a.DisplayTitle != a.Title || a.DisplayDescription != a.Snippet)
-            {
-                md.AppendLine($"Original headline ({Inline(a.Language)}): {Inline(a.Title)}").AppendLine();
-                if (a.Snippet is not null) md.AppendLine($"Original feed description: {Inline(a.Snippet)}").AppendLine();
-            }
             if (report.AlsoCarriedBy.Count > 0) md.AppendLine($"Also carried by: {string.Join(", ", report.AlsoCarriedBy)}").AppendLine();
         }
     }

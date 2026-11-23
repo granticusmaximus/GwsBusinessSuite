@@ -90,13 +90,6 @@ else
     </nav>
 
     <article class="story-document">
-        @if (e.Headline is not null)
-        {
-            <details class="story-original">
-                <summary>Original headline</summary>
-                <p>@e.Title</p>
-            </details>
-        }
         <p class="story-numbers">@EventDocument.KeyNumbers(e, at => at.ToLocalGwsDateTime())</p>
         @if (_tab == TabTrust && _story.Trust is null)
         {

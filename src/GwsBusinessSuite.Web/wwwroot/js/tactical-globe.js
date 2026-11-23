@@ -4303,8 +4303,7 @@ window.tacticalGlobe = (function () {
                 escapeHtml(source.outlet + ': ' + headline) + '</a>' +
                 (source.englishDescription ? '<p>' + escapeHtml(source.englishDescription) + '</p>' : '') +
                 (source.englishSummary ? '<p><strong>ENGLISH SUMMARY:</strong> ' + escapeHtml(source.englishSummary) + '</p>' : '') +
-                '<details><summary>Original (' + escapeHtml(source.language) + ')</summary>' +
-                escapeHtml(source.title) + '</details></li>';
+                '</li>';
         }).join('');
         const panel = document.createElement('div');
         panel.className = 'tg-stream-panel tg-incident-panel';

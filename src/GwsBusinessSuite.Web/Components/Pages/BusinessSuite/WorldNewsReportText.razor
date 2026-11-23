@@ -21,21 +21,13 @@ else
 {
     <p class="news-report-note">English translation or summary pending. Processing continues in the background; reload for updates.</p>
 }
-<details class="news-report-original">
-    <summary>Original (@Report.Language)</summary>
-    <p>@Report.Title</p>
-    @if (Report.Snippet is { Length: > 0 } original)
-    {
-        <p>@original</p>
-    }
-</details>
 @if (Href is not null && !IsEnglish)
 {
     @* Read a report translated (20-11-26): the article from the outlet's page, in English, in the reader. *@
     <button type="button" class="btn btn-sm btn-link news-report-translate" @onclick="() => _reading = Href">
         <i class="bi bi-translate me-1" aria-hidden="true"></i>Read it in English
     </button>
-    <ArticleReaderModal Url="@_reading" Title="@Report.DisplayTitle" Summary="@(Report.English?.Summary ?? Report.Snippet)" StartTranslated="true"
+    <ArticleReaderModal Url="@_reading" Title="@Report.DisplayTitle" Summary="@Report.English?.Summary" StartTranslated="true"
                         ReadingTools="false" OnClose="() => _reading = null" />
 }
 

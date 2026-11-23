@@ -205,12 +205,7 @@ public static partial class EventAnalyzer
         }
         var claim = Flat(Bullet().Replace(Section("CLAIM").Trim(), string.Empty));
         var summary = Flat(Section("SUMMARY"));
-        if (claim.Length < 20 && summary.Length < 40)
-        {
-            var fallback = Flat(text);
-            if (fallback.Length < 120) return null;
-            summary = fallback;
-        }
+        if (claim.Length < 20 && summary.Length < 40) return null;
         var agreed = Bullets(Section("AGREED")).Select(line => Fact(line, outlets)).Where(fact => fact.Text.Length >= 8).Take(MaxAgreed).ToList();
         var differences = Bullets(Section("DIFFERENCES"))
             .Select(line => Difference(line, outlets))
