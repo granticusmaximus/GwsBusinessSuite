@@ -28,7 +28,7 @@ public sealed class MacRelayOllamaService(SentinelAgentRelay relay) : IOllamaSer
     public Task<string> GenerateAsync(string model, string systemPrompt, string userPrompt, int numCtx, CancellationToken ct = default) =>
         MacRelayScope.SharedWorkAllowed
             ? GenerateOnMacAsync(model, systemPrompt, userPrompt, numCtx, ct)
-            : _closed.GenerateAsync(model, systemPrompt, userPrompt, numCtx, ct);
+            : _closed.GenerateAsync(model, systemPrompt, userPrompt, ct);
 
     public async IAsyncEnumerable<string> GenerateStreamAsync(
         string model, string systemPrompt, string userPrompt, [EnumeratorCancellation] CancellationToken ct = default)

@@ -1239,8 +1239,12 @@ public sealed partial class WorldNewsService : IDisposable
                     .GenerateAsync(_model, EventAnalyzer.SystemPrompt, prompt, 16_384, limit.Token);
             }
             var outlets = articles.Select(a => a.Outlet).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-            var parsed = EventAnalyzer.Parse(raw, outlets)
-                ?? throw new InvalidOperationException("SentinelGPT's answer didn't have the analysis in it. Try again.");
+            if (EventAnalyzer.Parse(raw, outlets) is not { } parsed)
+            {
+                var preview = string.IsNullOrWhiteSpace(raw) ? "(empty)" : raw.Length <= 300 ? raw : raw[..300];
+                _logger.LogWarning("World News analysis of {Event} returned unparseable output ({Length} chars): {Preview}", eventId, raw?.Length ?? 0, preview);
+                throw new InvalidOperationException("SentinelGPT's answer didn't have the analysis in it. Try again.");
+            }
             var writtenBy = _serverHasNoModel ? "SentinelGPT on the Mac" : _model;
             var saved = Store.SaveAnalysis(new EventAnalysis(eventId, parsed.Claim, parsed.Summary, parsed.Agreed, parsed.Differences, writtenBy,
                 e.ArticleCount, excerpts.Count, DateTimeOffset.UtcNow, EventAnalyzer.ParseDisputes(raw, outlets)));
