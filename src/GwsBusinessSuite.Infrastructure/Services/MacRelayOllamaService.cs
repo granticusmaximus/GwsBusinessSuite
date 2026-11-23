@@ -22,8 +22,13 @@ public sealed class MacRelayOllamaService(SentinelAgentRelay relay) : IOllamaSer
 
     public Task<string> GenerateAsync(string model, string systemPrompt, string userPrompt, CancellationToken ct = default) =>
         MacRelayScope.SharedWorkAllowed
-            ? GenerateOnMacAsync(model, systemPrompt, userPrompt, ct)
+            ? GenerateOnMacAsync(model, systemPrompt, userPrompt, numCtx: 16_384, ct)
             : _closed.GenerateAsync(model, systemPrompt, userPrompt, ct);
+
+    public Task<string> GenerateAsync(string model, string systemPrompt, string userPrompt, int numCtx, CancellationToken ct = default) =>
+        MacRelayScope.SharedWorkAllowed
+            ? GenerateOnMacAsync(model, systemPrompt, userPrompt, numCtx, ct)
+            : _closed.GenerateAsync(model, systemPrompt, userPrompt, numCtx, ct);
 
     public async IAsyncEnumerable<string> GenerateStreamAsync(
         string model, string systemPrompt, string userPrompt, [EnumeratorCancellation] CancellationToken ct = default)
@@ -34,12 +39,12 @@ public sealed class MacRelayOllamaService(SentinelAgentRelay relay) : IOllamaSer
             yield break;
         }
         // The relay answers in one piece.
-        yield return await GenerateOnMacAsync(model, systemPrompt, userPrompt, ct);
+        yield return await GenerateOnMacAsync(model, systemPrompt, userPrompt, numCtx: 16_384, ct);
     }
 
     public Task<OllamaChatResponse> ChatAsync(
         string model, IReadOnlyList<OllamaChatMessage> messages, IReadOnlyList<OllamaToolDefinition>? tools = null, CancellationToken ct = default) =>
-        MacRelayScope.SharedWorkAllowed ? ChatOnMacAsync(model, messages, tools, ct) : _closed.ChatAsync(model, messages, tools, ct);
+        MacRelayScope.SharedWorkAllowed ? ChatOnMacAsync(model, messages, tools, numCtx: 16_384, ct) : _closed.ChatAsync(model, messages, tools, ct);
 
     public Task<IReadOnlyCollection<string>> ListModelsAsync(CancellationToken ct = default) => _closed.ListModelsAsync(ct);
 
@@ -55,21 +60,23 @@ public sealed class MacRelayOllamaService(SentinelAgentRelay relay) : IOllamaSer
         _closed.GenerateImageAsync(model, prompt, ct);
 
     // The model asked for when that Mac has it (as "name" or "name:latest"), otherwise the best one
-    // it has that can run SentinelGPT.
-    public static string? ModelOn(IReadOnlyList<string> installed, string model) =>
+    // it has that can run SentinelGPT (or any non-embedding chat model when no tools are needed).
+    public static string? ModelOn(IReadOnlyList<string> installed, string model, bool requireTools = true) =>
         installed.FirstOrDefault(name => name.Equals(model, StringComparison.OrdinalIgnoreCase)
             || (!model.Contains(':') && name.Equals(model + ":latest", StringComparison.OrdinalIgnoreCase)))
-        ?? SentinelAgentModels.LocalCandidates(installed).FirstOrDefault();
+        ?? SentinelAgentModels.LocalCandidates(installed).FirstOrDefault()
+        ?? (requireTools ? null : installed.FirstOrDefault(name => !name.Contains("embed", StringComparison.OrdinalIgnoreCase)));
 
-    private async Task<string> GenerateOnMacAsync(string model, string systemPrompt, string userPrompt, CancellationToken ct) =>
-        (await ChatOnMacAsync(model, [new("system", systemPrompt), new("user", userPrompt)], null, ct)).Content.Trim();
+    private async Task<string> GenerateOnMacAsync(string model, string systemPrompt, string userPrompt, int numCtx, CancellationToken ct) =>
+        (await ChatOnMacAsync(model, [new("system", systemPrompt), new("user", userPrompt)], null, numCtx, ct)).Content.Trim();
 
     private async Task<OllamaChatResponse> ChatOnMacAsync(
-        string model, IReadOnlyList<OllamaChatMessage> messages, IReadOnlyList<OllamaToolDefinition>? tools, CancellationToken ct)
+        string model, IReadOnlyList<OllamaChatMessage> messages, IReadOnlyList<OllamaToolDefinition>? tools, int numCtx, CancellationToken ct)
     {
-        if (relay.SharedWorkMac() is not { } mac || ModelOn(mac.Models, model) is not { } macModel)
+        var requireTools = tools is { Count: > 0 };
+        if (relay.SharedWorkMac() is not { } mac || ModelOn(mac.Models, model, requireTools) is not { } macModel)
             throw new ServerAiUnavailableException("Server AI", NoMacAlternative);
-        var payload = OllamaChatPayload.Build(macModel, messages, tools, "30m").ToJsonString();
+        var payload = OllamaChatPayload.Build(macModel, messages, tools, "30m", numCtx).ToJsonString();
         return OllamaChatPayload.Parse(await relay.ChatSharedAsync(mac.Username, payload, ct));
     }
 }

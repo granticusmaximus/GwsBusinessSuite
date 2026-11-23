@@ -18,8 +18,9 @@ public sealed class SentinelAgentRelay(TimeProvider time, TimeSpan? callTimeout 
     public static readonly TimeSpan PollWait = TimeSpan.FromSeconds(25);
     // A Mac that hasn't asked within this is treated as gone (it asks again as soon as a poll ends).
     public static readonly TimeSpan OnlineFor = TimeSpan.FromSeconds(60);
-    // How long one model call may take on the Mac (a big local model's first answer can be slow).
-    private readonly TimeSpan _callTimeout = callTimeout ?? TimeSpan.FromMinutes(3);
+    // How long one model call may take on the Mac (a big local model's first answer or a large
+    // World News comparison prompt can take several minutes).
+    private readonly TimeSpan _callTimeout = callTimeout ?? TimeSpan.FromMinutes(6);
     private const int MaxModels = 30;
 
     private readonly ConcurrentDictionary<string, Mac> _macs = new(StringComparer.OrdinalIgnoreCase);
@@ -84,7 +85,9 @@ public sealed class SentinelAgentRelay(TimeProvider time, TimeSpan? callTimeout 
         }
     }
 
-    private bool IsOnline(Mac mac) => time.GetUtcNow() - mac.LastSeen <= OnlineFor;
+    // While the Mac is running an in-flight call (which can take > 60s on large prompts) it cannot
+    // long-poll TakeAsync, so treat it as online until its waiting call finishes or times out.
+    private bool IsOnline(Mac mac) => !mac.Waiting.IsEmpty || time.GetUtcNow() - mac.LastSeen <= OnlineFor;
 
     // The Mac's long poll: the next call for this person - their own steps first, then shared work
     // when they're an Admin (takesSharedWork) - or null after PollWait.
@@ -126,7 +129,9 @@ public sealed class SentinelAgentRelay(TimeProvider time, TimeSpan? callTimeout 
     // waiting for it any more.
     public bool Complete(string username, Guid callId, string? body, string? error)
     {
-        if (!_macs.TryGetValue(username, out var mac) || !mac.Waiting.TryGetValue(callId, out var call)) return false;
+        if (!_macs.TryGetValue(username, out var mac)) return false;
+        mac.LastSeen = time.GetUtcNow();
+        if (!mac.Waiting.TryGetValue(callId, out var call)) return false;
         return error is null
             ? call.Reply.TrySetResult(body ?? string.Empty)
             : call.Reply.TrySetException(new InvalidOperationException(error));

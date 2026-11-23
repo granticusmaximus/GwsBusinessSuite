@@ -10,8 +10,13 @@ namespace GwsBusinessSuite.App;
 // itself (the tools, the changes) runs on the server as the same person; this only thinks.
 public sealed class SentinelAgentMacRelay(NativeSessionClient session, OllamaClient ollama)
 {
-    private static readonly HttpClient Local = new() { BaseAddress = new Uri("http://127.0.0.1:11434/"), Timeout = TimeSpan.FromMinutes(5) };
+    private static readonly HttpClient Local = new(new SocketsHttpHandler { UseProxy = false })
+    {
+        BaseAddress = new Uri("http://127.0.0.1:11434/"),
+        Timeout = TimeSpan.FromMinutes(6)
+    };
     private static readonly TimeSpan Backoff = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan SignInRetry = TimeSpan.FromSeconds(5);
     private bool _started;
 
     public string Status { get; private set; } = "Not started.";
@@ -25,8 +30,8 @@ public sealed class SentinelAgentMacRelay(NativeSessionClient session, OllamaCli
 
     private async Task LoopAsync()
     {
-        // Once the Workspace tab has had time to sign in.
-        await Task.Delay(TimeSpan.FromSeconds(30));
+        // Give the Workspace tab a moment to restore its session cookies without delaying relays.
+        await Task.Delay(TimeSpan.FromSeconds(3));
         while (true)
         {
             try
@@ -44,7 +49,7 @@ public sealed class SentinelAgentMacRelay(NativeSessionClient session, OllamaCli
                 if (error is not null)
                 {
                     Status = $"SentinelGPT relay paused: {error}";
-                    await Task.Delay(Backoff);
+                    await Task.Delay(NativeSessionClient.IsRetryable(error) ? SignInRetry : Backoff);
                     continue;
                 }
                 if (job is null) continue;

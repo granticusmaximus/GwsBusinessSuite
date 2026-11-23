@@ -13,7 +13,7 @@ public sealed class CameraWatcher(NativeSessionClient session, OllamaClient olla
 {
     private static readonly TimeSpan DefaultInterval = TimeSpan.FromMinutes(10);
     private static readonly TimeSpan BetweenCameras = TimeSpan.FromSeconds(3);
-    private readonly HttpClient _ollamaHttp = new() { BaseAddress = new Uri("http://127.0.0.1:11434/"), Timeout = TimeSpan.FromMinutes(2) };
+    private readonly HttpClient _ollamaHttp = new(new SocketsHttpHandler { UseProxy = false }) { BaseAddress = new Uri("http://127.0.0.1:11434/"), Timeout = TimeSpan.FromMinutes(2) };
     private CancellationTokenSource? _stop;
 
     public string Status { get; private set; } = "Not started";

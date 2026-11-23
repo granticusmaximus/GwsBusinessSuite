@@ -13,7 +13,7 @@ public sealed class OllamaClient : IDisposable
     public OllamaClient(Uri baseUri, HttpClient? httpClient = null)
     {
         _ownsClient = httpClient is null;
-        _http = httpClient ?? new HttpClient { Timeout = TimeSpan.FromMinutes(30) };
+        _http = httpClient ?? new HttpClient(new SocketsHttpHandler { UseProxy = false }) { Timeout = TimeSpan.FromMinutes(30) };
         _http.BaseAddress ??= baseUri;
     }
 
