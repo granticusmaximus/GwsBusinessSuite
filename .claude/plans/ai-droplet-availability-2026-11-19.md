@@ -77,6 +77,18 @@ Grant: "build a way to work the Ollama droplet to do better and be available", a
   sleeps after a minute idle, and the droplet covers those times, as designed.
 - [x] AGENTS.md rule added.
 
+## 22-11-26: stalled Mac generation handoff
+
+- [x] A Mac whose health endpoint answers but whose model runner produces nothing now has a separate
+      two-minute attempt deadline. The request then moves to the AI droplet while the caller's own
+      cancellation budget remains alive; caller-requested cancellation still never falls back.
+- [x] World News analysis has a six-minute overall budget so the droplet retains up to four minutes
+      after a stalled Mac handoff. Its timeout now says both machines timed out rather than implying
+      one unidentified SentinelGPT connection failed.
+- [x] Focused failover tests pass (25/25). `./scripts/verify-release.sh` is `PARTIAL`: all local
+      checks passed, including the Release build and full automated suite; deployed and responsive
+      targets were not supplied.
+
 ## 22-11-26: prevent silent droplet-only startup
 
 - [x] Centralized server AI (`SingleSource` with `Full` or `Light`) now requires a valid

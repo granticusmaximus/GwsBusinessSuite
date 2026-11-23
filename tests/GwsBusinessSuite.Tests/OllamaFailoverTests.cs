@@ -15,8 +15,8 @@ public sealed class OllamaFailoverTests
         new(new Clients(respond ?? (_ => new HttpResponseMessage(System.Net.HttpStatusCode.OK) { Content = new StringContent("{\"models\":[]}") })),
             new OllamaWorkloadScheduler(), NullLogger<OllamaFailoverMonitor>.Instance);
 
-    private static FailoverOllamaService Service(Fake mac, Fake droplet, OllamaFailoverMonitor monitor) =>
-        new(mac, droplet, monitor, NullLogger<FailoverOllamaService>.Instance);
+    private static FailoverOllamaService Service(Fake mac, Fake droplet, OllamaFailoverMonitor monitor, TimeSpan? primaryTimeout = null) =>
+        new(mac, droplet, monitor, NullLogger<FailoverOllamaService>.Instance, primaryResponseTimeout: primaryTimeout);
 
     [Fact]
     public void Circuit_ShouldGoDownAfterTwoMisses_AndComeBackAfterThreeAnswers()
@@ -63,6 +63,32 @@ public sealed class OllamaFailoverTests
 
         await FluentActions.Awaiting(() => service.GenerateAsync("m", "s", "u", cancelled.Token)).Should().ThrowAsync<OperationCanceledException>();
         droplet.Calls.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task AReachableButStalledMac_ShouldHandTheRequestToTheDropletBeforeTheCallersDeadline()
+    {
+        using var monitor = Monitor();
+        var mac = new Fake("mac", waitUntilCancelled: true);
+        var droplet = new Fake("droplet");
+        var service = Service(mac, droplet, monitor, TimeSpan.FromMilliseconds(25));
+        using var overall = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+
+        (await service.GenerateAsync("sentinelgpt", "s", "World News", overall.Token)).Should().Be("droplet");
+
+        mac.Calls.Should().Be(1);
+        droplet.Calls.Should().Be(1);
+        overall.IsCancellationRequested.Should().BeFalse("the backup answered inside the caller's independent budget");
+        monitor.PrimaryUp.Should().BeFalse("a runner that accepts the request but never answers is unavailable");
+    }
+
+    [Fact]
+    public async Task AStalledMacStream_ShouldFallBackBeforeShowingAnyWords()
+    {
+        using var monitor = Monitor();
+        var service = Service(new Fake("mac", waitUntilCancelled: true), new Fake("droplet"), monitor, TimeSpan.FromMilliseconds(25));
+
+        (await Collect(service.GenerateStreamAsync("sentinelgpt", "s", "u"))).Should().Equal("droplet");
     }
 
     [Fact]
@@ -285,6 +311,7 @@ public sealed class OllamaFailoverTests
         {
             Calls++;
             await Task.Yield();
+            if (waitUntilCancelled) await Task.Delay(Timeout.InfiniteTimeSpan, ct);
             if (fail is not null && !failAfterFirstWord) throw fail;
             yield return name;
             if (fail is not null) throw fail;

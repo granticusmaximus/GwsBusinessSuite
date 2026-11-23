@@ -276,8 +276,15 @@ public sealed class FailoverOllamaService(
     IOllamaService secondary,
     OllamaFailoverMonitor monitor,
     ILogger<FailoverOllamaService> logger,
-    OllamaJobLog? jobs = null) : IOllamaService
+    OllamaJobLog? jobs = null,
+    TimeSpan? primaryResponseTimeout = null) : IOllamaService
 {
+    // A healthy /api/version does not prove a generation is making progress. Bound the Mac's
+    // attempt separately so a wedged Ollama runner hands the still-live caller to the droplet.
+    // World News keeps a larger overall budget, leaving the backup time to finish.
+    public static readonly TimeSpan DefaultPrimaryResponseTimeout = TimeSpan.FromMinutes(2);
+    private readonly TimeSpan _primaryResponseTimeout = primaryResponseTimeout ?? DefaultPrimaryResponseTimeout;
+
     public const string MidAnswerMessage =
         "SentinelGPT's Mac stopped answering part-way through that answer. Ask again: the backup answers now.";
 
@@ -342,6 +349,7 @@ public sealed class FailoverOllamaService(
         if (monitor.PrimaryUp)
         {
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, monitor.PrimaryLostToken);
+            linked.CancelAfter(_primaryResponseTimeout);
             var started = Stopwatch.GetTimestamp();
             try
             {
@@ -389,6 +397,7 @@ public sealed class FailoverOllamaService(
         if (monitor.PrimaryUp)
         {
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, monitor.PrimaryLostToken);
+            linked.CancelAfter(_primaryResponseTimeout);
             var stream = call(primary, linked.Token).GetAsyncEnumerator(linked.Token);
             var yielded = false;
             var fellBack = false;
