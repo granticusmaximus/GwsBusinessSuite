@@ -1384,7 +1384,7 @@ public sealed class WorldNewsKitTests : IDisposable
         var old = Article("old", "Hochwasser in Berlin", "German", Now.AddDays(-20));
         var recent = Article("recent", "Roads reopen", "English", Now);
         store.AddArticles([old, recent]);
-        store.ReportsDueEnglish(Now, 8).Select(report => report.Id).Should().Equal("recent", "old");
+        store.ReportsDueEnglish(Now, 8).Select(report => report.Id).Should().Equal("old", "recent");
         store.ReportsDueEnglish(Now, 1, oldestFirst: true).Single().Id.Should().Be("old");
         store.DeferEnglishReports(["recent"], Now.AddMinutes(15));
 

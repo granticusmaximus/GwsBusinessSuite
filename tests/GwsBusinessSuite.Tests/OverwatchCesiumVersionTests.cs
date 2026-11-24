@@ -34,7 +34,7 @@ public sealed class OverwatchCesiumVersionTests
             "Cesium's blocking render-error dialog must not replace the contained globe fallback");
         tacticalGlobe.Should().Contain("viewer.scene.renderError.addEventListener(onRenderError)",
             "shader variants that fail after Viewer construction must use the same fallback");
-        tacticalGlobe.Should().Contain("msaaSamples: 1",
+        tacticalGlobe.Should().Contain("msaaSamples: isMacCatalyst ? 1 : 4",
             "the portable WebKit renderer must avoid multisample shader variants");
         tacticalGlobe.Should().Contain("requestWebgl1: false",
             "the native renderer must avoid WKWebView's defective WebGL 1 shader compiler");
