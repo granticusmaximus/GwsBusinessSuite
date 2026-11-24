@@ -134,7 +134,8 @@ public sealed partial class WorldNewsStore
             WHERE english_pending = 1
               AND NOT EXISTS (SELECT 1 FROM article_translations t
                               WHERE t.article_id = articles.id AND t.retry_after > $now)
-            ORDER BY seen_at {(oldestFirst ? "ASC" : "DESC")}, id LIMIT $limit
+            ORDER BY CASE WHEN lower(language) <> 'english' THEN 0 ELSE 1 END,
+                     seen_at {(oldestFirst ? "ASC" : "DESC")}, id LIMIT $limit
             """, ("$now", now.ToUnixTimeSeconds()), ("$limit", Math.Clamp(limit, 1, HeadlineTranslator.ReportsPerCall)));
 
     public void DeferEnglishReports(IEnumerable<string> articleIds, DateTimeOffset retryAt)

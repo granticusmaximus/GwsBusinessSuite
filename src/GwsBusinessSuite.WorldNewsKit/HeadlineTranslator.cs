@@ -23,6 +23,7 @@ public static partial class HeadlineTranslator
         Return only a JSON array, one object per input, preserving its number:
         [{"number":1,"headline":"English headline","description":"English description or null","summary":"English summary"}]
         Translate the entire supplied headline and description, not just selected parts. Keep text already in English unchanged.
+        Never leave a non-English headline or description untranslated or copy the original non-English text verbatim.
         The language metadata may be wrong: make every output English. Preserve names, numbers, uncertainty and attribution.
         Write a concise summary in your own English words (one or two sentences), using only that report's headline and description.
         If only a headline is supplied, summarize only what it says; never invent missing details or suggest independent verification.
@@ -72,6 +73,18 @@ public static partial class HeadlineTranslator
                 description = OptionalText(item, "description", 1, 4000);
             if (headline is null || summary is null || (!string.IsNullOrWhiteSpace(source.Snippet) && description is null))
                 continue;
+            if (!IsEnglish(source.Language))
+            {
+                var flatTitle = Flat(source.Title);
+                if (flatTitle.Length > 12 && string.Equals(headline, flatTitle, StringComparison.OrdinalIgnoreCase))
+                    continue;
+                if (!string.IsNullOrWhiteSpace(source.Snippet))
+                {
+                    var flatSnippet = Flat(source.Snippet);
+                    if (flatSnippet.Length > 20 && string.Equals(description, flatSnippet, StringComparison.OrdinalIgnoreCase))
+                        continue;
+                }
+            }
             usable.Add((number, new ReportTranslation(source.Id, source.Title, source.Snippet, headline, description, summary)));
         }
         if (usable.Count == 0 && batch.Count > 0) throw new JsonException("No usable English reports were returned.");

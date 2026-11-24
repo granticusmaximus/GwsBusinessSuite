@@ -147,8 +147,8 @@ public sealed class ArticleReaderService(
     // characters at a time, into English by the model, then laid out as any reader article (raw
     // HTML off). Public reports, so it's shared work when server AI is off.
     public const int TranslateChunkChars = 5_000;
-    public const int MaxTranslateChars = 20_000;
-    private static readonly TimeSpan TranslateTimeout = TimeSpan.FromMinutes(4);
+    public const int MaxTranslateChars = 40_000;
+    private static readonly TimeSpan TranslateTimeout = TimeSpan.FromMinutes(6);
 
     public const string TranslatePrompt =
         "Translate the user's Markdown news article into natural English. Keep the Markdown structure (headings, " +
