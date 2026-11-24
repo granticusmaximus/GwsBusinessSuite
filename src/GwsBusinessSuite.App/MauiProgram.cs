@@ -41,7 +41,9 @@ public static class MauiProgram
 		// used Keychain-backed SecureStorage until 2026-08-25 - moved off it after confirming the
 		// required keychain-access-groups entitlement needs real Apple provisioning this
 		// ad-hoc-signed build doesn't have (it broke the app's ability to launch at all).
-		builder.Services.AddSingleton(_ => new OllamaClient(new Uri("http://127.0.0.1:11434/")));
+		builder.Services.AddSingleton(_ => new OllamaClient(
+            new Uri("http://dagda.tailc9a402.ts.net:11434/"),
+            new Uri("http://gws-web.tailc9a402.ts.net:11434/")));
 		builder.Services.AddSingleton(_ =>
 			new ConversationSessionStore(Path.Combine(FileSystem.Current.AppDataDirectory, "sentinelgpt-sessions")));
 		builder.Services.AddSingleton(_ =>

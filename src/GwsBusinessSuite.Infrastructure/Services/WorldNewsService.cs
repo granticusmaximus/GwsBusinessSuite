@@ -1233,8 +1233,8 @@ public sealed partial class WorldNewsService : IDisposable
                 await using var scope = _scopes.CreateAsyncScope();
                 // The Mac-first failover gives a stalled Mac attempt two minutes, then hands the
                 // same request to the droplet. Keep a separate overall budget long enough for that
-                // backup to finish instead of cancelling exactly when failover is needed.
-                using var limit = new CancellationTokenSource(TimeSpan.FromMinutes(6));
+                // backup to finish on CPU without timing out.
+                using var limit = new CancellationTokenSource(TimeSpan.FromMinutes(10));
                 raw = await scope.ServiceProvider.GetRequiredService<IOllamaService>()
                     .GenerateAsync(_model, EventAnalyzer.SystemPrompt, prompt, 16_384, limit.Token);
             }
@@ -1258,7 +1258,7 @@ public sealed partial class WorldNewsService : IDisposable
         }
         catch (OperationCanceledException ex)
         {
-            throw new InvalidOperationException("SentinelGPT took too long on both the Mac and its AI-droplet backup (over 6 minutes). Try again in a moment.", ex);
+            throw new InvalidOperationException("SentinelGPT took too long on both the Mac and its AI-droplet backup (over 10 minutes). Try again in a moment.", ex);
         }
         catch (Exception ex) when (ex is HttpRequestException or System.Text.Json.JsonException)
         {

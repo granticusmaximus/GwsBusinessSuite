@@ -8,13 +8,91 @@ namespace GwsBusinessSuite.OllamaKit;
 public sealed class OllamaClient : IDisposable
 {
     private readonly HttpClient _http;
+    private readonly HttpClient? _secondaryHttp;
     private readonly bool _ownsClient;
+    private readonly TimeSpan _probeTimeout;
+    private DateTimeOffset _primaryCheckedAt = DateTimeOffset.MinValue;
+    private bool _primaryHealthy = true;
 
     public OllamaClient(Uri baseUri, HttpClient? httpClient = null)
     {
         _ownsClient = httpClient is null;
-        _http = httpClient ?? new HttpClient(new SocketsHttpHandler { UseProxy = false }) { Timeout = TimeSpan.FromMinutes(30) };
+        _http = httpClient ?? new HttpClient(new SocketsHttpHandler { UseProxy = false, ConnectTimeout = TimeSpan.FromSeconds(4) }) { Timeout = TimeSpan.FromMinutes(30) };
         _http.BaseAddress ??= baseUri;
+        _probeTimeout = TimeSpan.FromSeconds(4);
+    }
+
+    public OllamaClient(Uri primaryUri, Uri? secondaryUri, TimeSpan? primaryProbeTimeout = null)
+    {
+        _ownsClient = true;
+        _probeTimeout = primaryProbeTimeout ?? TimeSpan.FromSeconds(4);
+        _http = new HttpClient(new SocketsHttpHandler { UseProxy = false, ConnectTimeout = _probeTimeout })
+        {
+            BaseAddress = primaryUri,
+            Timeout = TimeSpan.FromMinutes(30)
+        };
+        if (secondaryUri is not null)
+        {
+            _secondaryHttp = new HttpClient(new SocketsHttpHandler { UseProxy = false, ConnectTimeout = TimeSpan.FromSeconds(5) })
+            {
+                BaseAddress = secondaryUri,
+                Timeout = TimeSpan.FromMinutes(30)
+            };
+        }
+    }
+
+    private async Task<bool> IsPrimaryAvailableAsync(CancellationToken ct)
+    {
+        if (_secondaryHttp is null) return true;
+        var now = DateTimeOffset.UtcNow;
+        if (_primaryHealthy && now - _primaryCheckedAt < TimeSpan.FromSeconds(15))
+            return true;
+        using var probeCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        probeCts.CancelAfter(_probeTimeout);
+        try
+        {
+            using var response = await _http.GetAsync("api/version", probeCts.Token);
+            _primaryHealthy = response.IsSuccessStatusCode;
+            _primaryCheckedAt = now;
+            return _primaryHealthy;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or IOException && !ct.IsCancellationRequested)
+        {
+            _primaryHealthy = false;
+            _primaryCheckedAt = now;
+            return false;
+        }
+    }
+
+    private void MarkPrimaryDown()
+    {
+        _primaryHealthy = false;
+        _primaryCheckedAt = DateTimeOffset.UtcNow;
+    }
+
+    private static bool IsConnectionOrTimeoutFailure(Exception ex, CancellationToken callerCt) =>
+        !callerCt.IsCancellationRequested && (ex is HttpRequestException or IOException or TaskCanceledException);
+
+    private async Task<HttpResponseMessage> SendWithFailoverAsync(
+        Func<HttpClient, bool, Task<HttpResponseMessage>> send,
+        CancellationToken cancellationToken)
+    {
+        if (_secondaryHttp is null)
+            return await send(_http, false);
+
+        if (await IsPrimaryAvailableAsync(cancellationToken))
+        {
+            try
+            {
+                return await send(_http, false);
+            }
+            catch (Exception ex) when (IsConnectionOrTimeoutFailure(ex, cancellationToken))
+            {
+                MarkPrimaryDown();
+            }
+        }
+
+        return await send(_secondaryHttp, true);
     }
 
     public async Task<OllamaChatResult> ChatAsync(
@@ -24,9 +102,11 @@ public sealed class OllamaClient : IDisposable
         CancellationToken cancellationToken,
         bool? think = null)
     {
-        var payload = BuildChatPayload(model, messages, tools, stream: false, think);
-
-        using var response = await _http.PostAsJsonAsync("api/chat", payload, cancellationToken);
+        using var response = await SendWithFailoverAsync((client, isSecondary) =>
+        {
+            var payload = BuildChatPayload(model, messages, tools, stream: false, think, isSecondary);
+            return client.PostAsJsonAsync("api/chat", payload, cancellationToken);
+        }, cancellationToken);
         var body = await response.Content.ReadAsStringAsync(cancellationToken);
         if (!response.IsSuccessStatusCode)
             throw new InvalidOperationException(
@@ -63,14 +143,15 @@ public sealed class OllamaClient : IDisposable
         [EnumeratorCancellation] CancellationToken cancellationToken,
         bool? think = null)
     {
-        var payload = BuildChatPayload(model, messages, tools, stream: true, think);
-
-        using var request = new HttpRequestMessage(HttpMethod.Post, "api/chat")
+        using var response = await SendWithFailoverAsync((client, isSecondary) =>
         {
-            Content = JsonContent.Create(payload)
-        };
-        using var response = await _http.SendAsync(
-            request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+            var payload = BuildChatPayload(model, messages, tools, stream: true, think, isSecondary);
+            var request = new HttpRequestMessage(HttpMethod.Post, "api/chat")
+            {
+                Content = JsonContent.Create(payload)
+            };
+            return client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+        }, cancellationToken);
         if (!response.IsSuccessStatusCode)
         {
             var errorBody = await response.Content.ReadAsStringAsync(cancellationToken);
@@ -119,8 +200,9 @@ public sealed class OllamaClient : IDisposable
     {
         try
         {
-            using var response = await _http.PostAsJsonAsync(
-                "api/generate", new { model, keep_alive = "30m" }, cancellationToken);
+            using var response = await SendWithFailoverAsync((client, isSecondary) =>
+                client.PostAsJsonAsync("api/generate", new { model, keep_alive = isSecondary ? "-1" : "30m" }, cancellationToken),
+                cancellationToken);
         }
         catch
         {
@@ -133,7 +215,9 @@ public sealed class OllamaClient : IDisposable
     public async Task<IReadOnlyList<float[]>> EmbedAsync(string model, IReadOnlyList<string> inputs, CancellationToken cancellationToken)
     {
         if (inputs.Count == 0) return [];
-        using var response = await _http.PostAsJsonAsync("api/embed", new { model, input = inputs }, cancellationToken);
+        using var response = await SendWithFailoverAsync((client, _) =>
+            client.PostAsJsonAsync("api/embed", new { model, input = inputs }, cancellationToken),
+            cancellationToken);
         var body = await response.Content.ReadAsStringAsync(cancellationToken);
         if (!response.IsSuccessStatusCode)
             throw new InvalidOperationException(
@@ -162,9 +246,9 @@ public sealed class OllamaClient : IDisposable
     // see OllamaModelInfo for why Ollama makes that the caller's problem.
     public async Task<IReadOnlyList<OllamaModelInfo>> ListModelDetailsAsync(CancellationToken cancellationToken)
     {
-        using var response = await _http.GetAsync("api/tags", cancellationToken);
+        using var response = await SendWithFailoverAsync((client, _) => client.GetAsync("api/tags", cancellationToken), cancellationToken);
         if (!response.IsSuccessStatusCode)
-            throw new InvalidOperationException($"Ollama is unavailable at {_http.BaseAddress}.");
+            throw new InvalidOperationException($"Ollama is unavailable at {response.RequestMessage?.RequestUri ?? _http.BaseAddress}.");
         var result = await response.Content.ReadFromJsonAsync<OllamaTagsResponse>(cancellationToken);
         return result?.Models?
             .Where(model => !string.IsNullOrWhiteSpace(model.Name))
@@ -274,7 +358,10 @@ public sealed class OllamaClient : IDisposable
     public void Dispose()
     {
         if (_ownsClient)
+        {
             _http.Dispose();
+            _secondaryHttp?.Dispose();
+        }
     }
 
     // One shape for both the streaming and non-streaming calls so they can't drift apart on
@@ -288,7 +375,8 @@ public sealed class OllamaClient : IDisposable
         IReadOnlyList<OllamaChatMessage> messages,
         IReadOnlyList<OllamaToolDefinition> tools,
         bool stream,
-        bool? think)
+        bool? think,
+        bool isSecondary = false)
     {
         var payload = new Dictionary<string, object>
         {
@@ -299,8 +387,8 @@ public sealed class OllamaClient : IDisposable
             // array with HTTP 400 for the whole request.
             ["tools"] = tools.Select(tool => tool.ToApiShape()).ToArray(),
             ["stream"] = stream,
-            ["keep_alive"] = "30m",
-            ["options"] = new { num_ctx = 16_384, temperature = 0.2 }
+            ["keep_alive"] = isSecondary ? "-1" : "30m",
+            ["options"] = new { num_ctx = isSecondary ? 8_192 : 16_384, temperature = 0.2 }
         };
         if (think is not null)
             payload["think"] = think.Value;

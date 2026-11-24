@@ -16,7 +16,8 @@ public sealed class OllamaService(
     OllamaPerformanceTracker performanceTracker,
     ILogger<OllamaService> logger,
     Microsoft.Extensions.Options.IOptions<GwsBusinessSuite.Application.ContentStudio.ContentStudioOptions>? options = null,
-    string modelKeepAlive = "30m") : IOllamaService
+    string modelKeepAlive = "30m",
+    bool respectPinnedContext = true) : IOllamaService
 {
     // Asked once per instance (a request's worth of calls); a tags request is milliseconds against
     // a generation's seconds.
@@ -24,7 +25,7 @@ public sealed class OllamaService(
 
     // ContentStudio:ContextLength: every request asks for the same context, so Ollama never reloads
     // the model to change it (19-11-26). Null keeps each caller's own size.
-    private int? PinnedContext => options?.Value.ContextLength is > 0 and var length ? length : null;
+    private int? PinnedContext => respectPinnedContext && options?.Value.ContextLength is > 0 and var length ? length : null;
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> WarnedModels = new(StringComparer.OrdinalIgnoreCase);
 
     // The model setting (Settings > AI) is shared with the Mac app, whose own Ollama has models the

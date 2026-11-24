@@ -9,6 +9,11 @@ services:
       # The origin is private to the droplet. Cloudflared/reverse proxy reaches it over
       # loopback; internet clients must use the HTTPS hostname and cannot bypass TLS.
       - "127.0.0.1:80:8080"
+    # Tailscale MagicDNS first so the container resolves *.ts.net (dagda.tailc9a402.ts.net),
+    # with Cloudflare 1.1.1.1 fallback for public hosts.
+    dns:
+      - 100.100.100.100
+      - 1.1.1.1
     env_file:
       - path: .env
         required: false
