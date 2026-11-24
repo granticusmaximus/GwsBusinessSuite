@@ -251,6 +251,7 @@ window.tacticalGlobe = (function () {
             console.warn('Overwatch: the street tint could not be added', err);
         }
         const land = new Cesium.CustomDataSource('tg-holo-land');
+        const landPolygons = [];
         try {
             const response = await fetch('/data/overwatch-land.json', { cache: 'force-cache' });
             const data = await response.json();
@@ -258,7 +259,7 @@ window.tacticalGlobe = (function () {
                 const flat = [];
                 ring.forEach(function (point) { flat.push(point[0], point[1]); });
                 const positions = Cesium.Cartesian3.fromDegreesArray(flat);
-                land.entities.add({ polygon: { hierarchy: positions, material: green.withAlpha(HOLO.landAlpha), height: 0, outline: false } });
+                landPolygons.push(land.entities.add({ polygon: { hierarchy: positions, material: green.withAlpha(HOLO.landAlpha), height: 0, outline: false } }));
                 land.entities.add({ polyline: { positions: positions, width: 2, arcType: Cesium.ArcType.GEODESIC,
                     material: new Cesium.PolylineGlowMaterialProperty({ glowPower: 0.25, color: green.withAlpha(HOLO.coastAlpha) }) } });
             });
@@ -278,6 +279,7 @@ window.tacticalGlobe = (function () {
         await viewer.dataSources.add(land);
         const shell = viewer.container && viewer.container.closest ? viewer.container.closest('.tg-shell') : null;
         const stageName = document.getElementById('tg-stage-name');
+        const isMacCatalyst = window.__gwsMacCatalystWebView === true;
         const fade = function () {
             const height = viewer.camera.positionCartographic.height;
             const share = holoStreetShare(height);
@@ -289,11 +291,22 @@ window.tacticalGlobe = (function () {
             }
             updateReadout(viewer, height);
             // The Satellite look (setLook) shows real aerial imagery at every height, so the
-            // green land, grid, dark streets and wash stay hidden under it.
+            // green land, grid, dark streets and wash stay hidden under it. Holo Earth layers
+            // glowing coastlines, the 15-degree grid, and a subtle wash over real aerial imagery.
             const satellite = holo.look === 'satellite';
-            if (streets) streets.alpha = satellite ? 0 : share * HOLO.streetAlpha;
-            if (wash) wash.alpha = satellite ? 0 : share * HOLO.washAlpha;
-            land.show = !satellite && share < 0.98;
+            const holoEarth = holo.look === 'holo-earth';
+            const showEarthAtmosphere = !isMacCatalyst && (satellite || holoEarth);
+            try {
+                scene.globe.showGroundAtmosphere = showEarthAtmosphere;
+                if (scene.skyAtmosphere) scene.skyAtmosphere.show = showEarthAtmosphere;
+                if (scene.skyBox) scene.skyBox.show = showEarthAtmosphere;
+                scene.fog.enabled = showEarthAtmosphere;
+                scene.fog.renderable = showEarthAtmosphere;
+            } catch (err) { /* best effort */ }
+            landPolygons.forEach(function (poly) { poly.show = !holoEarth; });
+            if (streets) streets.alpha = (satellite || holoEarth) ? 0 : share * HOLO.streetAlpha;
+            if (wash) wash.alpha = satellite ? 0 : holoEarth ? 0.08 + share * 0.12 : share * HOLO.washAlpha;
+            land.show = !satellite && (holoEarth || share < 0.98);
             scene.requestRender();
         };
         const holo = { look: 'night-ops', imagery: null, fade: fade };
@@ -1139,6 +1152,7 @@ window.tacticalGlobe = (function () {
         // ArcGisMapServerImageryProvider has an async `fromUrl` factory in this Cesium version
         // (confirmed directly against the loaded library) since it has to fetch the service's
         // own metadata first.
+        const isMacCatalyst = window.__gwsMacCatalystWebView === true;
         let viewer;
         let baseLayer;
         try {
@@ -1182,22 +1196,16 @@ window.tacticalGlobe = (function () {
                 // WKWebView reports multiple render targets while compiling Cesium's
                 // order-independent-transparency compositor fails. The effect is optional and
                 // has no bearing on the globe, imagery, or map interaction.
-                // Off everywhere (20-11-26): WebKit couldn't compile it, and the web and Mac globes draw
-                // the same pixels.
                 orderIndependentTranslucency: false,
                 // WKWebView's Metal-backed WebGL path has failed compiling Cesium's HDR,
-                // logarithmic-depth and multisample fragment variants on real Macs. These
-                // options keep the full 3D globe while selecting the portable shader path.
-                msaaSamples: 1,
+                // logarithmic-depth and multisample fragment variants on real Macs. Keep the
+                // conservative path for Mac Catalyst WKWebView while giving Web & PWA full AA.
+                msaaSamples: isMacCatalyst ? 1 : 4,
                 contextOptions: {
-                    // This WKWebView's WebGL 1 compiler rejects even Cesium's trivial
-                    // texture-copy shader. Keep its capable WebGL 2 path selected; the
-                    // native-only sun and MRT compositor exclusions above avoid the two
-                    // WebGL 2 shaders confirmed to fail on its Metal backend.
                     requestWebgl1: false,
                     webgl: {
                         alpha: false,
-                        antialias: false,
+                        antialias: !isMacCatalyst,
                         stencil: false,
                         preserveDrawingBuffer: false
                     }
@@ -1215,11 +1223,22 @@ window.tacticalGlobe = (function () {
             throw error;
         }
         const renderTimer = renderOnChange(viewer);
-        if (window.__gwsMacCatalystWebView === true) watchForBlankGlobe(viewer);
+        if (isMacCatalyst) watchForBlankGlobe(viewer);
+        viewer.resolutionScale = isMacCatalyst ? 1 : Math.min(window.devicePixelRatio || 1, 2);
         viewer.scene.highDynamicRange = false;
         viewer.scene.logarithmicDepthBuffer = false;
-        viewer.scene.fxaa = false;
+        viewer.scene.fxaa = !isMacCatalyst;
         viewer.scene.useDepthPicking = false;
+        let resizeObserver = null;
+        if (typeof ResizeObserver === 'function') {
+            resizeObserver = new ResizeObserver(function () {
+                if (!viewer.isDestroyed()) {
+                    viewer.resize();
+                    viewer.scene.requestRender();
+                }
+            });
+            resizeObserver.observe(container);
+        }
         // Faster imagery (13-11-26, Grant: "laggy rendering images on the globe"): keep 1,000 tiles
         // in memory rather than Cesium's 100, so panning back doesn't fetch them again, and load the
         // tiles beside the view so its edges are ready as it moves.
@@ -1550,7 +1569,7 @@ window.tacticalGlobe = (function () {
             hazardDataSource, internetDataSource, convergenceDataSource, airportDataSource, chokepointDataSource, weatherWarningDataSource, auroraLayers: [], satelliteDataSource, signDataSource, roadWeatherDataSource, radar, clickHandler, selectMode: false, selectedCameras: new Map(), currentView: null,
             travelDataSource, fireDataSource, conflictDataSource, humanitarianDataSource, satelliteImagery: null,
             ionToken: options && typeof options.ionToken === 'string' && options.ionToken.length > 0 ? options.ionToken : null, threeD: null,
-            renderTimer, pulseTimer: null, onRenderError
+            renderTimer, pulseTimer: null, onRenderError, resizeObserver
         });
 
         // Night Ops quality: the remembered level now, the battery's default once it answers.
@@ -3143,11 +3162,12 @@ window.tacticalGlobe = (function () {
         return quality;
     }
 
-    // Looks (Night Ops x Apple, 21-11-26): 'satellite' lays Esri's World_Imagery (real aerial
-    // photography, CORS-open, no key) over the dark base at every height, just above the base map
-    // and under the wash, labels and every overlay added later; 'standard' and 'night-ops' keep the
-    // holo globe. The page CSS handles the chrome (.tg-shell[data-ow-look]). Resolves to the look in force.
-    const LOOKS = ['standard', 'night-ops', 'satellite'];
+    // Looks (Night Ops x Apple, 21-11-26): 'satellite' and 'holo-earth' lay Esri's World_Imagery
+    // (real aerial photography, CORS-open, no key) over the dark base at every height, just above the
+    // base map and under the wash, labels and every overlay added later; 'holo-earth' tones it down
+    // slightly and keeps the glowing coastlines, 15-degree grid, and subtle green wash on top.
+    // 'standard' and 'night-ops' keep the holo globe. Resolves to the look in force.
+    const LOOKS = ['standard', 'night-ops', 'holo-earth', 'satellite'];
     async function setLook(containerId, look) {
         const entry = viewers.get(containerId || 'tg-viewport');
         const holo = entry && entry.viewer && !entry.viewer.isDestroyed() ? entry.viewer._tgHolo : null;
@@ -3155,7 +3175,8 @@ window.tacticalGlobe = (function () {
         if (LOOKS.indexOf(look) < 0) return holo.look;
         holo.look = look;
         const layers = entry.viewer.imageryLayers;
-        if (look === 'satellite' && !holo.imagery) {
+        const needsImagery = look === 'satellite' || look === 'holo-earth';
+        if (needsImagery && !holo.imagery) {
             try {
                 const layer = new Cesium.ImageryLayer(await Cesium.ArcGisMapServerImageryProvider.fromUrl(
                     'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer'));
@@ -3169,7 +3190,18 @@ window.tacticalGlobe = (function () {
                 return 'failed: no imagery';
             }
         }
-        if (holo.imagery) holo.imagery.show = holo.look === 'satellite';
+        if (holo.imagery) {
+            holo.imagery.show = holo.look === 'satellite' || holo.look === 'holo-earth';
+            if (holo.look === 'holo-earth') {
+                holo.imagery.saturation = 0.65;
+                holo.imagery.brightness = 0.78;
+                holo.imagery.contrast = 1.12;
+            } else {
+                holo.imagery.saturation = 1.0;
+                holo.imagery.brightness = 1.0;
+                holo.imagery.contrast = 1.0;
+            }
+        }
         holo.fade();
         return holo.look;
     }
@@ -6344,6 +6376,7 @@ window.tacticalGlobe = (function () {
         stopRadarPlayback(entry.radar);
         if (entry.radar.bar) entry.radar.bar.remove();
         if (entry.hoverIdentify) entry.hoverIdentify.dispose();
+        if (entry.resizeObserver) entry.resizeObserver.disconnect();
         clearInterval(entry.renderTimer);
         entry.viewer.scene.renderError.removeEventListener(entry.onRenderError);
         setPulsing(entry, false);

@@ -261,9 +261,9 @@ public sealed class NativeShapesTests
         Assert.Contains($"filter: brightness({N(Math.Round(1 - OverwatchMapLook.NightDim, 2))}) contrast(1.12);", css);
 
         // Looks (21-11-26): only Satellite hides the holo globe, and anything unknown is Night Ops.
-        Assert.Equal(["standard", "night-ops", "satellite", "night-ops", "night-ops"], new[] { "standard", "night-ops", "satellite", "nonsense", null }.Select(OverwatchMapLook.Look));
-        Assert.Equal([true, true, false, true], new[] { "standard", "night-ops", "satellite", null }.Select(OverwatchMapLook.ShowsHolo));
-        Assert.Contains("const LOOKS = ['standard', 'night-ops', 'satellite'];", js);
+        Assert.Equal(["standard", "night-ops", "holo-earth", "satellite", "night-ops", "night-ops"], new[] { "standard", "night-ops", "holo-earth", "satellite", "nonsense", null }.Select(OverwatchMapLook.Look));
+        Assert.Equal([true, true, true, false, true], new[] { "standard", "night-ops", "holo-earth", "satellite", null }.Select(OverwatchMapLook.ShowsHolo));
+        Assert.Contains("const LOOKS = ['standard', 'night-ops', 'holo-earth', 'satellite'];", js);
         // The HUD's ground height leaves out terrain-skirt readings (GND -21443 m over Atlanta, 21-11-26).
         Assert.Contains("const GROUND_MIN = -500, GROUND_MAX = 9000;", js);
         Assert.Contains("h >= GROUND_MIN && h <= GROUND_MAX) ground = Math.round(h);", js);

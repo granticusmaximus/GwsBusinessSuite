@@ -12,11 +12,12 @@
     font-family: var(--ow-mono, "IBM Plex Mono", ui-monospace, Menlo, monospace);
     border-radius: var(--gws-radius-md);
     overflow: hidden;
-    /* Fills the content area below the admin bar (app.css trims .gws-content's padding on this
-       page); Fullscreen (gws-builder-mode) fills the whole window. */
-    height: calc(100vh - var(--gws-admin-bar-height, 52px) - 1.5rem);
-    height: calc(100dvh - var(--gws-admin-bar-height, 52px) - 1.5rem);
-    min-height: 480px;
+    /* Fills the content area below the admin bar and above the desktop status strip or mobile/PWA
+       bottom bar (app.css trims .gws-content's padding on this page); Fullscreen (gws-builder-mode)
+       fills the whole window and respects safe-area insets for standalone PWAs. */
+    height: calc(100vh - var(--gws-admin-bar-height, 52px) - var(--gws-status-strip-height, 0px) - var(--gws-bottom-bar-height, 0px) - 1.5rem);
+    height: calc(100dvh - var(--gws-admin-bar-height, 52px) - var(--gws-status-strip-height, 0px) - var(--gws-bottom-bar-height, 0px) - 1.5rem);
+    min-height: 360px;
     box-shadow: 0 0 0 1px rgb(var(--ow-accent-rgb, 89 240 122) / 0.25), 0 20px 60px rgba(0, 0, 0, 0.5);
 }
 
@@ -469,7 +470,10 @@
 .gws-builder-mode .tg-shell {
     height: 100vh;
     height: 100dvh;
+    min-height: 0;
     border-radius: 0;
+    --tg-safe-top: env(safe-area-inset-top, 0px);
+    --tg-safe-bottom: env(safe-area-inset-bottom, 0px);
 }
 
 .tg-topbar {
@@ -1153,6 +1157,8 @@
 .tg-shell {
     --tg-gap: 0.75rem;
     --tg-ctl: 34px;
+    --tg-safe-top: 0px;
+    --tg-safe-bottom: 0px;
     --tg-bar-h: calc(var(--tg-ctl) + 1.25rem);
     --tg-sidebar-w: clamp(240px, 26cqi, 300px);
     --tg-inspector-w: clamp(280px, 30cqi, 360px);
@@ -1245,7 +1251,7 @@
 
 /* Toolbar: one row when there's room, the search on a second row below 900 px. */
 .tg-toolbar {
-    inset: 0 0 auto 0;
+    inset: var(--tg-safe-top, 0px) 0 auto 0;
     box-sizing: border-box;
     height: var(--tg-bar-h);
     display: grid;
@@ -1364,8 +1370,8 @@
 
 /* Sidebar (Layers) docked left, inspector docked right, both under the toolbar. */
 .tg-layers-panel {
-    top: calc(var(--tg-bar-h) + var(--tg-gap));
-    bottom: var(--tg-gap);
+    top: calc(var(--tg-safe-top, 0px) + var(--tg-bar-h) + var(--tg-gap));
+    bottom: calc(var(--tg-safe-bottom, 0px) + var(--tg-gap));
     left: var(--tg-gap);
     right: auto;
     width: var(--tg-sidebar-w);
@@ -1374,8 +1380,8 @@
 }
 
 .tg-side-panel {
-    top: calc(var(--tg-bar-h) + var(--tg-gap));
-    bottom: var(--tg-gap);
+    top: calc(var(--tg-safe-top, 0px) + var(--tg-bar-h) + var(--tg-gap));
+    bottom: calc(var(--tg-safe-bottom, 0px) + var(--tg-gap));
     left: auto;
     right: var(--tg-gap);
     width: var(--tg-inspector-w);
@@ -1383,7 +1389,7 @@
 
 /* Sources, shortcuts, street view and the other floating panels: under the toolbar, clear of the inspector. */
 .tg-floating-panel:not(.tg-layers-panel) {
-    top: calc(var(--tg-bar-h) + var(--tg-gap));
+    top: calc(var(--tg-safe-top, 0px) + var(--tg-bar-h) + var(--tg-gap));
     right: calc(var(--tg-inset-r) + var(--tg-gap));
     max-width: calc(100% - var(--tg-inset-r) - 2 * var(--tg-gap));
 }
@@ -1598,7 +1604,7 @@
 
 .tg-map-controls {
     right: calc(var(--tg-inset-r) + var(--tg-gap));
-    bottom: var(--tg-gap);
+    bottom: calc(var(--tg-safe-bottom, 0px) + var(--tg-gap));
 }
 
 /* Below 720 px: the toolbar is two compact rows, the sidebar and inspector are bottom sheets (one at a
@@ -1653,7 +1659,7 @@
     }
 
     .tg-map-controls {
-        top: calc(var(--tg-bar-h) + var(--tg-gap));
+        top: calc(var(--tg-safe-top, 0px) + var(--tg-bar-h) + var(--tg-gap));
         bottom: auto;
         right: var(--tg-gap);
         display: grid;

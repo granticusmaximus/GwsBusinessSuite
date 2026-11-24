@@ -74,12 +74,15 @@ public static class OverwatchMapLook
         _ => 0,
     };
 
-    // Looks (Night Ops x Apple, 21-11-26): Standard and Night Ops draw the holo globe; Satellite shows
-    // real aerial imagery (Esri World_Imagery on the web, Apple's satellite map on the Mac) with the
-    // holo land, grid and streets hidden (setLook in tactical-globe.js). Anything unknown is Night Ops.
+    // Looks (Night Ops x Apple, 21-11-26): Standard, Night Ops, and Holo Earth draw the holo globe
+    // (Holo Earth layers the glowing coastlines, 15-degree grid, and subtle wash over real aerial
+    // imagery on the web); Satellite shows real aerial imagery (Esri World_Imagery on the web, Apple's
+    // satellite map on the Mac) with the holo land, grid and streets hidden (setLook in tactical-globe.js).
+    // Anything unknown is Night Ops.
     public const string SatelliteLook = "satellite";
+    public const string HoloEarthLook = "holo-earth";
 
-    public static string Look(string? look) => look is "standard" or "night-ops" or SatelliteLook ? look : "night-ops";
+    public static string Look(string? look) => look is "standard" or "night-ops" or HoloEarthLook or SatelliteLook ? look : "night-ops";
 
     public static bool ShowsHolo(string? look) => Look(look) != SatelliteLook;
 

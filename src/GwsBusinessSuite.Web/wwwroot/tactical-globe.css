@@ -31,10 +31,12 @@
 }
 
 /* Look switch (20-11-26): OverwatchGrid.razor sets data-ow-look on .tg-shell. Night Ops is the look as
-   it was. Standard is calmer: Apple system green on neutral glass, no glow (the page's scoped CSS also
-   drops the scan lines and grain). Satellite reads as Standard for now.
-   TODO(overwatch look): Satellite should also swap the globe to plain satellite imagery; that is a
-   tactical-globe.js unit, tracked in .claude/plans/overwatch-night-ops-2026-11-20.md. */
+   it was. Holo Earth keeps the Night Ops green HUD over real aerial imagery with a subtle holographic
+   coastline/grid overlay. Standard is calmer: Apple system green on neutral glass, no glow (the page's
+   scoped CSS also drops the scan lines and grain). Satellite reads as Standard for now. */
+.tg-shell[data-ow-look="holo-earth"] .tg-scanlines {
+    opacity: 0.35;
+}
 .tg-shell[data-ow-look="standard"],
 .tg-shell[data-ow-look="satellite"] {
     --ow-accent: #30d158;
