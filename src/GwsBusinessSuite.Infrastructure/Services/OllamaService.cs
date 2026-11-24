@@ -16,7 +16,7 @@ public sealed class OllamaService(
     OllamaPerformanceTracker performanceTracker,
     ILogger<OllamaService> logger,
     Microsoft.Extensions.Options.IOptions<GwsBusinessSuite.Application.ContentStudio.ContentStudioOptions>? options = null,
-    string modelKeepAlive = "30m",
+    string modelKeepAlive = "5m",
     bool respectPinnedContext = true) : IOllamaService
 {
     // Asked once per instance (a request's worth of calls); a tags request is milliseconds against

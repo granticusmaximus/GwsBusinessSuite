@@ -23,7 +23,7 @@ namespace GwsBusinessSuite.Infrastructure.Services;
 public sealed class SentinelModelLoader
 {
     public const string SingleClient = "ollama-loader";
-    public const string KeepAlive = "30m";
+    public const string KeepAlive = "5m";
     public static readonly TimeSpan RecheckAfter = TimeSpan.FromMinutes(2);
     public static readonly TimeSpan UsedRecently = TimeSpan.FromMinutes(30);
     private static readonly TimeSpan LoadTimeout = TimeSpan.FromMinutes(3);

@@ -52,7 +52,7 @@ public sealed class SentinelModelLoaderTests
         Assert.Equal("loaded", result);
         var load = Assert.Single(ollama.Requests, r => r.StartsWith("POST /api/generate", StringComparison.Ordinal));
         Assert.Contains("\"model\":\"sentinelgpt:latest\"", load);
-        Assert.Contains("\"keep_alive\":\"30m\"", load);
+        Assert.Contains("\"keep_alive\":\"5m\"", load);
         Assert.DoesNotContain("prompt", load);
     }
 

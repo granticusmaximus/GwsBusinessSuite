@@ -1347,7 +1347,7 @@ public sealed class WorldNewsBackgroundService(
     private async Task<TimeSpan> EnglishOnceAsync(CancellationToken cancellationToken)
     {
         var madeProgress = await news.ProcessEnglishAsync(cancellationToken);
-        return TimeSpan.FromSeconds(madeProgress ? 5 : 60);
+        return TimeSpan.FromSeconds(madeProgress ? 30 : 60);
     }
 
     internal static async Task RunResilientLoopAsync(

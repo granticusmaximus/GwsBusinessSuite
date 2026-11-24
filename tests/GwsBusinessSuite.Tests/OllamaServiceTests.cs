@@ -100,7 +100,7 @@ public sealed class OllamaServiceTests
         await service.WarmModelAsync("sentinelgpt");
 
         payload.Should().Contain("\"model\":\"sentinelgpt\"");
-        payload.Should().Contain("\"keep_alive\":\"30m\"");
+        payload.Should().Contain("\"keep_alive\":\"5m\"");
         payload.Should().NotContain("\"prompt\"");
     }
 
