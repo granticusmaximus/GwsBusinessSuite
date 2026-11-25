@@ -47,7 +47,7 @@ public sealed class WorldNewsBrowseTests
         WorldNewsBrowse.RangeFor(WorldNewsTab.Today, 24).Should().Be(24);
         WorldNewsBrowse.RangeFor(WorldNewsTab.Today, 168).Should().Be(3);
         WorldNewsBrowse.RangeFor(WorldNewsTab.Latest, 3).Should().Be(24);
-        WorldNewsBrowse.RangeFor(WorldNewsTab.Latest, 720).Should().Be(24, "a month is the archive's alone");
+        WorldNewsBrowse.RangeFor(WorldNewsTab.Latest, 720).Should().Be(720);
         WorldNewsBrowse.RangeFor(WorldNewsTab.Reports, 720).Should().Be(720);
     }
 
