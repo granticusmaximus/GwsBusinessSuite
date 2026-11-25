@@ -22,7 +22,8 @@ public sealed class NewsIntelligenceService(
     IMemoryCache cache,
     NewsRefreshState refreshState,
     ILogger<NewsIntelligenceService> logger,
-    GwsBusinessSuite.Application.Automation.IAutomationTriggerService? automationTriggers = null) : INewsIntelligenceService
+    GwsBusinessSuite.Application.Automation.IAutomationTriggerService? automationTriggers = null,
+    OllamaWorkloadScheduler? workloads = null) : INewsIntelligenceService
 {
     // Google News RSS is used exclusively because:
     // 1. It works reliably from cloud / datacenter IPs (unlike outlet-specific feeds).
@@ -1236,6 +1237,7 @@ public sealed class NewsIntelligenceService(
 
             using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             timeoutCts.CancelAfter(timeout ?? BatchSummarizeTimeout);
+            using var background = workloads?.UseBackgroundPriority();
             // Public headlines: with server AI off they may be written on an Admin's Mac.
             using var sharedWork = MacRelayScope.ForSharedWork();
             var raw = await ollama.GenerateAsync(OllamaModel, system, string.Join("\n", input), timeoutCts.Token);

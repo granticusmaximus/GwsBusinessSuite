@@ -280,9 +280,10 @@ public sealed class FailoverOllamaService(
     TimeSpan? primaryResponseTimeout = null) : IOllamaService
 {
     // A healthy /api/version does not prove a generation is making progress. Bound the Mac's
-    // attempt separately so a wedged Ollama runner hands the still-live caller to the droplet.
-    // World News keeps a larger overall budget, leaving the backup time to finish.
-    public static readonly TimeSpan DefaultPrimaryResponseTimeout = TimeSpan.FromMinutes(2);
+    // attempt separately so a wedged Ollama runner hands the still-live caller to the droplet,
+    // while leaving enough headroom (5 min) for queued requests and 30k-char EventAnalyzer prompts
+    // so a healthy Mac isn't falsely marked down.
+    public static readonly TimeSpan DefaultPrimaryResponseTimeout = TimeSpan.FromMinutes(5);
     private readonly TimeSpan _primaryResponseTimeout = primaryResponseTimeout ?? DefaultPrimaryResponseTimeout;
 
     public const string MidAnswerMessage =
