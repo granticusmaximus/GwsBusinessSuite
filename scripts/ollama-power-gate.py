@@ -63,6 +63,28 @@ def check_power_state() -> tuple[bool, str]:
     return allow, reason
 
 
+def _read_request_body(rfile, headers) -> bytes | None:
+    te = headers.get("Transfer-Encoding", "").lower()
+    if "chunked" in te:
+        chunks = []
+        while True:
+            line = rfile.readline().strip()
+            if not line:
+                break
+            chunk_size = int(line.split(b";", 1)[0], 16)
+            if chunk_size == 0:
+                while True:
+                    trailer = rfile.readline()
+                    if not trailer or trailer in (b"\r\n", b"\n"):
+                        break
+                break
+            chunks.append(rfile.read(chunk_size))
+            rfile.read(2)
+        return b"".join(chunks)
+    content_length = int(headers.get("Content-Length", "0") or "0")
+    return rfile.read(content_length) if content_length > 0 else None
+
+
 class PowerGateHandler(http.server.BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
@@ -82,14 +104,15 @@ class PowerGateHandler(http.server.BaseHTTPRequestHandler):
             self.wfile.write(body)
             return
 
-        content_length = int(self.headers.get("Content-Length", "0"))
-        req_body = self.rfile.read(content_length) if content_length > 0 else None
+        req_body = _read_request_body(self.rfile, self.headers)
 
         forward_headers = {}
         for k, v in self.headers.items():
-            if k.lower() in ("host", "connection", "keep-alive", "transfer-encoding"):
+            if k.lower() in ("host", "connection", "keep-alive", "transfer-encoding", "content-length"):
                 continue
             forward_headers[k] = v
+        if req_body is not None:
+            forward_headers["Content-Length"] = str(len(req_body))
 
         conn = http.client.HTTPConnection(UPSTREAM_HOST, UPSTREAM_PORT, timeout=600)
         try:
