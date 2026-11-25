@@ -11,6 +11,8 @@ GwsBusinessSuite's OllamaFailoverMonitor cleanly fails over to the AI droplet.
 Local Mac apps talking directly to 127.0.0.1:11434 remain unaffected.
 """
 
+from __future__ import annotations
+
 import http.client
 import http.server
 import json
