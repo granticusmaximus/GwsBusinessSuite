@@ -32,10 +32,11 @@ public sealed partial class WorldNewsService : IDisposable
     // 18-11-26). Each feed still keeps its own pace (FeedSchedule), so a short interval mostly
     // means a busy outlet's new stories arrive within minutes rather than up to 15.
     public TimeSpan ReadInterval { get; }
-    // The most events a list holds; the page shows them a page at a time.
-    public const int MaxEvents = 300;
+    // No artificial ceiling on loaded events; the page renders them a page at a time.
+    public const int MaxEvents = int.MaxValue;
 
     private readonly SemaphoreSlim _running = new(1, 1);
+    private readonly SemaphoreSlim _aiPostRead = new(1, 1);
     private readonly OllamaClient _ollama;
     private readonly WorldNewsPipeline _pipeline;
     private readonly EventSummarizer _summarizer;
@@ -272,7 +273,6 @@ public sealed partial class WorldNewsService : IDisposable
                 };
             }
             await ClassifySituationsAsync(ct);
-            await RefineSubtypesAsync(ct);
             var alerts = Store.CreateWatchAlerts(DateTimeOffset.UtcNow, MayAlert).Concat(CreateSurgeAlerts(DateTimeOffset.UtcNow))
                 .Concat(Store.CreateKeywordAlerts(DateTimeOffset.UtcNow, MayAlert))
                 // N5: new stories on people's beats (the last day's), gated like every other alert.
@@ -297,13 +297,7 @@ public sealed partial class WorldNewsService : IDisposable
             LastReadFailed = false;
             Store.SetLastFetched(LastReadKey, LastRefreshed.Value);
             ClearLists();
-            // While the Mac app writes summaries with its bigger local model, the server's small
-            // one stays out of it; it takes over again if the Mac hasn't asked for work in a while.
-            var relayActive = RelayActive(DateTimeOffset.UtcNow);
-            Status = relayActive ? "Summaries are being written on the Mac..." : "Summarizing the biggest events...";
-            Changed?.Invoke();
-            var summaries = relayActive ? new SummaryRunReport(0, []) : await Task.Run(() => _summarizer.RunAsync(ct), ct);
-            var notes = report.Notes.Concat(summaries.Notes).ToList();
+            var notes = report.Notes.ToList();
             var problems = notes.Count == 0 ? string.Empty
                 : $" {notes.Count} {(notes.Count == 1 ? "problem" : "problems")}: {notes[0]}";
             var latestReport = report.LatestReportAt is { } latest ? $" Latest report {latest.ToLocalGwsDateTime()}." : string.Empty;
@@ -312,9 +306,10 @@ public sealed partial class WorldNewsService : IDisposable
             Status = $"{report.Added:N0} new of {report.Fetched:N0} reports ({report.Deduplicated:N0} already stored); "
                 + $"{report.SourcesSucceeded}/{report.SourcesAttempted} sources succeeded; "
                 + $"{report.Embedded:N0} embedded, {report.EmbeddingBacklog:N0} awaiting embedding; "
-                + $"{report.NewEvents:N0} new events, {summaries.Written:N0} summaries written.{latestReport}{crawlerSummary}{problems}";
+                + $"{report.NewEvents:N0} new events.{latestReport}{crawlerSummary}{problems}";
             if (notes.Count > 0)
                 _logger.LogWarning("World news read finished with {Count} problem(s): {Notes}", notes.Count, string.Join(" | ", notes));
+            StartBackgroundAiWork();
             finished = report;
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -1275,6 +1270,40 @@ public sealed partial class WorldNewsService : IDisposable
     [System.Text.RegularExpressions.GeneratedRegex("[^a-z0-9]+")]
     private static partial System.Text.RegularExpressions.Regex NonSlug();
 
+    private void StartBackgroundAiWork()
+    {
+        if (!_aiPostRead.Wait(0)) return;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                var ct = _stopping.Token;
+                await RefineSubtypesAsync(ct);
+                if (!RelayActive(DateTimeOffset.UtcNow))
+                {
+                    var summaries = await Task.Run(() => _summarizer.RunAsync(ct), ct);
+                    if (summaries.Written > 0)
+                    {
+                        ClearLists();
+                        _mapCache?.Clear();
+                        Changed?.Invoke();
+                    }
+                }
+            }
+            catch (OperationCanceledException) when (_stopping.IsCancellationRequested)
+            {
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "World News: background AI post-read work failed");
+            }
+            finally
+            {
+                _aiPostRead.Release();
+            }
+        });
+    }
+
     public void Dispose()
     {
         _stopping.Cancel();
@@ -1283,6 +1312,7 @@ public sealed partial class WorldNewsService : IDisposable
         _regrouping.Dispose();
         _ollama.Dispose();
         _running.Dispose();
+        _aiPostRead.Dispose();
         _englishRunning.Dispose();
     }
 }

@@ -833,6 +833,7 @@ else
     private string _placeCity = string.Empty;
     private string? _placeMessage;
     private string? _shareNote;
+    private HashSet<string>? _matchedEventIds;
     private readonly Dictionary<string, WorldNewsRowFacts> _facts = new(StringComparer.Ordinal);
 
     private ElementReference _root;
@@ -890,7 +891,9 @@ else
         _facts.TryGetValue("s:" + s.Id, out var facts) ? facts : _facts["s:" + s.Id] = WorldNewsBrowse.Facts(s);
 
     private IReadOnlyList<EventOverview> VisibleEvents => (_events ?? [])
-        .Where(e => WorldNewsBrowse.Matches(e.Title, e.Headline, FactsFor(e), e.Countries, e.Languages, State)).ToList();
+        .Where(e => (_matchedEventIds is not null && _matchedEventIds.Contains(e.Id)
+                && WorldNewsBrowse.Matches(e.Title, e.Headline, FactsFor(e), e.Countries, e.Languages, State with { Query = string.Empty }))
+            || WorldNewsBrowse.Matches(e.Title, e.Headline, FactsFor(e), e.Countries, e.Languages, State)).ToList();
 
     // Watching (21-11-26): only the stories you watch, newest news first, including ones older than
     // the range picker's window (loaded one by one into _watchedExtra).
@@ -1087,6 +1090,7 @@ else
             return;
         }
         _events = await Task.Run(() => News.TopEvents(_rangeHours));
+        await RefreshEventTextMatchesAsync();
         if (_selected is not null) _selected = _events.FirstOrDefault(e => e.Id == _selected.Id);
         if (_selected is not null)
         {
@@ -1125,10 +1129,24 @@ else
         return _view == WorldNewsTab.Today ? LoadAsync() : Task.CompletedTask;
     }
 
-    private Task ChangeTextFilterAsync()
+    private async Task ChangeTextFilterAsync()
     {
         _shown = PageSize;
-        return _view == WorldNewsTab.Reports ? LoadReportsAsync(reset: true) : Task.CompletedTask;
+        if (_view == WorldNewsTab.Reports) await LoadReportsAsync(reset: true);
+        else if (_view == WorldNewsTab.Latest) await RefreshEventTextMatchesAsync();
+    }
+
+    private async Task RefreshEventTextMatchesAsync()
+    {
+        if (_view != WorldNewsTab.Latest || string.IsNullOrWhiteSpace(_filter))
+        {
+            _matchedEventIds = null;
+            return;
+        }
+        var q = WorldNewsFinder.WordQuery(_filter);
+        var since = DateTimeOffset.UtcNow.AddHours(-_rangeHours);
+        var hits = await Task.Run(() => News.Store.EventsMatchingText(q, since, int.MaxValue));
+        _matchedEventIds = hits.Select(h => h.EventId).ToHashSet(StringComparer.Ordinal);
     }
 
     private Task ChangeSourceFilterAsync()

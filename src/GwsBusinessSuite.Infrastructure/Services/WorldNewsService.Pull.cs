@@ -134,7 +134,7 @@ public sealed partial class WorldNewsService
             if (report is null) note ??= "The read didn't finish: " + Status;
 
             SetPullStatus("Regrouping stories...");
-            var regroup = await RegroupCoreAsync(string.IsNullOrWhiteSpace(username) ? "a pull" : username, ct);
+            var regroup = await RegroupCoreAsync(string.IsNullOrWhiteSpace(username) ? "a pull" : username, ct, skipAiChecks: true);
             var corroborated = await Task.Run(() => thin.Count(e => Store.Event(e.Id) is { OutletCount: > 1 }), ct);
             LastPull = new PullSummary(DateTimeOffset.UtcNow, username, report?.Added ?? 0, report?.NewEvents ?? 0, report?.UpdatedEvents ?? 0,
                 (report?.MergedEvents ?? 0) + regroup.Merged, corroborated, thin.Count, searches, crawlQueued, plan, note ?? regroup.Note,
@@ -237,9 +237,9 @@ public sealed partial class WorldNewsService
     // Asks the AI about the closest pairs below the merge threshold (a few a run, at background
     // priority, standing aside for anyone chatting), then compares every active story with every
     // other, merging the AI's confirmed pairs and never the ones kept apart.
-    private async Task<RegroupSummary> RegroupCoreAsync(string actor, CancellationToken ct)
+    private async Task<RegroupSummary> RegroupCoreAsync(string actor, CancellationToken ct, bool skipAiChecks = false)
     {
-        var calls = _regroupAiChecks == 0 ? [] : await Task.Run(() => _pipeline.CloseCalls(CloseCallBand, _regroupAiChecks), ct);
+        var calls = skipAiChecks || _regroupAiChecks == 0 ? [] : await Task.Run(() => _pipeline.CloseCalls(CloseCallBand, _regroupAiChecks), ct);
         var confirmed = new HashSet<(string, string)>();
         var asked = 0;
         var apart = 0;

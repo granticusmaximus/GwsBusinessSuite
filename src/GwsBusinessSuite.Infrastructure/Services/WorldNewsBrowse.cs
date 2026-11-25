@@ -68,7 +68,7 @@ public static class WorldNewsBrowse
     {
         WorldNewsTab.Today => [(3, "Last 3 hours"), (24, "Last 24 hours")],
         WorldNewsTab.Reports => [(24, "Last 24 hours"), (72, "Last 3 days"), (168, "Last 7 days"), (720, "Last 30 days")],
-        _ => [(24, "Last 24 hours"), (72, "Last 3 days"), (168, "Last 7 days")]
+        _ => [(24, "Last 24 hours"), (72, "Last 3 days"), (168, "Last 7 days"), (720, "Last 30 days")]
     };
 
     // A range the tab offers: the asked-for one, else the tab's default.
