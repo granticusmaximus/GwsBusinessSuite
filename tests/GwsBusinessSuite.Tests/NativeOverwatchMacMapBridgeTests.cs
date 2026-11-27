@@ -203,6 +203,30 @@ public sealed class NativeOverwatchMacMapBridgeTests
         NativeOverwatchOperations.All.Should().Contain(NativeOverwatchOperations.Selectable);
     }
 
+    // 27-11-26, found by the Overwatch visual tour: turning 3D on during a fly-to stopped the flight
+    // halfway, and 3D showed Apple's shop and landmark pins that the flat map hides.
+    [Fact]
+    public void MacMap_3D_ShouldFinishTheFlight_AndHideApplesPlaces()
+    {
+        var bridge = File.ReadAllText(Path.Combine(RepoRoot, "src/GwsBusinessSuite.App/Platforms/MacCatalyst/MacNativeOverwatchBridge.cs"));
+        var threeD = bridge[bridge.IndexOf("private void SetThreeD(", StringComparison.Ordinal)..bridge.IndexOf("private void MapTap(", StringComparison.Ordinal)];
+        threeD.Should().Contain("var (centre, distance) = _flyTarget ?? (_map.CenterCoordinate, camera.CenterCoordinateDistance);")
+            .And.Contain("PointOfInterestFilter = MKPointOfInterestFilter.FilterExcludingAllCategories");
+        bridge.Should().Contain("_flyTarget = (new CLLocationCoordinate2D(latitude, longitude), height);")
+            .And.Contain("owner.ArrivedIfFlying();");
+    }
+
+    // The Mac look (26-11-26): a fly-to puts the Apple map's camera at the height the page asked for,
+    // like the web globe; the old span of height / 55,000 degrees showed four times the area.
+    [Fact]
+    public void MacMap_ShouldFlyToTheRequestedHeight_LikeTheWebGlobe()
+    {
+        var bridge = File.ReadAllText(Path.Combine(RepoRoot, "src/GwsBusinessSuite.App/Platforms/MacCatalyst/MacNativeOverwatchBridge.cs"));
+        var flyTo = bridge[bridge.IndexOf("private void FlyTo(", StringComparison.Ordinal)..bridge.IndexOf("private void FlyToBounds(", StringComparison.Ordinal)];
+        flyTo.Should().Contain("MKMapCamera.CameraLookingAtCenterCoordinate(new CLLocationCoordinate2D(latitude, longitude), height, 0, _map.Camera.Heading)")
+            .And.NotContain("/ 55_000");
+    }
+
     // Night Ops phase 6 (20-11-26): the Apple map reports its camera to the page (stage chip, HUD
     // readout, night mode), throttled; dims itself at night from the shared values; and 3D is
     // Apple's realistic elevation, with contours and slope kept off the page.

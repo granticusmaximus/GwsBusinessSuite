@@ -199,10 +199,16 @@ public sealed partial class HazardLayerService(
         }
         catch (Exception ex) when (ex is HttpRequestException or JsonException or TaskCanceledException or KeyNotFoundException or InvalidOperationException)
         {
+            // A failure is remembered for a while (27-11-26): GDACS hanging to the 25-second timeout made
+            // every pan and refresh wait for it again, so the whole layer drew nothing for 25 s each time.
             logger.LogWarning(ex, "Hazard layer {Key} failed", key);
+            cache.Set(key, (IReadOnlyList<HazardFeature>)[], SourceRetryAfter);
             return [];
         }
     }
+
+    // How long a hazard source that failed is left before it's asked again.
+    public static readonly TimeSpan SourceRetryAfter = TimeSpan.FromMinutes(5);
 
     public static IReadOnlyList<HazardFeature> ParseQuakes(string json)
     {

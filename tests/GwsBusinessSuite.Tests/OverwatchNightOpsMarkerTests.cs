@@ -1,4 +1,6 @@
+using System.Text.RegularExpressions;
 using FluentAssertions;
+using GwsBusinessSuite.Application.Overwatch;
 
 namespace GwsBusinessSuite.Tests;
 
@@ -11,22 +13,29 @@ public sealed class OverwatchNightOpsMarkerTests
 
     private static string Script => File.ReadAllText(Path.Combine(RepoRoot, "src/GwsBusinessSuite.Web/wwwroot/js/tactical-globe.js"));
 
+    // The Mac look (26-11-26, Grant: the Mac app is the reference): web pins are the Mac's discs. Every
+    // SF Symbol the Mac can draw (NativeShapes.Marker) has its Bootstrap Icons twin on the web, and the
+    // web's tones are NativeShapes.ToneHex. The drawn-pin check is in OverwatchNightOpsBrowserTests.
     [Fact]
-    public void Markers_ShouldComeFromOneCachedGlyphSet()
+    public void WebPins_ShouldBeTheMacDiscs_WithAnIconForEverySymbolTheMacUses()
     {
         var js = Script;
-        js.Should().Contain("function markerGlyph(name, variant)")
-            .And.Contain("const cached = markerGlyphs.get(key);")
-            .And.Contain("markerGlyphs.set(key, image);", "each glyph is drawn to a canvas once");
-        foreach (var glyph in new[] { "chevron", "diamond", "dot", "ring-dot", "lens", "cone", "wedge", "snowflake", "plate", "viewer",
-                     "outline", "heat", "triangle", "aqi", "hexagon", "rings", "crossed", "cross-circle", "diamond-outline", "shield", "bolt", "arcs" })
+        var shapes = File.ReadAllText(Path.Combine(RepoRoot, "src/GwsBusinessSuite.Application/Overwatch/NativeShapes.cs"));
+        var marker = shapes[shapes.IndexOf("public static MarkerStyle Marker(", StringComparison.Ordinal)..shapes.IndexOf("private static string? Text(", StringComparison.Ordinal)];
+        var macSymbols = Regex.Matches(marker, "new\\(\"(?<s>[a-z0-9.]+)\"").Select(m => m.Groups["s"].Value).ToHashSet();
+        macSymbols.Should().Contain(["airplane", "camera.fill", "newspaper.fill", "mappin"]);
+        var table = Regex.Match(js, @"const SF_TO_BI = \{(?<t>[\s\S]*?)\};").Groups["t"].Value;
+        var webSymbols = Regex.Matches(table, "'(?<s>[a-z0-9.]+)': '").Select(m => m.Groups["s"].Value).ToHashSet();
+        macSymbols.Except(webSymbols).Should().BeEmpty("every symbol the Mac map draws has an icon on the web");
+
+        foreach (var tone in Enum.GetValues<NativeShapes.MarkerTone>())
         {
-            js.Should().Contain($"case '{glyph}':", $"the kit glyph '{glyph}' is drawn");
+            var hex = NativeShapes.ToneHex(tone);
+            if (hex == "#59f07a") js.Should().NotContain($"{tone}: '#", $"{tone} falls back to the Night Ops green, as on the Mac");
+            else js.Should().Contain($"{tone}: '{hex}'", $"the web's {tone} is the Mac's");
         }
-        js.Should().Contain("const aircraftIcon = markerGlyph('chevron');")
-            .And.Contain("const shipIcon = markerGlyph('diamond');")
-            .And.Contain("image: markerGlyph('wedge'),")
-            .And.Contain("case 'tg-travel':")
+        js.Should().Contain("styleMacCluster(clusteredEntities, cluster);", "groups are the Mac's count discs")
+            .And.Contain("const MAC_CALLOUT_FONT = 'bold 10px Menlo", "callouts use the Mac's Menlo Bold box")
             .And.Contain("hatchLines(ring).forEach(", "weather alerts are hatched with plain lines, not a pattern material");
     }
 

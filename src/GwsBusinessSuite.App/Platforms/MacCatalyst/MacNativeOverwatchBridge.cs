@@ -36,6 +36,10 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
     private IReadOnlySet<string>? _focus;
 
     // A zoom of more than half again either way regroups the crowded layers.
+    // Any move that ends (the fly-to arriving, or a drag cutting it short) drops the target, so 3D
+    // never jumps back to an old destination.
+    internal void ArrivedIfFlying() => _flyTarget = null;
+
     internal void RegroupIfZoomed()
     {
         var span = _map.Region.Span.LongitudeDelta;
@@ -244,6 +248,9 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
         });
     }
 
+    // Where a fly-to is heading until the map arrives (RegionChanged clears it).
+    private (CLLocationCoordinate2D Centre, double Distance)? _flyTarget;
+
     private void ApplySafely(string operation, object?[] arguments)
     {
         var started = Stopwatch.GetTimestamp();
@@ -333,6 +340,13 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
             case "setTrafficFlow": SetTrafficFlow(arguments); return;
             case "clearTimeMachine": SetTimeMachine([]); return;
             case "setRadarVisible": _radarVisible = arguments.LastOrDefault() is true; RefreshRadar(); return;
+#if DEBUG
+            // The Overwatch visual tour (OverwatchSelfTest, Debug builds only).
+            case "selfTestShot": SelfTestShot(arguments); return;
+            case "selfTestSelect": SelfTestSelect(arguments); return;
+            case "selfTestLog": SelfTestWrite("tour.log", arguments.ElementAtOrDefault(1)?.ToString() + "\n", append: true); SelfTestDone(arguments, true); return;
+            case "selfTestReport": SelfTestWrite("report.txt", arguments.ElementAtOrDefault(1)?.ToString() ?? "", append: false); SelfTestDone(arguments, true); return;
+#endif
             case "home":
                 _map.SetRegion(new MKCoordinateRegion(new CLLocationCoordinate2D(20, 0), new MKCoordinateSpan(140, 340)), true);
                 return;
@@ -473,8 +487,12 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
     {
         var offset = arguments.FirstOrDefault() is string ? 1 : 0;
         if (!AsDouble(arguments.ElementAtOrDefault(offset), out var latitude) || !AsDouble(arguments.ElementAtOrDefault(offset + 1), out var longitude)) return;
-        var span = AsDouble(arguments.ElementAtOrDefault(offset + 2), out var height) ? Math.Clamp(height / 55_000, 0.002, 160) : 0.08;
-        _map.SetRegion(new MKCoordinateRegion(new CLLocationCoordinate2D(latitude, longitude), new MKCoordinateSpan(span, span)), true);
+        // The camera at the height the page asked for, looking straight down, as the web globe flies
+        // (26-11-26). A region span of height / 55,000 degrees put the Mac about four times higher than
+        // the web for the same request (4,500 km became 18,000 km), so the two apps showed different areas.
+        var height = AsDouble(arguments.ElementAtOrDefault(offset + 2), out var asked) ? Math.Clamp(asked, 150, 40_000_000) : 8_800;
+        _flyTarget = (new CLLocationCoordinate2D(latitude, longitude), height);
+        _map.SetCamera(MKMapCamera.CameraLookingAtCenterCoordinate(new CLLocationCoordinate2D(latitude, longitude), height, 0, _map.Camera.Heading), true);
     }
 
     private void FlyToBounds(object?[] arguments)
@@ -555,10 +573,18 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
     private void SetThreeD(object?[] arguments)
     {
         var enabled = arguments.LastOrDefault() is true;
-        _map.PreferredConfiguration = new MKHybridMapConfiguration(enabled ? MKMapElevationStyle.Realistic : MKMapElevationStyle.Flat);
+        // The configuration carries its own points-of-interest filter: without it, 3D showed Apple's
+        // restaurant and landmark pins that the flat map and the web leave out (27-11-26).
+        _map.PreferredConfiguration = new MKHybridMapConfiguration(enabled ? MKMapElevationStyle.Realistic : MKMapElevationStyle.Flat)
+        {
+            PointOfInterestFilter = MKPointOfInterestFilter.FilterExcludingAllCategories
+        };
         var camera = _map.Camera;
+        // Mid-flight, tilt at where the flight is going, not where it is now (27-11-26: turning 3D on
+        // during a fly-to stopped the flight halfway, over New Mexico on the way to San Francisco).
+        var (centre, distance) = _flyTarget ?? (_map.CenterCoordinate, camera.CenterCoordinateDistance);
         _map.SetCamera(MKMapCamera.CameraLookingAtCenterCoordinate(
-            _map.CenterCoordinate, camera.CenterCoordinateDistance, (nfloat)(enabled ? ThreeDPitch : 0), camera.Heading), true);
+            centre, distance, (nfloat)(enabled ? ThreeDPitch : 0), camera.Heading), true);
     }
 
     private void MapTap(object?[] arguments)
@@ -1203,6 +1229,72 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
     // (KVO on "coordinate") to re-file the pin in its quad trie. The trie went stale and the next
     // AddAnnotations crashed in MKQuadTrie _insert (EXC_BAD_ACCESS at 0x20): 19-11-26 twice (blamed on
     // our own grouping) and 21-11-26.
+#if DEBUG
+    // The Overwatch visual tour (OverwatchSelfTest, Debug builds only): pictures of the window (the
+    // Apple map with the page over it) and a pin's window opened through the real click path.
+    private static readonly string SelfTestFolder = Path.Combine(
+        NSFileManager.DefaultManager.GetUrls(NSSearchPathDirectory.DownloadsDirectory, NSSearchPathDomain.User)[0].Path ?? Path.GetTempPath(),
+        "gws-overwatch-selftest", DateTime.Now.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture));
+
+    private static readonly Dictionary<string, string> SelfTestOperations = new(StringComparer.Ordinal)
+    {
+        ["cameras"] = "setCameraPins", ["roadtemps"] = "setRoadWeather", ["incidents"] = "setTrafficIncidents",
+        ["signs"] = "setMessageSigns", ["world-news"] = "setWorldNews", ["convergence"] = "setConvergence",
+        ["conflict"] = "setConflict", ["travel"] = "setTravelAdvice", ["humanitarian"] = "setHumanitarian",
+        ["hazards"] = "setHazards", ["wmo"] = "setWeatherWarnings", ["outages"] = "setPowerOutages",
+        ["internet"] = "setInternetOutages", ["fires"] = "setFireHotspots", ["aircraft"] = "setAircraft",
+        ["airquality"] = "setAirQuality", ["airports"] = "setAirportStatus", ["satellites"] = "setSatellites",
+        ["ships"] = "setShips", ["chokepoints"] = "setChokepoints", ["coverage"] = "setCoverageMarkers",
+    };
+
+    private void SelfTestDone(object?[] arguments, bool result)
+    {
+        var id = arguments.ElementAtOrDefault(0) is double number ? number.ToString(CultureInfo.InvariantCulture) : "0";
+        _ = SendAsync($"window.__owHostDone && window.__owHostDone({id}, {(result ? "true" : "false")})");
+    }
+
+    private static void SelfTestWrite(string file, string text, bool append)
+    {
+        Directory.CreateDirectory(SelfTestFolder);
+        var path = Path.Combine(SelfTestFolder, file);
+        if (append) File.AppendAllText(path, text); else File.WriteAllText(path, text);
+    }
+
+    // MapKit draws with Metal, which no in-app capture can read (the map came out blank, 26-11-26),
+    // so the picture is taken from outside the app: this writes the name to shot-request.txt and
+    // waits up to 20 s for a watcher (screencapture -l <window>) to save <name>.png and remove it.
+    private void SelfTestShot(object?[] arguments)
+    {
+        var name = new string((arguments.ElementAtOrDefault(1)?.ToString() ?? "shot").Select(c => char.IsLetterOrDigit(c) || c == '-' ? c : '_').ToArray());
+        Directory.CreateDirectory(SelfTestFolder);
+        var request = Path.Combine(SelfTestFolder, "shot-request.txt");
+        File.WriteAllText(request, name);
+        _ = Task.Run(async () =>
+        {
+            for (var i = 0; i < 80 && File.Exists(request); i++) await Task.Delay(250);
+            MainThread.BeginInvokeOnMainThread(() => SelfTestDone(arguments, !File.Exists(request)));
+        });
+    }
+
+    // Opens the window of a pin of the layer that's in view, preferring single pins to count discs.
+    private void SelfTestSelect(object?[] arguments)
+    {
+        var key = arguments.ElementAtOrDefault(1)?.ToString() ?? "";
+        if (!SelfTestOperations.TryGetValue(key, out var operation) || !_annotations.TryGetValue(operation, out var pins))
+        {
+            SelfTestDone(arguments, false);
+            return;
+        }
+        var area = _map.VisibleMapRect;
+        var visible = pins.Values.OfType<NativeAnnotation>().Where(pin => area.Contains(MKMapPoint.FromCoordinate(pin.Coordinate))).ToList();
+        var pick = visible.FirstOrDefault(pin => !(ReadString(pin.Payload, "id")?.StartsWith("group:", StringComparison.Ordinal) ?? false))
+            ?? visible.FirstOrDefault() ?? pins.Values.OfType<NativeAnnotation>().FirstOrDefault();
+        if (pick is null) { SelfTestDone(arguments, false); return; }
+        Activate(pick);
+        SelfTestDone(arguments, true);
+    }
+#endif
+
     private sealed class NativeAnnotation : MKPointAnnotation
     {
         public NativeAnnotation(string operation, Dictionary<string, object?> payload, CLLocationCoordinate2D coordinate)
@@ -1467,6 +1559,7 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
 
         public override void RegionChanged(MKMapView mapView, bool animated)
         {
+            owner.ArrivedIfFlying();
             owner.UpdateHolo();
             owner.RegroupIfZoomed();
             owner.RegionDidChange(mapView.Region);

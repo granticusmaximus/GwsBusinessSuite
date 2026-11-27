@@ -1084,17 +1084,37 @@
 }
 
 /* Night mode (phase 5, 20-11-26): when the sun is down at the centre of the view the map dims and the
-   grain strengthens, like a tube turned up. Day leaves both as they were. */
-.tg-viewport {
-    transition: filter 1.2s ease;
+   grain strengthens, like a tube turned up. Day leaves both as they were. The dimming is the Mac's
+   (26-11-26, Mac look): plain black over the map and its pins, 18% at dusk and 38% at night
+   (OverwatchMapLook.DuskDim / NightDim), easing over 1.2 s. On the Mac the native map dims itself under
+   the transparent page, so the shade here is web only (gws-native-overwatch is the Mac's Apple map). */
+.tg-viewport::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    background: #000;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 1.2s ease;
 }
 
-.tg-shell[data-ow-night="dusk"] .tg-viewport {
-    filter: brightness(0.82);
+.tg-shell[data-ow-night="dusk"] .tg-viewport::after {
+    opacity: 0.18;
 }
 
-.tg-shell[data-ow-night="night"] .tg-viewport {
-    filter: brightness(0.62) contrast(1.12);
+.tg-shell[data-ow-night="night"] .tg-viewport::after {
+    opacity: 0.38;
+}
+
+html.gws-native-overwatch .tg-viewport::after {
+    display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .tg-viewport::after {
+        transition: none;
+    }
 }
 
 .tg-shell[data-ow-night="night"][data-ow-stage="regional"] .tg-grain,
@@ -1366,6 +1386,10 @@
     }
     .tg-toolbar .tg-topbar-center { justify-content: stretch; }
     .tg-toolbar .tg-search { max-width: none; }
+    /* 27-11-26 visual tour (tablet, 820 wide): Layers, the title and the four looks didn't fit and ran
+       into each other. The title goes first (it goes below 720 anyway); the row never spills over. */
+    .tg-toolbar-title { display: none; }
+    .tg-toolbar .tg-topbar-left { min-width: 0; overflow: hidden; }
 }
 
 /* Sidebar (Layers) docked left, inspector docked right, both under the toolbar. */
@@ -1647,6 +1671,9 @@
         border-left: none;
         border-right: none;
         border-bottom: none;
+        /* 27-11-26 visual tour (phone): at 50% the pins and place names behind showed through the
+           sheet's text wherever the blur isn't drawn (some WebKit builds, the Mac's native map). */
+        background-color: var(--ow-glass-sheet, rgb(4 14 8 / 0.92));
     }
 
     .tg-shell:has(.tg-layers-panel:not(.is-hidden)) .tg-side-panel { display: none; }

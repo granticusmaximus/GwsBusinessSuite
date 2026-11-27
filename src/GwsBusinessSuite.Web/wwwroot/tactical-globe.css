@@ -15,6 +15,7 @@
     --ow-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", Inter, system-ui, sans-serif;
     --ow-figures: "SF Mono", ui-monospace, "IBM Plex Mono", Menlo, Consolas, monospace;
     --ow-glass: rgb(4 14 8 / 0.5);
+    --ow-glass-sheet: rgb(4 14 8 / 0.92); /* phone bottom sheets: text over a busy map */
     --ow-glass-solid: #06110a;
     --ow-glass-blur: blur(18px) saturate(140%);
     --ow-edge: rgb(var(--ow-accent-rgb) / 0.45);
@@ -44,6 +45,7 @@
     --ow-ink: #f2f5f3;
     --ow-muted: #9aa39d;
     --ow-glass: rgb(22 24 23 / 0.55);
+    --ow-glass-sheet: rgb(22 24 23 / 0.94);
     --ow-glass-solid: #1c1e1d;
     --ow-edge: rgb(255 255 255 / 0.14);
     --ow-glow: none;

@@ -206,23 +206,6 @@ window.tacticalGlobe = (function () {
         entry.viewer.scene.requestRender();
     }
 
-    // A callout box beside an item the server picked (OverwatchCallouts: at most three in view),
-    // the same text the Mac map draws beside the pin.
-    function calloutLabel(text, colour) {
-        return {
-            text: text,
-            font: '600 11px "JetBrains Mono", ui-monospace, monospace',
-            fillColor: Cesium.Color.fromCssColorString(colour || '#b8ffd6'),
-            showBackground: true,
-            backgroundColor: Cesium.Color.fromCssColorString('#020c07').withAlpha(0.88),
-            backgroundPadding: new Cesium.Cartesian2(7, 5),
-            horizontalOrigin: Cesium.HorizontalOrigin.LEFT,
-            verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
-            pixelOffset: new Cesium.Cartesian2(14, -12),
-            disableDepthTestDistance: 0
-        };
-    }
-
     async function applyHoloLook(viewer, streets) {
         const scene = viewer.scene;
         const green = Cesium.Color.fromCssColorString(HOLO.green);
@@ -266,15 +249,16 @@ window.tacticalGlobe = (function () {
         } catch (err) {
             console.warn('Overwatch: the coastlines could not be loaded', err);
         }
+        const gridLines = [];
         for (let lon = -180; lon < 180; lon += HOLO.gridStep) {
-            land.entities.add({ polyline: { positions: Cesium.Cartesian3.fromDegreesArray([lon, -85, lon, 0, lon, 85]), width: 1,
-                arcType: Cesium.ArcType.GEODESIC, material: green.withAlpha(HOLO.gridAlpha) } });
+            gridLines.push(land.entities.add({ polyline: { positions: Cesium.Cartesian3.fromDegreesArray([lon, -85, lon, 0, lon, 85]), width: 1,
+                arcType: Cesium.ArcType.GEODESIC, material: green.withAlpha(HOLO.gridAlpha) } }));
         }
         for (let lat = -75; lat <= 75; lat += HOLO.gridStep) {
             const line = [];
             for (let lon = -180; lon <= 180; lon += 5) line.push(lon, lat);
-            land.entities.add({ polyline: { positions: Cesium.Cartesian3.fromDegreesArray(line), width: 1,
-                arcType: Cesium.ArcType.RHUMB, material: green.withAlpha(HOLO.gridAlpha) } });
+            gridLines.push(land.entities.add({ polyline: { positions: Cesium.Cartesian3.fromDegreesArray(line), width: 1,
+                arcType: Cesium.ArcType.RHUMB, material: green.withAlpha(HOLO.gridAlpha) } }));
         }
         await viewer.dataSources.add(land);
         const shell = viewer.container && viewer.container.closest ? viewer.container.closest('.tg-shell') : null;
@@ -290,12 +274,15 @@ window.tacticalGlobe = (function () {
                 if (stageName) stageName.textContent = stage.toUpperCase();
             }
             updateReadout(viewer, height);
-            // The Satellite look (setLook) shows real aerial imagery at every height, so the
-            // green land, grid, dark streets and wash stay hidden under it. Holo Earth layers
-            // glowing coastlines, the 15-degree grid, and a subtle wash over real aerial imagery.
+            // The Mac look (26-11-26, Grant: the Mac app's globe is the reference). Standard and Night
+            // Ops are Apple's globe as the Mac shows it: real imagery in natural colour with the sky's
+            // atmosphere and stars, the glowing green coastlines and borders on top (no green land
+            // fill, no grid), and from 400 km down the green-washed street map fading in, with the roads
+            // overlay faint and fading as it does. Satellite is imagery at every height with roads and names, like
+            // Apple's hybrid map. Holo Earth keeps its toned imagery, grid and wash.
             const satellite = holo.look === 'satellite';
             const holoEarth = holo.look === 'holo-earth';
-            const showEarthAtmosphere = !isMacCatalyst && (satellite || holoEarth);
+            const showEarthAtmosphere = !isMacCatalyst;
             try {
                 scene.globe.showGroundAtmosphere = showEarthAtmosphere;
                 if (scene.skyAtmosphere) scene.skyAtmosphere.show = showEarthAtmosphere;
@@ -303,13 +290,24 @@ window.tacticalGlobe = (function () {
                 scene.fog.enabled = showEarthAtmosphere;
                 scene.fog.renderable = showEarthAtmosphere;
             } catch (err) { /* best effort */ }
-            landPolygons.forEach(function (poly) { poly.show = !holoEarth; });
+            landPolygons.forEach(function (poly) { poly.show = false; });
+            gridLines.forEach(function (line) { line.show = holoEarth; });
             if (streets) streets.alpha = (satellite || holoEarth) ? 0 : share * HOLO.streetAlpha;
+            // The street map is the base layer, under the imagery: the imagery fades out as it fades in.
+            if (holo.imagery) holo.imagery.alpha = (satellite || holoEarth) ? 1 : 1 - share;
             if (wash) wash.alpha = satellite ? 0 : holoEarth ? 0.08 + share * 0.12 : share * HOLO.washAlpha;
             land.show = !satellite && (holoEarth || share < 0.98);
+            // Names and roads as Apple's map shows them over its globe: place names until the street map
+            // is fully in, roads faintly (full strength in Satellite and Holo Earth).
+            if (holo.labels) {
+                const overImagery = satellite || holoEarth || share < 0.98;
+                holo.labels.places.show = overImagery;
+                holo.labels.roads.show = overImagery;
+                holo.labels.roads.alpha = satellite || holoEarth ? 1 : 0.45 * (1 - share);
+            }
             scene.requestRender();
         };
-        const holo = { look: 'night-ops', imagery: null, fade: fade };
+        const holo = { look: 'night-ops', imagery: null, labels: null, fade: fade };
         viewer._tgHolo = holo;
         viewer.camera.percentageChanged = 0.05;
         viewer.camera.changed.addEventListener(fade);
@@ -317,44 +315,16 @@ window.tacticalGlobe = (function () {
         return land;
     }
 
-    function createPinBillboardImage(outlineColor, outlineWidth) {
-        const size = 28;
-        const canvas = document.createElement('canvas');
-        canvas.width = size;
-        canvas.height = size;
-        const ctx = canvas.getContext('2d');
-        const radius = (size - outlineWidth) / 2 - 1;
-        ctx.beginPath();
-        ctx.arc(size / 2, size / 2, radius, 0, Math.PI * 2);
-        ctx.fillStyle = '#ffffff';
-        ctx.fill();
-        ctx.lineWidth = outlineWidth;
-        ctx.strokeStyle = outlineColor;
-        ctx.stroke();
-        return canvas.toDataURL();
-    }
-
-    const pinBillboardImage = createPinBillboardImage('#05080a', 2);
-    const pinBillboardImageSelected = createPinBillboardImage('#b8ffd6', 4);
-
-    // Camera pins by what the camera offers (19-11-26, camera availability phase 3), by shape so
-    // colour isn't the only cue (billboard.color stays the alert tint). Night Ops kit (20-11-26): a
-    // lens square for a still image, the same with a camcorder tab for live video, hollow when the
-    // camera was found not working, and a ring around it while it sits inside a weather alert.
-    // The camera window says the same in words.
+    // Camera pins by what the camera offers (19-11-26, camera availability phase 3), as the Mac
+    // draws them (26-11-26): camera, video camera, or a dim warning when found not working; the red
+    // alert disc inside a weather alert; the bright rim when selected for the watch wall.
     function cameraPinImage(pin, selected, alert) {
-        const parts = [];
-        if (pin && pin.mode === 'LiveVideo') parts.push('video');
-        if (pin && pin.state === 'Unavailable') parts.push('hollow');
-        if (selected) parts.push('selected');
-        if (alert) parts.push('alert');
-        return markerGlyph('lens', parts.join('-'));
+        const style = macMarker(alert ? 'setCameraAlertHighlights' : 'setCameraPins', pin || {});
+        return macDisc(style.symbol, style.tone, style.prominent, selected);
     }
 
-    // World News pins carry their story's Bootstrap icon (18-11-26). Same white-fill pin, with the
-    // glyph cut in near-black so the purple tint colours only the disc. Until the icon font has
-    // loaded, a pin is the plain disc; setWorldNews redraws once it has.
-    const iconPinImages = new Map();
+    // The Bootstrap Icons font draws the symbol inside every Mac-look disc (macDisc). Until it has
+    // loaded a disc is drawn plain; init waits for it, and setWorldNews redraws once it arrives.
     let iconFontReady = false;
     let iconFontWaiting = null;
 
@@ -382,45 +352,13 @@ window.tacticalGlobe = (function () {
         return false;
     }
 
-    // World News pins are kit hexagons with the story's Bootstrap icon cut in near-black.
-    function iconPinImage(name) {
-        if (!name || !iconFontReady) return markerGlyph('hexagon');
-        if (iconPinImages.has(name)) return iconPinImages.get(name);
-        const glyph = iconGlyph(name);
-        if (!glyph) {
-            iconPinImages.set(name, markerGlyph('hexagon'));
-            return markerGlyph('hexagon');
-        }
-        const size = 56;
-        const canvas = document.createElement('canvas');
-        canvas.width = canvas.height = size;
-        const ctx = canvas.getContext('2d');
-        ctx.translate(size / 2, size / 2);
-        const points = [];
-        for (let i = 0; i < 6; i++) points.push([Math.cos(Math.PI / 6 + i * Math.PI / 3) * 25, Math.sin(Math.PI / 6 + i * Math.PI / 3) * 25]);
-        polygonPath(ctx, points);
-        glyphSolid(ctx, GLYPH_EDGE, 4);
-        ctx.fillStyle = GLYPH_EDGE;
-        ctx.font = '26px "bootstrap-icons"';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(glyph, 0, 1);
-        const image = canvas.toDataURL();
-        iconPinImages.set(name, image);
-        return image;
-    }
-    // Night Ops marker kit (combined design, 20-11-26): one glyph per layer, drawn to a canvas once
-    // and cached by name. Like the pins above, each glyph is a white shape with a near-black edge, so
-    // billboard.color tints the shape and the edge stays dark. A faint backing disc keeps the whole
-    // square clickable (Cesium drops fully transparent billboard pixels when picking), so hollow
-    // shapes pick as easily as solid ones. The Mac keeps its SF Symbols (NativeShapes.Style).
+    // What's left of the Night Ops kit (20-11-26) after the Mac-look discs (26-11-26): the thermal
+    // glows, and the dots and wedges of the tools (route stops, route conditions, measure points).
+    // Each is drawn to a canvas once and cached; billboard.color tints the white shape. A faint
+    // backing disc keeps the whole square clickable (Cesium drops fully transparent pixels when picking).
     const GLYPH_SIZE = 48;
     const GLYPH_EDGE = '#05080a';
     const markerGlyphs = new Map();
-    const hazardKindLetters = {
-        earthquake: 'E', wildfire: 'W', cyclone: 'C', flood: 'F', river: 'F', volcano: 'V', drought: 'D',
-        landslide: 'L', dust: 'H', ice: 'I', tsunami: 'T'
-    };
 
     function glyphSolid(ctx, edge, width) {
         ctx.fillStyle = '#ffffff';
@@ -428,17 +366,6 @@ window.tacticalGlobe = (function () {
         ctx.lineJoin = 'round';
         ctx.lineWidth = width || 3;
         ctx.strokeStyle = edge || GLYPH_EDGE;
-        ctx.stroke();
-    }
-
-    function glyphHollow(ctx, edge) {
-        ctx.lineJoin = 'round';
-        ctx.lineCap = 'round';
-        ctx.lineWidth = 8;
-        ctx.strokeStyle = edge || GLYPH_EDGE;
-        ctx.stroke();
-        ctx.lineWidth = 3.5;
-        ctx.strokeStyle = '#ffffff';
         ctx.stroke();
     }
 
@@ -456,9 +383,8 @@ window.tacticalGlobe = (function () {
         ctx.closePath();
     }
 
-    // name: a kit glyph; variant: what changes the drawing (a severity, a letter, a level, 'selected').
-    function markerGlyph(name, variant) {
-        const key = name + (variant ? ':' + variant : '');
+    function markerGlyph(name) {
+        const key = name;
         const cached = markerGlyphs.get(key);
         if (cached) return cached;
         const canvas = document.createElement('canvas');
@@ -469,18 +395,275 @@ window.tacticalGlobe = (function () {
         ctx.arc(0, 0, GLYPH_SIZE / 2 - 1, 0, Math.PI * 2);
         ctx.fillStyle = 'rgba(255, 255, 255, 0.02)';
         ctx.fill();
-        drawGlyph(ctx, name, variant || '');
+        drawGlyph(ctx, name);
         const image = canvas.toDataURL();
         markerGlyphs.set(key, image);
         return image;
     }
 
-    function drawGlyph(ctx, name, variant) {
+    // The Mac look on the web (26-11-26, Grant: the Mac app's Overwatch is the reference). Every pin
+    // is the Mac map's disc (MacNativeOverwatchBridge.MapDelegate.Disc): the tone's colour, a 1.5 px
+    // near-black rim and the symbol in near-black (white on red), 24 px, or 30 px when prominent.
+    // macMarker is NativeShapes.Marker line for line (same operation names, same item fields), and
+    // MAC_TONES is NativeShapes.ToneHex; OverwatchMacLookBrowserTests checks both against the C#.
+    // Apple's SF Symbols can't ship on the web, so each maps to its Bootstrap Icons twin (the font
+    // App.razor already loads).
+    const MAC_TONES = { Red: '#ff3b3b', Orange: '#ffb000', Yellow: '#ffb000', Gray: '#3f8f62' };
+    const MAC_GREEN = '#59f07a';
+    const MAC_BRIGHT = '#b8ffd6';
+    function macToneHex(tone) { return MAC_TONES[tone] || MAC_GREEN; }
+    const SF_TO_BI = {
+        'airplane': 'airplane-fill', 'airplane.circle.fill': 'airplane-fill', 'airplane.departure': 'airplane-engines-fill',
+        'antenna.radiowaves.left.and.right.circle.fill': 'broadcast', 'aqi.medium': 'cloud-haze2-fill',
+        'arrow.left.arrow.right': 'arrow-left-right', 'binoculars.fill': 'binoculars-fill', 'bolt.fill': 'lightning-fill',
+        'bolt.trianglebadge.exclamationmark.fill': 'lightning-charge-fill', 'camera.badge.ellipsis': 'camera-reels-fill',
+        'camera.fill': 'camera-fill', 'car.side.fill': 'car-front-fill', 'clock.arrow.circlepath': 'clock-history',
+        'cloud.bolt.rain.fill': 'cloud-lightning-rain-fill', 'cross.case.fill': 'bandaid-fill', 'cross.fill': 'plus-lg',
+        'exclamationmark.octagon.fill': 'exclamation-octagon-fill', 'exclamationmark.triangle.fill': 'exclamation-triangle-fill',
+        'ferry.fill': 'water', 'figure.fall': 'arrow-down-right-circle-fill', 'figure.wave': 'cone-striped', 'flame.fill': 'fire',
+        'globe.americas.fill': 'globe-americas', 'hurricane': 'hurricane', 'lifepreserver.fill': 'life-preserver',
+        'location.fill': 'geo-alt-fill', 'mappin': 'geo-alt-fill', 'mappin.and.ellipse': 'pin-map-fill', 'mountain.2.fill': 'triangle-fill',
+        'newspaper.fill': 'newspaper', 'person.3.fill': 'people-fill', 'sailboat.fill': 'wind', 'scope': 'crosshair',
+        'shield.lefthalf.filled': 'shield-shaded', 'shippingbox.fill': 'box-seam-fill', 'signpost.right.fill': 'signpost-fill',
+        'smoke.fill': 'cloud-haze-fill', 'snowflake': 'snow', 'sparkles': 'stars', 'sun.dust.fill': 'sun-fill', 'target': 'bullseye',
+        'thermometer.medium': 'thermometer-half', 'video.fill': 'camera-video-fill', 'water.waves': 'water',
+        'waveform.path.ecg': 'activity', 'wifi.slash': 'wifi-off'
+    };
+
+    function macText(item, key) {
+        const value = item ? item[key] : null;
+        return value === null || value === undefined ? null : String(value).trim().toLowerCase();
+    }
+    function macStyle(symbol, tone, prominent) { return { symbol: symbol, tone: tone, prominent: !!prominent }; }
+
+    function macMarker(operation, item) {
+        const kind = macText(item, 'kind');
+        const category = macText(item, 'category');
+        const type = macText(item, 'type');
+        const major = macText(item, 'severity') === 'major';
+        const moderate = macText(item, 'severity') === 'moderate';
+        const severityTone = major ? 'Red' : moderate ? 'Orange' : 'Yellow';
+        if (operation === 'setTimeMachine') {
+            switch (category) {
+                case 'aircraft': return macStyle('airplane', 'Cyan');
+                case 'ship': return macStyle('ferry.fill', 'Orange');
+                case 'outage': return macStyle('bolt.fill', 'Pink');
+                case 'earthquake': return macStyle('waveform.path.ecg', 'Red');
+                case 'crash': return macStyle('car.side.fill', 'Red');
+                case 'closure': return macStyle('exclamationmark.octagon.fill', 'Red');
+                default: return macStyle('clock.arrow.circlepath', 'Gray');
+            }
+        }
+        switch (operation) {
+            case 'setCameraPins':
+                if (macText(item, 'state') === 'unavailable') return macStyle('exclamationmark.triangle.fill', 'Gray');
+                if (macText(item, 'mode') === 'livevideo') return macStyle('video.fill', 'Teal');
+                return macStyle('camera.fill', 'Green');
+            case 'setCameraAlertHighlights': return macStyle('camera.badge.ellipsis', 'Red', true);
+            case 'setAircraft':
+                return item && item.emergency && String(item.emergency).trim() ? macStyle('airplane.circle.fill', 'Red', true) : macStyle('airplane', 'Cyan');
+            case 'setShips':
+                switch (type) {
+                    case 'sailing': case 'pleasure craft': return macStyle('sailboat.fill', 'Orange');
+                    case 'cargo': case 'tanker': return macStyle('shippingbox.fill', 'Orange');
+                    case 'search and rescue': return macStyle('lifepreserver.fill', 'Red', true);
+                    case 'medical': return macStyle('cross.case.fill', 'Red', true);
+                    case 'military': case 'law enforcement': return macStyle('shield.lefthalf.filled', 'Gray', true);
+                    default: return macStyle('ferry.fill', 'Orange');
+                }
+            case 'setWorldNews': return macStyle('newspaper.fill', 'Purple');
+            case 'setTrafficIncidents':
+                switch (category) {
+                    case 'crash': return macStyle('car.side.fill', severityTone, major);
+                    case 'closure': return macStyle('exclamationmark.octagon.fill', 'Red', true);
+                    case 'roadwork': return macStyle('figure.wave', severityTone, major);
+                    case 'event': return macStyle('person.3.fill', severityTone, major);
+                    default: return macStyle('exclamationmark.triangle.fill', severityTone, major);
+                }
+            case 'setRoadWeather': return macStyle('thermometer.medium', 'Blue');
+            case 'setMessageSigns': return macStyle('signpost.right.fill', 'Orange');
+            case 'setAirQuality': return macStyle('aqi.medium', 'Green');
+            case 'setPowerOutages': return macStyle('bolt.trianglebadge.exclamationmark.fill', 'Pink', major);
+            case 'setInternetOutages': return macStyle('wifi.slash', 'Red', major);
+            case 'setAirportStatus': return macStyle('airplane.departure', severityTone, major);
+            case 'setChokepoints': return macStyle('arrow.left.arrow.right', severityTone, major);
+            case 'setWeatherWarnings': return macStyle('cloud.bolt.rain.fill', severityTone, major);
+            case 'setTravelAdvice': return macStyle('globe.americas.fill', severityTone, major);
+            case 'setFireHotspots': return macStyle('flame.fill', 'Red', major);
+            case 'setConflict': return macStyle(kind === 'conflict-confirmed' ? 'target' : 'scope', 'Red', major);
+            case 'setHumanitarian': return macStyle('cross.fill', 'Red', major);
+            case 'setSatellites': return macStyle('antenna.radiowaves.left.and.right.circle.fill', 'Cyan');
+            case 'setConvergence': return macStyle('sparkles', 'Orange', true);
+            case 'setCoverageMarkers': return macStyle('binoculars.fill', 'Teal');
+            case 'setMapNotes': return macStyle('mappin.and.ellipse', 'Yellow');
+            case 'setStreetViewMarker': return macStyle('location.fill', 'Blue', true);
+            case 'setPhoto': return macStyle('camera.fill', 'Green', true);
+            case 'setWeatherAlerts': return macStyle('cloud.bolt.rain.fill', 'Red', major);
+            case 'setHazards':
+                switch (kind) {
+                    case 'earthquake': return macStyle('waveform.path.ecg', severityTone, major);
+                    case 'wildfire': case 'hotspot': return macStyle('flame.fill', severityTone, major);
+                    case 'river': case 'flood': return macStyle('water.waves', severityTone, major);
+                    case 'cyclone': return macStyle('hurricane', severityTone, major);
+                    case 'volcano': return macStyle('mountain.2.fill', severityTone, major);
+                    case 'drought': return macStyle('sun.dust.fill', severityTone, major);
+                    case 'landslide': return macStyle('figure.fall', severityTone, major);
+                    case 'dust': return macStyle('smoke.fill', severityTone, major);
+                    case 'ice': return macStyle('snowflake', severityTone, major);
+                    default: return macStyle('exclamationmark.triangle.fill', severityTone, major);
+                }
+            default: return macStyle('mappin', 'Yellow');
+        }
+    }
+
+    // Drawn at twice the size so the disc stays sharp on Retina screens; Cesium shows it at width x height.
+    const MAC_SCALE = 2;
+    const macImages = new Map();
+    function macCanvas(width, height) {
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.ceil(width * MAC_SCALE);
+        canvas.height = Math.ceil(height * MAC_SCALE);
+        const ctx = canvas.getContext('2d');
+        ctx.scale(MAC_SCALE, MAC_SCALE);
+        return { canvas: canvas, ctx: ctx };
+    }
+    function macDiscSize(prominent) { return prominent ? 30 : 24; }
+    function drawMacDisc(ctx, x, y, symbol, tone, prominent, rim) {
+        const size = macDiscSize(prominent);
+        ctx.beginPath();
+        ctx.arc(x + size / 2, y + size / 2, size / 2 - 1, 0, Math.PI * 2);
+        ctx.fillStyle = macToneHex(tone);
+        ctx.fill();
+        ctx.lineWidth = rim ? 3 : 1.5;
+        ctx.strokeStyle = rim || GLYPH_EDGE;
+        ctx.stroke();
+        const glyph = iconFontReady ? iconGlyph(SF_TO_BI[symbol] || SF_TO_BI.mappin) : '';
+        if (!glyph) return;
+        ctx.fillStyle = tone === 'Red' ? '#ffffff' : GLYPH_EDGE;
+        ctx.font = Math.round(size * 0.5) + 'px "bootstrap-icons"';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(glyph, x + size / 2, y + size / 2 + 1);
+    }
+    // The disc for a style (selected adds the bright selection rim, a web extra Grant kept).
+    function macDisc(symbol, tone, prominent, selected) {
+        const key = 'disc|' + symbol + '|' + tone + '|' + !!prominent + '|' + !!selected + '|' + iconFontReady;
+        const cached = macImages.get(key);
+        if (cached) return cached;
+        const size = macDiscSize(prominent);
+        const drawing = macCanvas(size, size);
+        drawMacDisc(drawing.ctx, 0, 0, symbol, tone, prominent, selected ? MAC_BRIGHT : null);
+        const image = drawing.canvas.toDataURL();
+        macImages.set(key, image);
+        return image;
+    }
+    // A crowd as one green disc with its count (MapDelegate.CountDisc).
+    function macCountSize(count) {
+        const digits = String(count).length;
+        return digits <= 1 ? 28 : digits === 2 ? 32 : digits === 3 ? 36 : 42;
+    }
+    function macCountDisc(count) {
+        const text = String(count);
+        const key = 'count|' + text;
+        const cached = macImages.get(key);
+        if (cached) return cached;
+        const size = macCountSize(count);
+        const drawing = macCanvas(size, size);
+        const ctx = drawing.ctx;
+        ctx.beginPath();
+        ctx.arc(size / 2, size / 2, size / 2 - 1, 0, Math.PI * 2);
+        ctx.fillStyle = MAC_GREEN;
+        ctx.fill();
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = GLYPH_EDGE;
+        ctx.stroke();
+        ctx.fillStyle = GLYPH_EDGE;
+        ctx.font = 'bold ' + Math.round(size * 0.4) + 'px -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(text, size / 2, size / 2 + 1);
+        const image = drawing.canvas.toDataURL();
+        macImages.set(key, image);
+        return image;
+    }
+    // A callout (OverwatchCallouts): the disc with a dark box beside it in Menlo Bold, the box's rim in
+    // the severity colour or the bright green (MapDelegate.CalloutImage). Returns the image, its size
+    // and the disc's width, so the billboard can be offset to keep the disc on the place.
+    const MAC_CALLOUT_FONT = 'bold 10px Menlo, "SF Mono", ui-monospace, monospace';
+    function macCallout(symbol, tone, prominent, text) {
+        const key = 'callout|' + symbol + '|' + tone + '|' + !!prominent + '|' + text + '|' + iconFontReady;
+        const cached = macImages.get(key);
+        if (cached) return cached;
+        const disc = macDiscSize(prominent);
+        const measure = document.createElement('canvas').getContext('2d');
+        measure.font = MAC_CALLOUT_FONT;
+        const boxWidth = Math.ceil(measure.measureText(text).width) + 14;
+        const boxHeight = 12 + 8;
+        const gap = 8;
+        const width = disc + gap + boxWidth;
+        const height = Math.max(disc, boxHeight);
+        const drawing = macCanvas(width, height);
+        const ctx = drawing.ctx;
+        drawMacDisc(ctx, 0, (height - disc) / 2, symbol, tone, prominent, null);
+        const colour = tone === 'Red' || tone === 'Orange' || tone === 'Yellow' ? macToneHex(tone) : MAC_BRIGHT;
+        const boxX = disc + gap, boxY = (height - boxHeight) / 2;
+        ctx.globalAlpha = 0.88;
+        ctx.fillStyle = '#020c07';
+        ctx.fillRect(boxX, boxY, boxWidth, boxHeight);
+        ctx.globalAlpha = 0.7;
+        ctx.lineWidth = 0.8;
+        ctx.strokeStyle = colour;
+        ctx.strokeRect(boxX, boxY, boxWidth, boxHeight);
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = colour;
+        ctx.font = MAC_CALLOUT_FONT;
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(text, boxX + 7, boxY + boxHeight / 2 + 0.5);
+        const result = { image: drawing.canvas.toDataURL(), width: width, height: height, disc: disc };
+        macImages.set(key, result);
+        return result;
+    }
+    // The billboard for an item on a layer: { image, width, height, color, pixelOffset? }. options:
+    // { selected, callout } (callout defaults to item.callout).
+    function macPin(operation, item, options) {
+        const style = macMarker(operation, item);
+        const callout = options && 'callout' in options ? options.callout : item && item.callout;
+        if (callout) {
+            const drawn = macCallout(style.symbol, style.tone, style.prominent, String(callout));
+            return {
+                image: drawn.image, width: drawn.width, height: drawn.height, color: Cesium.Color.WHITE,
+                pixelOffset: new Cesium.Cartesian2((drawn.width - drawn.disc) / 2, 0)
+            };
+        }
+        const size = macDiscSize(style.prominent);
+        return { image: macDisc(style.symbol, style.tone, style.prominent, options && options.selected), width: size, height: size, color: Cesium.Color.WHITE };
+    }
+    // The cluster billboard as the Mac's count disc.
+    function styleMacCluster(clusteredEntities, cluster) {
+        const count = clusteredEntities.length;
+        const size = macCountSize(count);
+        cluster.billboard.show = true;
+        cluster.billboard.image = macCountDisc(count);
+        cluster.billboard.width = size;
+        cluster.billboard.height = size;
+        cluster.billboard.color = Cesium.Color.WHITE;
+        cluster.billboard.disableDepthTestDistance = 0;
+        cluster.point.show = false;
+        cluster.label.show = false;
+    }
+    // The icon font, before the first pin is drawn, so discs carry their symbol from the start.
+    function loadMacIconFont() {
+        if (iconFontReady || !document.fonts || !document.fonts.load) return Promise.resolve(iconFontReady);
+        const loading = document.fonts.load('16px "bootstrap-icons"').then(function (faces) {
+            iconFontReady = !!(faces && faces.length > 0);
+            return iconFontReady;
+        }).catch(function () { return false; });
+        return Promise.race([loading, new Promise(function (resolve) { setTimeout(function () { resolve(false); }, 2500); })]);
+    }
+
+    function drawGlyph(ctx, name) {
         switch (name) {
-            case 'chevron': // aircraft, pointing along its heading (the billboard rotates)
-                polygonPath(ctx, [[0, -21], [16, 17], [0, 8], [-16, 17]]);
-                glyphSolid(ctx);
-                return;
             case 'engines': // the thermal tint behind an aircraft chevron: two warm engine spots
                 [[-7, 8], [7, 8]].forEach(function (p) {
                     const glow = ctx.createRadialGradient(p[0], p[1], 0, p[0], p[1], 11);
@@ -503,208 +686,15 @@ window.tacticalGlobe = (function () {
                 ctx.fillRect(-24, -24, 48, 48);
                 return;
             }
-            case 'diamond': // ships, long axis along the heading
-                polygonPath(ctx, [[0, -21], [11, 0], [0, 21], [-11, 0]]);
-                glyphSolid(ctx);
-                return;
             case 'dot': // satellites, route conditions, road weather stations
                 ctx.beginPath();
                 ctx.arc(0, 0, 11, 0, Math.PI * 2);
                 glyphSolid(ctx);
                 return;
-            case 'ring-dot': // airport delays: the ring grows with the delay
-            {
-                const ring = variant === 'major' ? 20 : variant === 'moderate' ? 16 : 12;
-                ctx.beginPath();
-                ctx.arc(0, 0, ring, 0, Math.PI * 2);
-                glyphHollow(ctx);
-                ctx.beginPath();
-                ctx.arc(0, 0, 6, 0, Math.PI * 2);
-                glyphSolid(ctx, GLYPH_EDGE, 2.5);
-                return;
-            }
-            case 'lens': // cameras: a lens square; live video adds the camcorder tab; hollow = not working
-            {
-                const parts = variant.split('-');
-                const video = parts.indexOf('video') >= 0, hollow = parts.indexOf('hollow') >= 0;
-                const selected = parts.indexOf('selected') >= 0, alert = parts.indexOf('alert') >= 0;
-                const edge = selected ? '#b8ffd6' : GLYPH_EDGE;
-                const left = video ? -19 : -16, right = video ? 9 : 16;
-                if (alert) { // camera alert: a ring around the camera
-                    ctx.beginPath();
-                    ctx.arc(0, 0, 22, 0, Math.PI * 2);
-                    glyphHollow(ctx);
-                }
-                ctx.beginPath();
-                ctx.roundRect(left, -14, right - left, 28, 5);
-                if (video) { ctx.moveTo(right, -2); ctx.lineTo(19, -9); ctx.lineTo(19, 9); ctx.lineTo(right, 2); ctx.closePath(); }
-                if (hollow) glyphHollow(ctx, edge); else glyphSolid(ctx, edge, selected ? 4 : 3);
-                ctx.beginPath();
-                ctx.arc((left + right) / 2, 0, 7, 0, Math.PI * 2);
-                ctx.lineWidth = 3;
-                ctx.strokeStyle = hollow ? '#ffffff' : GLYPH_EDGE;
-                ctx.stroke();
-                return;
-            }
-            case 'cone': // camera coverage: a view cone from the camera
-                ctx.beginPath();
-                ctx.moveTo(0, 18);
-                ctx.arc(0, 18, 36, -Math.PI / 2 - 0.62, -Math.PI / 2 + 0.62);
-                ctx.closePath();
-                ctx.fillStyle = 'rgba(255, 255, 255, 0.55)';
-                ctx.fill();
-                glyphHollow(ctx);
-                ctx.beginPath();
-                ctx.arc(0, 18, 4, 0, Math.PI * 2);
-                glyphSolid(ctx, GLYPH_EDGE, 2);
-                return;
             case 'wedge': // traffic incidents: a small warning wedge
                 polygonPath(ctx, [[0, -19], [19, 16], [-19, 16]]);
                 glyphSolid(ctx);
                 glyphText(ctx, '!', 20, 5);
-                return;
-            case 'snowflake': // road weather station where ice is likely
-                ctx.beginPath();
-                for (let i = 0; i < 3; i++) {
-                    const a = i * Math.PI / 3;
-                    ctx.moveTo(Math.cos(a) * 19, Math.sin(a) * 19);
-                    ctx.lineTo(-Math.cos(a) * 19, -Math.sin(a) * 19);
-                }
-                glyphHollow(ctx);
-                return;
-            case 'plate': // message signs: a sign plate on its post
-                ctx.beginPath();
-                ctx.rect(-3, 6, 6, 15);
-                glyphSolid(ctx, GLYPH_EDGE, 2.5);
-                ctx.beginPath();
-                ctx.roundRect(-20, -17, 40, 24, 3);
-                glyphSolid(ctx);
-                ctx.fillStyle = GLYPH_EDGE;
-                ctx.fillRect(-13, -11, 26, 3.5);
-                ctx.fillRect(-13, -3, 18, 3.5);
-                return;
-            case 'viewer': // street view: where the viewer stands, with the arc it faces
-                ctx.beginPath();
-                ctx.moveTo(0, 0);
-                ctx.arc(0, 0, 22, -Math.PI / 2 - 0.7, -Math.PI / 2 + 0.7);
-                ctx.closePath();
-                ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
-                ctx.fill();
-                glyphHollow(ctx);
-                ctx.beginPath();
-                ctx.arc(0, 0, 8, 0, Math.PI * 2);
-                glyphSolid(ctx);
-                return;
-            case 'outline': // weather warnings: an outlined area
-                ctx.beginPath();
-                ctx.roundRect(-17, -17, 34, 34, 4);
-                glyphHollow(ctx);
-                glyphText(ctx, '!', 18, 2);
-                ctx.fillStyle = '#ffffff';
-                ctx.font = 'bold 14px "IBM Plex Mono", ui-monospace, monospace';
-                ctx.fillText('!', 0, 2);
-                return;
-            case 'heat': // fire hotspots: a heat dot
-            {
-                const glow = ctx.createRadialGradient(0, 0, 2, 0, 0, 16);
-                glow.addColorStop(0, 'rgba(255, 255, 255, 1)');
-                glow.addColorStop(0.5, 'rgba(255, 255, 255, 0.75)');
-                glow.addColorStop(1, 'rgba(255, 255, 255, 0)');
-                ctx.beginPath();
-                ctx.arc(0, 0, 16, 0, Math.PI * 2);
-                ctx.fillStyle = glow;
-                ctx.fill();
-                ctx.beginPath();
-                ctx.arc(0, 0, 7, 0, Math.PI * 2);
-                glyphSolid(ctx, GLYPH_EDGE, 2.5);
-                return;
-            }
-            case 'triangle': // hazards: a triangle with the kind's letter; major has a double edge
-            {
-                const parts = variant.split(':');
-                if (parts[1] === 'major') {
-                    polygonPath(ctx, [[0, -23], [23, 19], [-23, 19]]);
-                    ctx.lineWidth = 2.5;
-                    ctx.strokeStyle = '#ffffff';
-                    ctx.stroke();
-                }
-                polygonPath(ctx, [[0, -18], [18, 15], [-18, 15]]);
-                glyphSolid(ctx);
-                glyphText(ctx, parts[0] || '!', 15, 6);
-                return;
-            }
-            case 'aqi': // air quality: a disc in the AQI colour
-                ctx.beginPath();
-                ctx.arc(0, 0, 20, 0, Math.PI * 2);
-                ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
-                ctx.fill();
-                glyphHollow(ctx);
-                return;
-            case 'hexagon': // World News
-            {
-                const points = [];
-                for (let i = 0; i < 6; i++) points.push([Math.cos(Math.PI / 6 + i * Math.PI / 3) * 21, Math.sin(Math.PI / 6 + i * Math.PI / 3) * 21]);
-                polygonPath(ctx, points);
-                glyphSolid(ctx);
-                return;
-            }
-            case 'rings': // signals converging: concentric rings
-                [20, 13].forEach(function (r) { ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); glyphHollow(ctx); });
-                ctx.beginPath();
-                ctx.arc(0, 0, 6, 0, Math.PI * 2);
-                glyphSolid(ctx, GLYPH_EDGE, 2.5);
-                return;
-            case 'crossed': // conflict: a crossed marker
-                ctx.beginPath();
-                ctx.moveTo(-15, -15); ctx.lineTo(15, 15);
-                ctx.moveTo(15, -15); ctx.lineTo(-15, 15);
-                ctx.lineCap = 'round';
-                ctx.lineWidth = 12;
-                ctx.strokeStyle = GLYPH_EDGE;
-                ctx.stroke();
-                ctx.lineWidth = 6;
-                ctx.strokeStyle = '#ffffff';
-                ctx.stroke();
-                return;
-            case 'cross-circle': // humanitarian: a cross in a circle
-                ctx.beginPath();
-                ctx.arc(0, 0, 20, 0, Math.PI * 2);
-                glyphSolid(ctx);
-                ctx.fillStyle = GLYPH_EDGE;
-                ctx.fillRect(-3.5, -12, 7, 24);
-                ctx.fillRect(-12, -3.5, 24, 7);
-                return;
-            case 'diamond-outline': // chokepoints
-                polygonPath(ctx, [[0, -20], [20, 0], [0, 20], [-20, 0]]);
-                glyphHollow(ctx);
-                ctx.beginPath();
-                ctx.arc(0, 0, 4, 0, Math.PI * 2);
-                glyphSolid(ctx, GLYPH_EDGE, 2);
-                return;
-            case 'shield': // travel advice: a shield with the level
-                ctx.beginPath();
-                ctx.moveTo(-17, -19); ctx.lineTo(17, -19); ctx.lineTo(17, 0);
-                ctx.quadraticCurveTo(17, 14, 0, 21); ctx.quadraticCurveTo(-17, 14, -17, 0);
-                ctx.closePath();
-                glyphSolid(ctx);
-                glyphText(ctx, variant || '!', 20, 0);
-                return;
-            case 'bolt': // power outages
-                polygonPath(ctx, [[5, -22], [-13, 3], [-1, 3], [-6, 22], [13, -5], [1, -5]]);
-                glyphSolid(ctx);
-                return;
-            case 'arcs': // internet outages: broken signal arcs
-                ctx.beginPath();
-                [8, 15, 22].forEach(function (r) {
-                    ctx.moveTo(Math.cos(-Math.PI * 0.75) * r, 12 + Math.sin(-Math.PI * 0.75) * r);
-                    ctx.arc(0, 12, r, -Math.PI * 0.75, -Math.PI * 0.56);
-                    ctx.moveTo(Math.cos(-Math.PI * 0.44) * r, 12 + Math.sin(-Math.PI * 0.44) * r);
-                    ctx.arc(0, 12, r, -Math.PI * 0.44, -Math.PI * 0.25);
-                });
-                glyphHollow(ctx);
-                ctx.beginPath();
-                ctx.arc(0, 12, 4, 0, Math.PI * 2);
-                glyphSolid(ctx, GLYPH_EDGE, 2);
                 return;
             default:
                 ctx.beginPath();
@@ -1136,6 +1126,8 @@ window.tacticalGlobe = (function () {
         const container = document.getElementById(containerId);
         if (!container || viewers.has(containerId)) return;
         guardEntityAdds();
+        // The Mac-look pins carry an icon from the font; wait for it (at most 2.5 s) before drawing any.
+        await loadMacIconFont();
 
         // Real incident history for this one basemap: it first hit tile.openstreetmap.org
         // directly, which looked fine in every automated check (200 OK, valid PNG, CORS-open)
@@ -1319,6 +1311,10 @@ window.tacticalGlobe = (function () {
             await Cesium.ArcGisMapServerImageryProvider.fromUrl(
                 'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer'));
         viewer.imageryLayers.add(roadsLabelsLayer);
+        if (viewer._tgHolo) {
+            viewer._tgHolo.labels = { places: placesLabelsLayer, roads: roadsLabelsLayer };
+            viewer._tgHolo.fade();
+        }
 
         // Radar is a timeline of frames (past scans + HRRR future radar) rather than one live
         // layer - see setRadarTimeline. Frames are added lazily as Cesium imagery layers the
@@ -1335,74 +1331,32 @@ window.tacticalGlobe = (function () {
         cameraDataSource.clustering.pixelRange = 60;
         cameraDataSource.clustering.minimumClusterSize = 3;
         cameraDataSource.clustering.clusterEvent.addEventListener(function (clusteredEntities, cluster) {
-            // Restyle Cesium's default cluster billboard (a stock pin icon) to match the
-            // terminal theme's own camera-pin look instead - a solid dot plus a count label.
-            // Uses the same billboard image as individual pins (not Cesium's `point` graphics -
-            // see the top-of-file comment on pinBillboardImage for why) rather than hiding the
-            // billboard and drawing a point instead.
-            cluster.billboard.show = true;
-            cluster.billboard.image = pinBillboardImage;
-            cluster.billboard.width = 20;
-            cluster.billboard.height = 20;
-            cluster.billboard.color = Cesium.Color.fromCssColorString('#59f07a');
-            cluster.billboard.disableDepthTestDistance = 0;
-            cluster.point.show = false;
-            cluster.label.show = true;
-            cluster.label.text = clusteredEntities.length.toString();
-            cluster.label.font = 'bold 13px "Share Tech Mono", monospace';
-            cluster.label.fillColor = Cesium.Color.fromCssColorString('#05080a');
-            cluster.label.verticalOrigin = Cesium.VerticalOrigin.CENTER;
-            cluster.label.horizontalOrigin = Cesium.HorizontalOrigin.CENTER;
-            cluster.label.disableDepthTestDistance = 0;
+            // The Mac map's count disc (26-11-26).
+            styleMacCluster(clusteredEntities, cluster);
         });
 
         // Incidents get the same treatment: statewide work-zone feeds (WZDx) mean thousands of
-        // incident pins at a state or country zoom. Amber clusters, so they read as incidents
-        // rather than the green camera clusters.
+        // incident pins at a state or country zoom. Groups are the Mac's green count discs.
         const incidentDataSource = new Cesium.CustomDataSource('tg-incidents');
         await viewer.dataSources.add(incidentDataSource);
         incidentDataSource.clustering.enabled = true;
         incidentDataSource.clustering.pixelRange = 45;
         incidentDataSource.clustering.minimumClusterSize = 4;
         incidentDataSource.clustering.clusterEvent.addEventListener(function (clusteredEntities, cluster) {
-            cluster.billboard.show = true;
-            cluster.billboard.image = pinBillboardImage;
-            cluster.billboard.width = 18;
-            cluster.billboard.height = 18;
-            cluster.billboard.color = Cesium.Color.fromCssColorString('#59f07a');
-            cluster.billboard.disableDepthTestDistance = 0;
-            cluster.point.show = false;
-            cluster.label.show = true;
-            cluster.label.text = clusteredEntities.length.toString();
-            cluster.label.font = 'bold 12px "Share Tech Mono", monospace';
-            cluster.label.fillColor = Cesium.Color.fromCssColorString('#05080a');
-            cluster.label.verticalOrigin = Cesium.VerticalOrigin.CENTER;
-            cluster.label.horizontalOrigin = Cesium.HorizontalOrigin.CENTER;
-            cluster.label.disableDepthTestDistance = 0;
+            // The Mac map's count disc (26-11-26).
+            styleMacCluster(clusteredEntities, cluster);
         });
 
-        // World News is an intelligence overlay, not a confirmed incident layer. Purple markers
-        // and clusters keep that distinction visible; every marker is deliberately country-level.
+        // World News is an intelligence overlay, not a confirmed incident layer; every marker is
+        // deliberately country-level.
         const worldNewsDataSource = new Cesium.CustomDataSource('tg-world-news');
         await viewer.dataSources.add(worldNewsDataSource);
         worldNewsDataSource.clustering.enabled = true;
         worldNewsDataSource.clustering.pixelRange = 50;
         worldNewsDataSource.clustering.minimumClusterSize = 3;
         worldNewsDataSource.clustering.clusterEvent.addEventListener(function (clusteredEntities, cluster) {
-            cluster.billboard.show = true;
-            cluster.billboard.image = pinBillboardImage;
-            cluster.billboard.width = 20;
-            cluster.billboard.height = 20;
-            cluster.billboard.color = Cesium.Color.fromCssColorString('#59f07a');
-            cluster.billboard.disableDepthTestDistance = 0;
-            cluster.point.show = false;
-            cluster.label.show = true;
-            cluster.label.text = clusteredEntities.length.toString();
-            cluster.label.font = 'bold 12px "Share Tech Mono", monospace';
-            cluster.label.fillColor = Cesium.Color.fromCssColorString('#05080a');
-            cluster.label.verticalOrigin = Cesium.VerticalOrigin.CENTER;
-            cluster.label.horizontalOrigin = Cesium.HorizontalOrigin.CENTER;
-            cluster.label.disableDepthTestDistance = 0;
+            // The Mac map's count disc (26-11-26).
+            styleMacCluster(clusteredEntities, cluster);
         });
 
         // Hazard layer (earthquakes, wildfires, flooding river gauges) - unclustered: there are
@@ -1429,6 +1383,14 @@ window.tacticalGlobe = (function () {
         await viewer.dataSources.add(fireDataSource);
         const conflictDataSource = new Cesium.CustomDataSource('tg-conflict');
         await viewer.dataSources.add(conflictDataSource);
+        // Conflict reports crowd (hundreds in one region); the Mac groups them (NativeShapes.Groupable),
+        // and so does the web since the Mac look (26-11-26), as the same green count discs.
+        conflictDataSource.clustering.enabled = true;
+        conflictDataSource.clustering.pixelRange = 45;
+        conflictDataSource.clustering.minimumClusterSize = 3;
+        conflictDataSource.clustering.clusterEvent.addEventListener(function (clusteredEntities, cluster) {
+            styleMacCluster(clusteredEntities, cluster);
+        });
         const humanitarianDataSource = new Cesium.CustomDataSource('tg-humanitarian');
         await viewer.dataSources.add(humanitarianDataSource);
         const signDataSource = new Cesium.CustomDataSource('tg-signs');
@@ -1509,14 +1471,23 @@ window.tacticalGlobe = (function () {
             // clustering behavior), not a single Entity - zoom into the cluster instead of
             // treating it as a camera/incident click. Also fall back to drillPick when a dense
             // cluster or label is sitting on top of the billboard and a plain scene.pick misses it.
+            // Pins stacked on one spot (news placed at a country's centre, conflict reports at one
+            // town) never split by zooming, so that group opens its first item instead (the Mac lists them).
             if (Array.isArray(entity)) {
                 const positions = entity
                     .map(function (e) { return e.position && e.position.getValue(viewer.clock.currentTime); })
                     .filter(function (p) { return !!p; });
-                if (positions.length > 0) {
-                    viewer.camera.flyToBoundingSphere(Cesium.BoundingSphere.fromPoints(positions), { duration: 0.75 });
+                const sphere = positions.length > 0 ? Cesium.BoundingSphere.fromPoints(positions) : null;
+                if (sphere && sphere.radius < 100 && isActionable(entity[0])) {
+                    entity = entity[0];
+                } else {
+                    if (sphere) viewer.camera.flyToBoundingSphere(sphere, { duration: 0.75 });
+                    entity = null;
                 }
-            } else if (entity && entity._tacticalGlobeCamera) {
+            }
+            if (!entity) {
+                // nothing to open
+            } else if (entity._tacticalGlobeCamera) {
                 const entry = viewers.get(containerId);
                 if (entry && entry.selectMode) {
                     toggleCameraSelection(entry, entity._tacticalGlobeCamera);
@@ -1878,11 +1849,7 @@ window.tacticalGlobe = (function () {
         const photo = Object.assign({ name: name || 'Photo' }, info);
         const pin = entities.add({
             position: Cesium.Cartesian3.fromDegrees(info.longitude, info.latitude),
-            billboard: { image: pinBillboardImage, width: 22, height: 22, color: Cesium.Color.fromCssColorString('#59f07a'), disableDepthTestDistance: 0 },
-            label: {
-                text: 'PHOTO', font: '600 11px monospace', fillColor: Cesium.Color.WHITE, outlineColor: Cesium.Color.BLACK, outlineWidth: 3,
-                style: Cesium.LabelStyle.FILL_AND_OUTLINE, pixelOffset: new Cesium.Cartesian2(0, -20), disableDepthTestDistance: 0
-            }
+            billboard: Object.assign(macPin('setPhoto', photo), { disableDepthTestDistance: 0 })
         });
         pin._tacticalGlobePhoto = photo;
         entry.photoEntities.push(pin);
@@ -2190,9 +2157,9 @@ window.tacticalGlobe = (function () {
                     // cosmetic change - 14px was hard to land precisely, especially in areas with
                     // hundreds of nearby cameras (e.g. Austin, Georgia).
                     image: cameraPinImage(pin, entry.selectedCameras.has(pin.id)),
-                    width: 14,
-                    height: 14,
-                    color: Cesium.Color.fromCssColorString('#59f07a'),
+                    width: 24,
+                    height: 24,
+                    color: Cesium.Color.WHITE,
                     disableDepthTestDistance: 0
                 }
             });
@@ -2244,11 +2211,7 @@ window.tacticalGlobe = (function () {
         clearStreetViewMarker(containerId);
         entry.streetViewEntity = entry.viewer.entities.add({
             position: Cesium.Cartesian3.fromDegrees(Number(lon), Number(lat)),
-            billboard: { image: markerGlyph('viewer'), width: 24, height: 24, color: Cesium.Color.fromCssColorString('#66e0c8'),
-                disableDepthTestDistance: 0 },
-            label: { text: 'STREET VIEW', font: 'bold 11px monospace', fillColor: Cesium.Color.fromCssColorString('#66e0c8'),
-                outlineColor: Cesium.Color.BLACK, outlineWidth: 3, style: Cesium.LabelStyle.FILL_AND_OUTLINE,
-                pixelOffset: new Cesium.Cartesian2(0, -18), disableDepthTestDistance: 0 }
+            billboard: Object.assign(macPin('setStreetViewMarker', {}), { disableDepthTestDistance: 0 })
         });
     }
 
@@ -2292,8 +2255,6 @@ window.tacticalGlobe = (function () {
     // Time machine: the past view drawn on its own layers - an archived radar mosaic, plus the
     // incidents and earthquakes that were active then - so the live layers (which the page
     // switches off meanwhile) never mix with history.
-    const TIME_MACHINE_COLOURS = { crash: '#ff4d4d', closure: '#ff9f1c', hazard: '#ffd166', earthquake: '#59f07a',
-        aircraft: '#e6f1ff', ship: '#4cc9f0', outage: '#f72585' };
 
     function setTimeMachine(containerId, snapshot) {
         const entry = viewers.get(containerId || 'tg-viewport');
@@ -2308,19 +2269,16 @@ window.tacticalGlobe = (function () {
             }));
             tm.layer.alpha = 0.7;
         }
-        const add = (item, colour, size) => tm.entities.push(entry.viewer.entities.add({
+        // The Mac look (26-11-26): each recorded item is the Mac's time machine disc, without a label.
+        const add = (item) => tm.entities.push(entry.viewer.entities.add({
             position: Cesium.Cartesian3.fromDegrees(Number(item.lon), Number(item.lat)),
             name: item.title,
-            point: { pixelSize: size, color: Cesium.Color.fromCssColorString(colour).withAlpha(0.9),
-                outlineColor: Cesium.Color.BLACK, outlineWidth: 1, disableDepthTestDistance: 0 },
-            label: { text: item.title, font: '11px monospace', fillColor: Cesium.Color.WHITE, outlineColor: Cesium.Color.BLACK, outlineWidth: 3,
-                style: Cesium.LabelStyle.FILL_AND_OUTLINE, pixelOffset: new Cesium.Cartesian2(0, -14),
-                distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 60000), disableDepthTestDistance: 0 }
+            billboard: Object.assign(macPin('setTimeMachine', item, { callout: null }), { disableDepthTestDistance: 0 })
         }));
-        (snapshot.incidents || []).forEach(item => add(item, TIME_MACHINE_COLOURS[item.category] || '#ffffff', 10));
-        (snapshot.earthquakes || []).forEach(item => add(item, TIME_MACHINE_COLOURS.earthquake, 12));
+        (snapshot.incidents || []).forEach(item => add(item));
+        (snapshot.earthquakes || []).forEach(item => add(item));
         // #6: aircraft, ships and outage areas recorded near that moment (live-layer history).
-        (snapshot.tracks || []).forEach(item => add(item, TIME_MACHINE_COLOURS[item.category] || '#ffffff', item.category === 'outage' ? 11 : 7));
+        (snapshot.tracks || []).forEach(item => add(item));
     }
 
     function clearTimeMachine(containerId) {
@@ -2333,8 +2291,7 @@ window.tacticalGlobe = (function () {
 
     // Live aircraft (OpenSky): a small plane arrow turned to its heading, with callsign and
     // altitude shown when zoomed in. aircraft: [{ id, callsign, lat, lon, altitudeFeet, speedKnots, heading }].
-    // Night Ops kit: an aircraft is a chevron pointing along its heading.
-    const aircraftIcon = markerGlyph('chevron');
+    // The Mac look (26-11-26): an aircraft is the Mac's disc, turned to its heading (a web extra).
 
     // Drawn as a BillboardCollection + LabelCollection rather than entities. Labels are the real
     // cost (400 of them measured +50 ms/frame in software rendering, even when hidden by
@@ -2359,41 +2316,30 @@ window.tacticalGlobe = (function () {
         thermal.removeAll();
         thermal.show = thermalOn();
         const thermalColour = Cesium.Color.WHITE.withAlpha(entry.thermalShown === false ? 0 : 1);
-        const nearOnly = new Cesium.DistanceDisplayCondition(0, 120000);
-        const withLabels = entry.viewer.camera.positionCartographic.height < 150000;
         const selectedId = entry.aircraftPath && entry.aircraftPath.id;
         (aircraft || []).forEach(function (plane) {
             const position = Cesium.Cartesian3.fromDegrees(Number(plane.lon), Number(plane.lat));
-            const altitude = Number.isFinite(plane.altitudeFeet) ? Math.round(plane.altitudeFeet / 100) * 100 : null;
             const selected = plane.id === selectedId;
-            // A plane squawking 7500/7600/7700 is red and always labelled (flight anomalies, 13-11-26).
-            const colour = Cesium.Color.fromCssColorString(plane.emergency ? '#ff3b30' : selected ? AIRCRAFT_PATH_COLOUR : AIRCRAFT_COLOUR);
+            // A plane squawking 7500/7600/7700 is the Mac's red emergency disc (flight anomalies, 13-11-26).
             // The id is what scene.pick hands the click handler, so clicking a plane opens its panel.
             const pickId = { _tacticalGlobeAircraft: plane };
+            const pin = macPin('setAircraft', plane, { selected: selected, callout: null });
             billboards.add({
-                id: pickId, position: position, image: aircraftIcon, width: selected ? 26 : 20, height: selected ? 26 : 20, color: colour,
+                id: pickId, position: position, image: pin.image, width: pin.width, height: pin.height, color: pin.color,
                 rotation: -Cesium.Math.toRadians(Number(plane.heading) || 0), alignedAxis: Cesium.Cartesian3.ZERO,
                 disableDepthTestDistance: 0
             });
             thermal.add({
-                position: position, image: markerGlyph('engines'), width: selected ? 26 : 20, height: selected ? 26 : 20, color: thermalColour,
+                position: position, image: markerGlyph('engines'), width: pin.width, height: pin.height, color: thermalColour,
                 rotation: -Cesium.Math.toRadians(Number(plane.heading) || 0), alignedAxis: Cesium.Cartesian3.ZERO,
                 disableDepthTestDistance: 0
             });
             if (entry.bracketAircraftId !== null && entry.bracketAircraftId === plane.id) entry.bracketPosition = position;
             if (selected) updateSelectedAircraft(entry, plane);
-            if (!withLabels && !plane.emergency) return;
-            labels.add({
-                id: pickId, position: position,
-                text: (plane.emergency ? plane.emergency.toUpperCase() + '  ' : '') + (plane.callsign || plane.id) + (altitude !== null ? '  ' + altitude.toLocaleString('en-US') + ' FT' : ''),
-                font: '10px monospace', fillColor: colour, outlineColor: Cesium.Color.BLACK, outlineWidth: 3,
-                style: Cesium.LabelStyle.FILL_AND_OUTLINE, pixelOffset: new Cesium.Cartesian2(0, -16),
-                distanceDisplayCondition: plane.emergency ? undefined : nearOnly, disableDepthTestDistance: 0
-            });
+            // No callsign labels on the map, as on the Mac: the hover card and window carry them.
         });
     }
 
-    const AIRCRAFT_COLOUR = '#59f07a';
     const AIRCRAFT_PATH_COLOUR = '#b8ffd6';
 
     // A plane's reported altitude in metres (feet in the feed), or 0 when it has none.
@@ -2409,8 +2355,10 @@ window.tacticalGlobe = (function () {
         for (let i = 0; i < billboards.length; i++) {
             const b = billboards.get(i);
             if (!b.id || b.id._tacticalGlobeAircraft.id !== id) continue;
-            b.color = Cesium.Color.fromCssColorString(on ? AIRCRAFT_PATH_COLOUR : AIRCRAFT_COLOUR);
-            b.width = b.height = on ? 26 : 20;
+            const pin = macPin('setAircraft', b.id._tacticalGlobeAircraft, { selected: on, callout: null });
+            b.image = pin.image;
+            b.width = pin.width;
+            b.height = pin.height;
         }
     }
 
@@ -2719,10 +2667,7 @@ window.tacticalGlobe = (function () {
     // Live ships (aisstream.io AIS): a hull marker turned to its heading (or course), with name,
     // speed and type shown when zoomed in. ships: [{ id, name, lat, lon, speedKnots, heading, type, destination }].
     // Same primitive-collection approach as aircraft, for the same per-frame cost reason.
-    // Night Ops kit: a ship is a diamond, its long axis along the heading.
-    const shipIcon = markerGlyph('diamond');
-
-    const SHIP_COLOURS = { Tanker: '#ff5252', Cargo: '#69f0ae', Passenger: '#448aff', Fishing: '#ffd740', Military: '#e040fb' };
+    // The Mac look (26-11-26): a ship is the Mac's disc by its type, turned to its heading (a web extra).
 
     function setShips(containerId, ships) {
         const entry = viewers.get(containerId || 'tg-viewport');
@@ -2737,48 +2682,28 @@ window.tacticalGlobe = (function () {
         const labels = entry.shipPrimitives.labels;
         billboards.removeAll();
         labels.removeAll();
-        const nearOnly = new Cesium.DistanceDisplayCondition(0, 120000);
-        const withLabels = entry.viewer.camera.positionCartographic.height < 150000;
         (ships || []).forEach(function (ship) {
             const position = Cesium.Cartesian3.fromDegrees(Number(ship.lon), Number(ship.lat));
-            const colour = Cesium.Color.fromCssColorString(SHIP_COLOURS[ship.type] || '#ffab40');
             const hasHeading = Number.isFinite(ship.heading);
+            const pin = macPin('setShips', ship, { callout: null });
             billboards.add({
-                position: position, image: shipIcon, width: 16, height: 16, color: colour,
+                position: position, image: pin.image, width: pin.width, height: pin.height, color: pin.color,
                 rotation: hasHeading ? -Cesium.Math.toRadians(Number(ship.heading)) : 0, alignedAxis: Cesium.Cartesian3.ZERO,
                 disableDepthTestDistance: 0
-            });
-            if (!withLabels) return;
-            const speed = Number.isFinite(ship.speedKnots) ? '  ' + Number(ship.speedKnots).toFixed(1) + ' KN' : '';
-            const detail = [ship.type, ship.destination ? '\u2192 ' + ship.destination : null].filter(Boolean).join(' ');
-            labels.add({
-                position: position,
-                text: String(ship.name || ship.id) + speed + (detail ? '\n' + detail.toUpperCase() : ''),
-                font: '10px monospace', fillColor: colour, outlineColor: Cesium.Color.BLACK, outlineWidth: 3,
-                style: Cesium.LabelStyle.FILL_AND_OUTLINE, pixelOffset: new Cesium.Cartesian2(0, -18),
-                distanceDisplayCondition: nearOnly, disableDepthTestDistance: 0
             });
         });
     }
 
-    // Air quality (Open-Meteo): a dot per sample point coloured by U.S. AQI band, with its value.
+    // Air quality (Open-Meteo): the Mac's air disc per sample point; the value is in its window.
     // readings: [{ lat, lon, aqi, category }].
-    const AQI_COLOURS = [[50, '#00e400'], [100, '#ffff00'], [150, '#ff7e00'], [200, '#ff0000'], [300, '#8f3f97'], [Infinity, '#7e0023']];
-
     function setAirQuality(containerId, readings) {
         const entry = viewers.get(containerId || 'tg-viewport');
         if (!entry) return;
         (entry.airQualityEntities || []).forEach(function (entity) { entry.viewer.entities.remove(entity); });
         entry.airQualityEntities = (readings || []).map(function (reading) {
-            const aqi = Number(reading.aqi);
-            const colour = Cesium.Color.fromCssColorString(AQI_COLOURS.find(function (band) { return aqi <= band[0]; })[1]);
             return entry.viewer.entities.add({
                 position: Cesium.Cartesian3.fromDegrees(Number(reading.lon), Number(reading.lat)),
-                billboard: { image: markerGlyph('aqi'), width: 24, height: 24, color: colour, disableDepthTestDistance: 0 },
-                label: {
-                    text: 'AQI ' + aqi, font: 'bold 10px monospace', fillColor: Cesium.Color.WHITE, outlineColor: Cesium.Color.BLACK, outlineWidth: 3,
-                    style: Cesium.LabelStyle.FILL_AND_OUTLINE, pixelOffset: new Cesium.Cartesian2(0, -20), disableDepthTestDistance: 0
-                }
+                billboard: Object.assign(macPin('setAirQuality', reading), { disableDepthTestDistance: 0 })
             });
         });
     }
@@ -2808,14 +2733,7 @@ window.tacticalGlobe = (function () {
             });
             added.push(entry.viewer.entities.add({
                 position: Cesium.Cartesian3.fromDegrees(Number(area.lon), Number(area.lat)),
-                billboard: { image: markerGlyph('bolt'), width: 18, height: 18, color: colour, disableDepthTestDistance: 0 },
-                label: {
-                    pixelOffset: new Cesium.Cartesian2(0, 24),
-                    text: area.name + '\n' + Number(area.customersOut).toLocaleString('en-US') + ' OUT',
-                    font: 'bold 10px monospace', fillColor: colour, outlineColor: Cesium.Color.BLACK, outlineWidth: 3,
-                    style: Cesium.LabelStyle.FILL_AND_OUTLINE, horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
-                    distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 1500000), disableDepthTestDistance: 0
-                }
+                billboard: Object.assign(macPin('setPowerOutages', area), { disableDepthTestDistance: 0 })
             }));
         });
     }
@@ -3038,7 +2956,7 @@ window.tacticalGlobe = (function () {
             }
             const pin = entry.viewer.entities.add({
                 position: Cesium.Cartesian3.fromDegrees(Number(points[0][1]), Number(points[0][0])),
-                billboard: { image: markerGlyph('dot'), width: 15, height: 15, color: colour, disableDepthTestDistance: 0 },
+                billboard: Object.assign(macPin('setMapNotes', note, { callout: null }), { disableDepthTestDistance: 0 }),
                 label: label(note.title, colour)
             });
             pin._tacticalGlobeNote = note.id;
@@ -3162,11 +3080,11 @@ window.tacticalGlobe = (function () {
         return quality;
     }
 
-    // Looks (Night Ops x Apple, 21-11-26): 'satellite' and 'holo-earth' lay Esri's World_Imagery
-    // (real aerial photography, CORS-open, no key) over the dark base at every height, just above the
-    // base map and under the wash, labels and every overlay added later; 'holo-earth' tones it down
-    // slightly and keeps the glowing coastlines, 15-degree grid, and subtle green wash on top.
-    // 'standard' and 'night-ops' keep the holo globe. Resolves to the look in force.
+    // Looks (Night Ops x Apple, 21-11-26; the Mac look, 26-11-26): every look lays Esri's World_Imagery
+    // (real aerial photography, CORS-open, no key) over the dark base, just above the base map and
+    // under the streets, wash, labels and every overlay added later, so the globe is real Earth as
+    // on the Mac's Apple map. 'holo-earth' tones it down and keeps the grid and wash; what each look
+    // shows on top is in applyHoloLook's fade. Resolves to the look in force.
     const LOOKS = ['standard', 'night-ops', 'holo-earth', 'satellite'];
     async function setLook(containerId, look) {
         const entry = viewers.get(containerId || 'tg-viewport');
@@ -3175,7 +3093,7 @@ window.tacticalGlobe = (function () {
         if (LOOKS.indexOf(look) < 0) return holo.look;
         holo.look = look;
         const layers = entry.viewer.imageryLayers;
-        const needsImagery = look === 'satellite' || look === 'holo-earth';
+        const needsImagery = true;
         if (needsImagery && !holo.imagery) {
             try {
                 const layer = new Cesium.ImageryLayer(await Cesium.ArcGisMapServerImageryProvider.fromUrl(
@@ -3191,7 +3109,7 @@ window.tacticalGlobe = (function () {
             }
         }
         if (holo.imagery) {
-            holo.imagery.show = holo.look === 'satellite' || holo.look === 'holo-earth';
+            holo.imagery.show = true;
             if (holo.look === 'holo-earth') {
                 holo.imagery.saturation = 0.65;
                 holo.imagery.brightness = 0.78;
@@ -3500,7 +3418,7 @@ window.tacticalGlobe = (function () {
         const holo = entry && entry.viewer && !entry.viewer.isDestroyed() ? entry.viewer._tgHolo : null;
         if (!holo) return null;
         const land = entry.viewer.dataSources.getByName('tg-holo-land')[0];
-        return { name: holo.look, imagery: !!(holo.imagery && holo.imagery.show), land: !!(land && land.show) };
+        return { name: holo.look, imagery: !!(holo.imagery && holo.imagery.show), land: !!(land && land.show), roads: !!(holo.labels && holo.labels.roads.show && holo.labels.roads.alpha >= 0.99) };
     }
 
     function nightOpsState(containerId) {
@@ -4168,9 +4086,9 @@ window.tacticalGlobe = (function () {
 
     function applyAlertHighlight(entity, severity) {
         if (!entity || !entity.billboard) return;
-        entity.billboard.color = severity ? severityColor(severity) : Cesium.Color.fromCssColorString('#59f07a');
-        entity.billboard.width = severity ? 22 : 14;
-        entity.billboard.height = severity ? 22 : 14;
+        entity.billboard.color = Cesium.Color.WHITE;
+        entity.billboard.width = severity ? 30 : 24;
+        entity.billboard.height = severity ? 30 : 24;
         entity._tacticalGlobeAlertSeverity = severity || null;
         // The kit's camera alert: a ring around the camera, so it isn't colour alone.
         const owner = entity._tacticalGlobeCamera;
@@ -4179,6 +4097,47 @@ window.tacticalGlobe = (function () {
             viewers.forEach(function (e) { if (e.selectedCameras && e.selectedCameras.has(owner.id)) selected = true; });
             entity.billboard.image = cameraPinImage(owner, selected, entity._tacticalGlobeAlertSeverity);
         }
+    }
+
+    // Read-only (26-11-26): where the pins of the 'tg-' layers are on screen right now, for the
+    // visual check of every layer (it clicks a real pin) and for an admin debugging in devtools.
+    // Returns at most `limit` of { source, x, y } in canvas pixels, pins inside the canvas only;
+    // `sources` (optional) limits it to those layers ('tg-signs', 'entities', 'aircraftPrimitives'...).
+    function visiblePins(containerId, limit, sources) {
+        const entry = viewers.get(containerId || 'tg-viewport');
+        if (!entry || entry.viewer.isDestroyed()) return [];
+        const scene = entry.viewer.scene;
+        const canvas = scene.canvas;
+        const now = Cesium.JulianDate.now();
+        const out = [];
+        const max = limit || 20;
+        // Only pins a click there would reach: not folded into a group, not behind the globe or another pin.
+        const wanted = function (source) { return !sources || sources.indexOf(source) >= 0; };
+        const consider = function (source, position, owner) {
+            if (!position || out.length >= max || !wanted(source)) return;
+            const at = Cesium.SceneTransforms.worldToWindowCoordinates(scene, position);
+            if (!at || at.x < 8 || at.y < 8 || at.x > canvas.clientWidth - 8 || at.y > canvas.clientHeight - 8) return;
+            // As the click handler does: a decorative glow on top doesn't stop the pin under it opening.
+            const hits = scene.drillPick(at, 4) || [];
+            const first = hits.find(function (hit) { return hit && (hit.id !== undefined || Array.isArray(hit.id)); });
+            if (!first || (first.id !== owner && first.primitive !== owner && !(first.id && first.id === owner.id))) return;
+            out.push({ source: source, x: Math.round(at.x), y: Math.round(at.y) });
+        };
+        for (let i = 0; i < entry.viewer.dataSources.length; i++) {
+            const source = entry.viewer.dataSources.get(i);
+            if (!(source.name || '').startsWith('tg-') || !source.show) continue;
+            source.entities.values.forEach(function (e) {
+                if (e.billboard && e.isShowing && !e._tgThermal) consider(source.name, e.position && e.position.getValue(now), e);
+            });
+        }
+        entry.viewer.entities.values.forEach(function (e) {
+            if (e.billboard && e.isShowing) consider('entities', e.position && e.position.getValue(now), e);
+        });
+        ['aircraftPrimitives', 'shipPrimitives'].forEach(function (key) {
+            const billboards = entry[key] && entry[key].billboards;
+            for (let i = 0; billboards && i < billboards.length; i++) consider(key, billboards.get(i).position, billboards.get(i));
+        });
+        return out;
     }
 
     // Read-only accessor for the alert-highlight state applied above - Cesium's entity styling
@@ -4229,13 +4188,7 @@ window.tacticalGlobe = (function () {
         (incidents || []).forEach(function (incident) {
             const entity = entry.incidentDataSource.entities.add({
                 position: Cesium.Cartesian3.fromDegrees(incident.lon, incident.lat),
-                billboard: {
-                    image: markerGlyph('wedge'),
-                    width: 16,
-                    height: 16,
-                    color: incidentTypeColor(incident.category || incident.eventType),
-                    disableDepthTestDistance: 0
-                }
+                billboard: Object.assign(macPin('setTrafficIncidents', incident), { disableDepthTestDistance: 0 })
             });
             entity._tacticalGlobeIncident = incident;
             entry.incidentEntities.set(incident.id, entity);
@@ -4260,51 +4213,26 @@ window.tacticalGlobe = (function () {
         const entry = viewers.get(containerId);
         if (!entry) return;
         entry.worldNewsSignals = signals || [];
-        const iconsReady = whenIconFontReady(function () {
+        whenIconFontReady(function () {
             if (viewers.get(containerId) === entry && entry.worldNewsSignals) setWorldNews(containerId, entry.worldNewsSignals);
         });
         entry.worldNewsDataSource.entities.suspendEvents();
         entry.worldNewsDataSource.entities.removeAll();
         const reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
         (signals || []).forEach(function (signal) {
-            // Bigger for wider coverage (3 outlets ~12px, 50+ ~30px); faded once a story goes quiet.
-            // An icon pin is at least 18px so its glyph stays readable.
-            // Sized by independent sources (wire copies count once, 19-11-26), else outlets.
-            const outletSize = Math.min(30, 8 + Math.log2(Math.max(2, Number(signal.independentCount) || Number(signal.outletCount) || 2)) * 4);
-            const size = iconsReady && signal.icon ? Math.max(18, outletSize) : outletSize;
-            const color = Cesium.Color.fromCssColorString('#59f07a').withAlpha(signal.active === false ? 0.45 : 1);
-            const billboard = {
-                image: iconsReady ? iconPinImage(signal.icon) : markerGlyph('hexagon'),
-                width: size,
-                height: size,
-                color: color,
-                disableDepthTestDistance: 0
-            };
-            let label;
-            if (signal.surge) {
-                // A slow pulse so breaking news catches the eye without strobing.
-                if (!reduced) {
-                    billboard.scale = new Cesium.CallbackProperty(function () {
-                        return 1 + 0.3 * (0.5 + 0.5 * Math.sin(Date.now() / 350));
-                    }, false);
-                }
-                label = {
-                    text: 'SURGING',
-                    font: 'bold 11px "Share Tech Mono", monospace',
-                    fillColor: Cesium.Color.fromCssColorString('#b8ffd6'),
-                    outlineColor: Cesium.Color.fromCssColorString('#05080a'),
-                    outlineWidth: 3,
-                    style: Cesium.LabelStyle.FILL_AND_OUTLINE,
-                    pixelOffset: new Cesium.Cartesian2(0, -size),
-                    disableDepthTestDistance: 0
-                };
+            // The Mac's news disc, with its callout box when it's one of the three in view
+            // (OverwatchCallouts); faded once a story goes quiet.
+            const billboard = Object.assign(macPin('setWorldNews', signal), { disableDepthTestDistance: 0 });
+            if (signal.active === false) billboard.color = Cesium.Color.WHITE.withAlpha(0.45);
+            // A surging story pulses slowly (a web extra), so breaking news catches the eye without strobing.
+            if (signal.surge && !reduced) {
+                billboard.scale = new Cesium.CallbackProperty(function () {
+                    return 1 + 0.3 * (0.5 + 0.5 * Math.sin(Date.now() / 350));
+                }, false);
             }
-            // One of the three callouts in view (OverwatchCallouts), unless the pin is surging.
-            if (!label && signal.callout) label = calloutLabel(signal.callout);
             const entity = entry.worldNewsDataSource.entities.add({
                 position: Cesium.Cartesian3.fromDegrees(signal.lon, signal.lat),
-                billboard: billboard,
-                label: label
+                billboard: billboard
             });
             entity._tacticalGlobeWorldNews = signal;
         });
@@ -4712,21 +4640,6 @@ window.tacticalGlobe = (function () {
         }
     }
 
-    // Keyed on the normalized category (IncidentNormalizer) so every source colors the same
-    // way; GDOT's raw names are kept as a fallback for any payload without a category.
-    function incidentTypeColor(categoryOrEventType) {
-        switch (categoryOrEventType) {
-            case 'crash':
-            case 'accidentsAndIncidents': return Cesium.Color.fromCssColorString('#ff453a');
-            case 'closure':
-            case 'closures': return Cesium.Color.fromCssColorString('#ff9d3b');
-            case 'roadwork': return Cesium.Color.fromCssColorString('#ffd60a');
-            case 'hazard': return Cesium.Color.fromCssColorString('#59f07a');
-            case 'event': return Cesium.Color.fromCssColorString('#59f07a');
-            default: return Cesium.Color.fromCssColorString('#59f07a');
-        }
-    }
-
     const hazardSizes = { major: 20, moderate: 15, minor: 11 };
 
     function setHazards(hazards, containerId) {
@@ -4955,12 +4868,7 @@ window.tacticalGlobe = (function () {
             const color = Cesium.Color.fromCssColorString(satelliteColors[sat.group] || '#d9e4ff');
             const dot = entities.add({
                 position: Cesium.Cartesian3.fromDegrees(sat.lon, sat.lat, sat.altitudeKm * 1000),
-                billboard: { image: markerGlyph('dot'), width: station ? 11 : 9, height: station ? 11 : 9, color: color, disableDepthTestDistance: 0 },
-                label: {
-                    text: String(sat.name || '').toUpperCase(), font: '600 10px monospace', fillColor: color, outlineColor: Cesium.Color.BLACK,
-                    outlineWidth: 3, style: Cesium.LabelStyle.FILL_AND_OUTLINE, pixelOffset: new Cesium.Cartesian2(0, -14),
-                    disableDepthTestDistance: 0
-                }
+                billboard: Object.assign(macPin('setSatellites', sat), { disableDepthTestDistance: 0 })
             });
             dot._tacticalGlobeSatellite = sat;
             if (station && sat.path && sat.path.length >= 6) {
@@ -5161,31 +5069,12 @@ window.tacticalGlobe = (function () {
         incidentPanel = panel;
     }
 
-    // Night Ops kit glyph per layer for the hazard-style pins, by the layer's data source.
-    function hazardGlyph(layer, hazard) {
-        switch (layer) {
-            case 'tg-internet': return markerGlyph('arcs');
-            case 'tg-airports': return markerGlyph('ring-dot', hazard.severity);
-            case 'tg-chokepoints': return markerGlyph('diamond-outline');
-            case 'tg-weather-warnings': return markerGlyph('outline');
-            case 'tg-travel': {
-                const level = /level\s*(\d)/i.exec(String(hazard.detail || '') + ' ' + String(hazard.title || ''));
-                return markerGlyph('shield', level ? level[1] : hazard.severity === 'major' ? '4' : hazard.severity === 'moderate' ? '3' : '2');
-            }
-            case 'tg-fires': return markerGlyph('heat');
-            case 'tg-conflict': return markerGlyph('crossed');
-            case 'tg-humanitarian': return markerGlyph('cross-circle');
-            default: return markerGlyph('triangle', (hazardKindLetters[hazard.kind] || '!') + (hazard.severity === 'major' ? ':major' : ''));
-        }
-    }
-
-    // Severity in Apple's system colours (warning #ffd60a, critical #ff453a), always with the glyph's
-    // size, and for hazards a double edge, so colour is never the only cue.
-    function hazardColour(severity, fire) {
-        if (severity === 'major') return '#ff453a';
-        if (severity === 'moderate') return fire ? '#ffb000' : '#ffd60a';
-        return fire ? '#ffb000' : '#59f07a';
-    }
+    // The Mac operation each hazard-style layer is drawn as (its disc in macMarker).
+    const hazardOperations = {
+        'tg-internet': 'setInternetOutages', 'tg-airports': 'setAirportStatus', 'tg-chokepoints': 'setChokepoints',
+        'tg-weather-warnings': 'setWeatherWarnings', 'tg-travel': 'setTravelAdvice', 'tg-fires': 'setFireHotspots',
+        'tg-conflict': 'setConflict', 'tg-humanitarian': 'setHumanitarian', 'tg-hazards': 'setHazards'
+    };
 
     function drawHazardPins(dataSource, hazards) {
         const layer = dataSource.name || '';
@@ -5196,17 +5085,11 @@ window.tacticalGlobe = (function () {
             const size = (hazardSizes[hazard.severity] || 11) + 5;
             const position = Cesium.Cartesian3.fromDegrees(hazard.lon, hazard.lat);
             if (fire) addThermalHalo(dataSource, position, size);
+            // The Mac's disc for the layer, with its callout box beside it when it's one of the three
+            // in view (OverwatchCallouts).
             const entity = dataSource.entities.add({
                 position: position,
-                billboard: {
-                    image: hazardGlyph(layer, hazard),
-                    width: size,
-                    height: size,
-                    color: Cesium.Color.fromCssColorString(hazardColour(hazard.severity, fire)),
-                    disableDepthTestDistance: 0
-                },
-                // One of the three callouts in view (OverwatchCallouts), in its severity colour.
-                label: hazard.callout ? calloutLabel(hazard.callout, hazard.severity === 'major' ? '#ff453a' : hazard.severity === 'moderate' ? '#ffd60a' : '#b8ffd6') : undefined
+                billboard: Object.assign(macPin(hazardOperations[layer] || 'setHazards', hazard), { disableDepthTestDistance: 0 })
             });
             entity._tacticalGlobeHazard = hazard;
         });
@@ -5238,23 +5121,7 @@ window.tacticalGlobe = (function () {
             square._tacticalGlobeConvergence = cell;
             const marker = entities.add({
                 position: Cesium.Cartesian3.fromDegrees(cell.lon, cell.lat),
-                billboard: {
-                    image: markerGlyph('rings'),
-                    width: 24,
-                    height: 24,
-                    color: color,
-                    disableDepthTestDistance: 0
-                },
-                label: {
-                    text: (cell.kinds || []).length + ' SIGNALS',
-                    font: '600 11px monospace',
-                    fillColor: Cesium.Color.WHITE,
-                    outlineColor: Cesium.Color.BLACK,
-                    outlineWidth: 3,
-                    style: Cesium.LabelStyle.FILL_AND_OUTLINE,
-                    pixelOffset: new Cesium.Cartesian2(0, -18),
-                    disableDepthTestDistance: 0
-                }
+                billboard: Object.assign(macPin('setConvergence', cell), { disableDepthTestDistance: 0 })
             });
             marker._tacticalGlobeConvergence = cell;
         });
@@ -5279,17 +5146,7 @@ window.tacticalGlobe = (function () {
         perimeter._tacticalGlobeConvergence = cell;
         const marker = entities.add({
             position: Cesium.Cartesian3.fromDegrees(cell.lon, cell.lat),
-            billboard: { image: markerGlyph('rings'), width: 20, height: 20, color: color, disableDepthTestDistance: 0 },
-            label: {
-                text: 'NO REPORTING',
-                font: '600 11px monospace',
-                fillColor: Cesium.Color.WHITE,
-                outlineColor: Cesium.Color.BLACK,
-                outlineWidth: 3,
-                style: Cesium.LabelStyle.FILL_AND_OUTLINE,
-                pixelOffset: new Cesium.Cartesian2(0, -18),
-                disableDepthTestDistance: 0
-            }
+            billboard: Object.assign(macPin('setConvergence', cell), { disableDepthTestDistance: 0 })
         });
         marker._tacticalGlobeConvergence = cell;
     }
@@ -5314,13 +5171,7 @@ window.tacticalGlobe = (function () {
         (signs || []).forEach(function (sign) {
             const entity = entry.signDataSource.entities.add({
                 position: Cesium.Cartesian3.fromDegrees(Number(sign.lon), Number(sign.lat)),
-                billboard: {
-                    image: markerGlyph('plate'),
-                    width: 16,
-                    height: 16,
-                    color: Cesium.Color.fromCssColorString('#ffd60a'),
-                    disableDepthTestDistance: 0
-                }
+                billboard: Object.assign(macPin('setMessageSigns', sign), { disableDepthTestDistance: 0 })
             });
             entity._tacticalGlobeSign = sign;
         });
@@ -5332,7 +5183,6 @@ window.tacticalGlobe = (function () {
         if (entry) entry.signDataSource.entities.removeAll();
     }
 
-    const roadRiskColors = { 'ice-likely': '#ff453a', 'near-freezing': '#ffd60a', 'clear': '#59f07a' };
     const roadRiskLabels = { 'ice-likely': 'ICE LIKELY', 'near-freezing': 'NEAR FREEZING', 'clear': 'NO ICE RISK' };
 
     // stations: [{ id, name, lat, lon, pavementF, airF, dewpointF, precipitation, observedAt, risk,
@@ -5345,14 +5195,7 @@ window.tacticalGlobe = (function () {
         (stations || []).forEach(function (station) {
             const entity = entry.roadWeatherDataSource.entities.add({
                 position: Cesium.Cartesian3.fromDegrees(Number(station.lon), Number(station.lat)),
-                billboard: {
-                    // A station dot; a snowflake where ice is likely.
-                    image: markerGlyph(station.risk === 'ice-likely' ? 'snowflake' : 'dot'),
-                    width: station.risk === 'clear' ? 10 : 16,
-                    height: station.risk === 'clear' ? 10 : 16,
-                    color: Cesium.Color.fromCssColorString(roadRiskColors[station.risk] || '#ffffff'),
-                    disableDepthTestDistance: 0
-                }
+                billboard: Object.assign(macPin('setRoadWeather', station), { disableDepthTestDistance: 0 })
             });
             entity._tacticalGlobeRoadWeather = station;
         });
@@ -5682,22 +5525,9 @@ window.tacticalGlobe = (function () {
         if (!entry) return;
         clearCoverageMarkers(containerId);
         entry.coverageEntities = (regions || []).map(function (region) {
-            const color = Cesium.Color.fromCssColorString(region.ok ? '#59f07a' : '#3f8f62');
             return entry.viewer.entities.add({
                 position: Cesium.Cartesian3.fromDegrees(Number(region.lon), Number(region.lat)),
-                billboard: { image: markerGlyph('cone'), width: 16, height: 16, color: color.withAlpha(0.9) },
-                label: {
-                    text: region.label,
-                    font: '11px monospace',
-                    fillColor: color,
-                    outlineColor: Cesium.Color.BLACK,
-                    outlineWidth: 2,
-                    style: Cesium.LabelStyle.FILL_AND_OUTLINE,
-                    pixelOffset: new Cesium.Cartesian2(0, -16),
-                    // Dots only from a whole-globe height (dozens of labels overlap there);
-                    // names appear once zoomed to roughly continent scale.
-                    distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 7000000)
-                }
+                billboard: macPin('setCoverageMarkers', region)
             });
         });
     }
@@ -6431,6 +6261,10 @@ window.tacticalGlobe = (function () {
         runLineOfSight: runLineOfSight,
         clearLineOfSight: clearLineOfSight,
         markerGlyph: markerGlyph,
+        macMarker: macMarker,
+        macDisc: macDisc,
+        macToneHex: macToneHex,
+        macSymbolIcon: function (symbol) { return SF_TO_BI[symbol] || null; },
         nightOpsState: nightOpsState,
         lineOfSightMask: lineOfSightMask,
         flyToStreetLevel: flyToStreetLevel,
@@ -6465,6 +6299,7 @@ window.tacticalGlobe = (function () {
         clearWeatherAlerts: clearWeatherAlerts,
         setCameraAlertHighlights: setCameraAlertHighlights,
         getCameraAlertSeverity: getCameraAlertSeverity,
+        visiblePins: visiblePins,
         setTrafficIncidents: setTrafficIncidents,
         clearTrafficIncidents: clearTrafficIncidents,
         setWorldNews: setWorldNews,

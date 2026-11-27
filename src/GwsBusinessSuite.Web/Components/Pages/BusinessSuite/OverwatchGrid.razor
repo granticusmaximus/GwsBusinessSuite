@@ -4091,6 +4091,8 @@
         try
         {
             var stations = await RoadWeatherDirectoryService.GetStationsInBoundingBoxAsync(_lastBbox);
+            // A late answer must not redraw a layer switched off meanwhile (27-11-26, Overwatch visual tour).
+            if (!_roadWeatherOn) return;
             await JS.InvokeVoidAsync("tacticalGlobe.setRoadWeather", stations.Select(station => new
             {
                 id = station.Id,
@@ -4132,6 +4134,8 @@
         try
         {
             var signs = await MessageSignDirectoryService.GetSignsInBoundingBoxAsync(_lastBbox);
+            // A late answer must not redraw a layer switched off meanwhile (27-11-26, Overwatch visual tour).
+            if (!_signsOn) return;
             await JS.InvokeVoidAsync("tacticalGlobe.setMessageSigns", signs.Select(sign => new
             {
                 id = sign.Id,
@@ -4373,6 +4377,8 @@
         try
         {
             var result = await AircraftService.GetAsync(_lastBbox);
+            // A late answer must not redraw a layer switched off meanwhile (27-11-26, Overwatch visual tour).
+            if (!_aircraftOn) return;
             RecordTracks(GwsBusinessSuite.Application.LiveLayers.LiveTrackKinds.Aircraft, result.Aircraft.Select(a => new GwsBusinessSuite.Application.LiveLayers.LiveTrack(GwsBusinessSuite.Application.LiveLayers.LiveTrackKinds.Aircraft, a.Icao24,
                 string.IsNullOrWhiteSpace(a.Callsign) ? a.Icao24.ToUpperInvariant() : a.Callsign.Trim(), a.Latitude, a.Longitude, a.HeadingDegrees, DateTimeOffset.UtcNow)));
             await JS.InvokeVoidAsync("tacticalGlobe.setAircraft", "tg-viewport", result.Aircraft.Select(a => new
@@ -4403,6 +4409,8 @@
         try
         {
             var result = await AirQualityService.GetAsync(_lastBbox);
+            // A late answer must not redraw a layer switched off meanwhile (27-11-26, Overwatch visual tour).
+            if (!_airQualityOn) return;
             await JS.InvokeVoidAsync("tacticalGlobe.setAirQuality", "tg-viewport", result.Readings.Select(r => new
             {
                 lat = r.Latitude, lon = r.Longitude, aqi = r.UsAqi, category = r.Category
@@ -4440,6 +4448,8 @@
         try
         {
             var result = await PowerOutageService.GetAsync(_lastBbox);
+            // A late answer must not redraw a layer switched off meanwhile (27-11-26, Overwatch visual tour).
+            if (!_outagesOn) return;
             RecordTracks(GwsBusinessSuite.Application.LiveLayers.LiveTrackKinds.Outage, result.Areas.Select(a => new GwsBusinessSuite.Application.LiveLayers.LiveTrack(GwsBusinessSuite.Application.LiveLayers.LiveTrackKinds.Outage, a.Name,
                 $"{a.Name}: {a.CustomersOut:N0} out", a.Latitude, a.Longitude, null, DateTimeOffset.UtcNow)));
             var inView = result.Areas.Where(a => _lastBbox.Contains(a.Latitude, a.Longitude)).ToList();
@@ -4485,6 +4495,8 @@
         try
         {
             var outages = await InternetOutageService.GetAsync();
+            // A late answer must not redraw a layer switched off meanwhile (27-11-26, Overwatch visual tour).
+            if (!_internetOn) return;
             var inView = outages.Where(o => _lastBbox.Contains(o.Latitude, o.Longitude)).OrderBy(o => SeverityRank(o.Severity)).ToList();
             await JS.InvokeVoidAsync("tacticalGlobe.setInternetOutages", HazardPayload(outages));
             _internetSummary = outages.Count == 0
@@ -4519,6 +4531,8 @@
         try
         {
             var view = await SignalConvergenceService.GetViewAsync(_lastBbox);
+            // A late answer must not redraw a layer switched off meanwhile (27-11-26, Overwatch visual tour).
+            if (!_convergenceOn) return;
             var cells = view.Cells;
             var squares = cells.Select(cell => (object)new
             {
@@ -4604,6 +4618,8 @@
         try
         {
             var countries = await WmoWarningService.GetAsync();
+            // A late answer must not redraw a layer switched off meanwhile (27-11-26, Overwatch visual tour).
+            if (!_wmoOn) return;
             if (AlreadyDrawn("wmo", ContentKey(countries))) return;
             await JS.InvokeVoidAsync("tacticalGlobe.setWeatherWarnings", HazardPayload(countries));
             var severe = countries.Where(c => c.Severity == "major").Select(c => c.Title.Split(':')[0]).ToList();
@@ -4639,6 +4655,8 @@
         try
         {
             var airports = await AirportStatusService.GetAsync();
+            // A late answer must not redraw a layer switched off meanwhile (27-11-26, Overwatch visual tour).
+            if (!_airportsOn) return;
             if (AlreadyDrawn("airports", ContentKey(airports))) return;
             await JS.InvokeVoidAsync("tacticalGlobe.setAirportStatus", HazardPayload(airports));
             var stops = airports.Where(a => a.Severity == "major").Select(a => a.Id["faa-".Length..]).ToList();
@@ -5013,6 +5031,8 @@
         try
         {
             var advisories = await TravelAdvisoryService.GetAsync();
+            // A late answer must not redraw a layer switched off meanwhile (27-11-26, Overwatch visual tour).
+            if (!_travelOn) return;
             if (AlreadyDrawn("travel advice", advisories.Aggregate(advisories.Count, (hash, a) => HashCode.Combine(hash, a.Code, a.Level)))) return;
             var pins = GwsBusinessSuite.Infrastructure.Services.TravelAdvisoryService.Pins(advisories,
                 GwsBusinessSuite.Infrastructure.Services.WorldNewsPlaces.Instance);
@@ -5050,6 +5070,8 @@
         try
         {
             var cells = await FireHotspotService.GetAsync();
+            // A late answer must not redraw a layer switched off meanwhile (27-11-26, Overwatch visual tour).
+            if (!_firesOn) return;
             var inView = cells.Where(c => _lastBbox.Contains(c.Latitude, c.Longitude)).ToList();
             var drawn = inView.Take(MaxFireCells).ToList();
             await JS.InvokeVoidAsync("tacticalGlobe.setFireHotspots", HazardPayload(drawn));
@@ -5098,6 +5120,8 @@
         try
         {
             var layer = await ConflictEventService.GetAsync();
+            // A late answer must not redraw a layer switched off meanwhile (27-11-26, Overwatch visual tour).
+            if (!_conflictOn) return;
             if (AlreadyDrawn("conflict", ContentKey(layer.Reported), ContentKey(layer.Confirmed), _conflictConfirmed, _conflictReported)) return;
             var shown = (_conflictConfirmed ? layer.Confirmed : Array.Empty<GwsBusinessSuite.Application.Hazards.HazardFeature>())
                 .Concat(_conflictReported ? layer.Reported : Array.Empty<GwsBusinessSuite.Application.Hazards.HazardFeature>())
@@ -5136,6 +5160,8 @@
         try
         {
             var items = await HumanitarianService.GetAsync();
+            // A late answer must not redraw a layer switched off meanwhile (27-11-26, Overwatch visual tour).
+            if (!_humanitarianOn) return;
             if (AlreadyDrawn("humanitarian", ContentKey(items))) return;
             await JS.InvokeVoidAsync("tacticalGlobe.setHumanitarian", HazardPayload(items));
             var emergencies = items.Select(i => i.Url).Distinct(StringComparer.Ordinal).Count();
@@ -5156,6 +5182,8 @@
         try
         {
             var result = await SatelliteService.GetAsync();
+            // A late answer must not redraw a layer switched off meanwhile (27-11-26, Overwatch visual tour).
+            if (!_satellitesOn) return;
             await JS.InvokeVoidAsync("tacticalGlobe.setSatellites", result.Satellites.Select(s => new
             {
                 id = s.Id, name = s.Name, group = s.Group, lat = s.Latitude, lon = s.Longitude, altitudeKm = s.AltitudeKm,
@@ -5256,6 +5284,8 @@
         try
         {
             var result = await ShipService.GetAsync(_lastBbox);
+            // A late answer must not redraw a layer switched off meanwhile (27-11-26, Overwatch visual tour).
+            if (!_shipsOn) return;
             RecordTracks(GwsBusinessSuite.Application.LiveLayers.LiveTrackKinds.Ship, result.Ships.Select(v => new GwsBusinessSuite.Application.LiveLayers.LiveTrack(GwsBusinessSuite.Application.LiveLayers.LiveTrackKinds.Ship, v.Mmsi.ToString(System.Globalization.CultureInfo.InvariantCulture),
                 string.IsNullOrWhiteSpace(v.Name) ? $"MMSI {v.Mmsi}" : v.Name, v.Latitude, v.Longitude, v.HeadingDegrees ?? v.CourseDegrees, v.SeenAt)));
             await JS.InvokeVoidAsync("tacticalGlobe.setShips", "tg-viewport", result.Ships.Select(s => new
@@ -5294,6 +5324,8 @@
         try
         {
             var result = await HazardLayerService.GetHazardsAsync(_lastBbox);
+            // A late answer must not redraw a layer switched off meanwhile (27-11-26, Overwatch visual tour).
+            if (!_hazardsOn) return;
             var payload = HazardPayload(result.Features).ToList();
             var counts = new[]
             {

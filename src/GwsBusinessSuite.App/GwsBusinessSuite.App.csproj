@@ -77,6 +77,12 @@
 		<PackageReference Include="Microsoft.Extensions.Logging.Debug" Version="10.0.0" />
 	</ItemGroup>
 
+	<!-- The Overwatch visual tour (26-11-26), Debug builds of the Mac app only: OverwatchSelfTest runs it
+	     when the app starts with GWS_OVERWATCH_SELFTEST=1. Release builds never contain it. -->
+	<ItemGroup Condition="'$(Configuration)' == 'Debug' And $(TargetFramework.Contains('maccatalyst'))">
+		<EmbeddedResource Include="..\..\tests\GwsBusinessSuite.Tests\TestData\overwatch-visual-tour.js" LogicalName="overwatch-visual-tour.js" />
+	</ItemGroup>
+
 	<ItemGroup>
 		<ProjectReference Include="..\GwsBusinessSuite.Application\GwsBusinessSuite.Application.csproj" />
 		<ProjectReference Include="..\GwsBusinessSuite.OllamaKit\GwsBusinessSuite.OllamaKit.csproj" />

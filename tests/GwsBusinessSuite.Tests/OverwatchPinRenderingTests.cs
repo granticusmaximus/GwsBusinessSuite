@@ -6,19 +6,19 @@ public sealed class OverwatchPinRenderingTests
 {
     private static readonly string RepoRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../.."));
 
-    // 18-11-26: World News pins carry their story's icon and the panel names the subtype. A stale
-    // editor buffer saved over the file removed both on 19-11-26 with every test still green.
+    // 18-11-26: the World News panel names the subtype. A stale editor buffer saved over the file
+    // removed it on 19-11-26 with every test still green. Since 26-11-26 (the Mac look) a news pin is
+    // the Mac's news disc, whose symbol comes from the icon font.
     [Fact]
-    public void WorldNewsPins_ShouldCarryTheStoryIcon_AndThePanelTheSubtype()
+    public void WorldNewsPins_ShouldBeTheMacNewsDisc_AndThePanelTheSubtype()
     {
         var source = File.ReadAllText(Path.Combine(
             RepoRoot, "src/GwsBusinessSuite.Web/wwwroot/js/tactical-globe.js"));
 
-        source.Should().Contain("function iconPinImage(name)")
-            .And.Contain("image: iconsReady ? iconPinImage(signal.icon) : markerGlyph('hexagon')",
-                "World News pins draw the story's Bootstrap icon once the icon font has loaded")
+        source.Should().Contain("const billboard = Object.assign(macPin('setWorldNews', signal), { disableDepthTestDistance: 0 });")
             .And.Contain("whenIconFontReady(",
-                "pins drawn before the icon font loads must be redrawn with their icons");
+                "pins drawn before the icon font loads must be redrawn with their symbols")
+            .And.Contain("await loadMacIconFont();", "the globe waits for the icon font before drawing pins");
         source.Should().Contain("signal.subtype && signal.tagLabel",
             "the World News panel shows the story's subtype");
     }
@@ -56,29 +56,29 @@ public sealed class OverwatchPinRenderingTests
 
         source.Should().NotContain("disableDepthTestDistance = Number.POSITIVE_INFINITY",
             "far-side markers must be occluded by the globe instead of bleeding through it");
-        System.Text.RegularExpressions.Regex.Matches(source, @"cluster\.point\.show\s*=\s*false")
-            .Should().HaveCount(3,
-                "camera, incident, and World News clusters must hide Cesium's point so their count label stays visible");
-        System.Text.RegularExpressions.Regex.Matches(source, @"cluster\.billboard\.disableDepthTestDistance\s*=\s*0")
-            .Should().HaveCount(3,
-                "camera, incident, and World News cluster markers must remain occluded by the globe");
-        System.Text.RegularExpressions.Regex.Matches(source, @"cluster\.label\.disableDepthTestDistance\s*=\s*0")
-            .Should().HaveCount(3,
-                "camera, incident, and World News count labels must use the same globe depth test");
+        // Since 26-11-26 the camera, incident and World News groups share one style: the Mac's count disc,
+        // with the count drawn into the image (no separate label to be covered).
+        System.Text.RegularExpressions.Regex.Matches(source, @"styleMacCluster\(clusteredEntities, cluster\);")
+            .Should().HaveCount(4, "camera, incident, World News and conflict clusters use the Mac's count disc");
+        var style = source[source.IndexOf("function styleMacCluster(", StringComparison.Ordinal)..];
+        style = style[..style.IndexOf("\n    }", StringComparison.Ordinal)];
+        style.Should().Contain("cluster.point.show = false;", "Cesium's own point is hidden")
+            .And.Contain("cluster.billboard.disableDepthTestDistance = 0;", "group discs stay occluded by the globe")
+            .And.Contain("cluster.label.show = false;", "the count is part of the disc");
         source.Should().Contain("viewer.scene.drillPick(movement.position, 32)")
             .And.Contain("drill.map(pickIdentifier).find(isActionable)",
                 "a decorative primitive on top of a pin must not prevent the actionable object from opening");
     }
 
-    // 19-11-26: 26 outlets running one wire story are one source, so pins are sized by independent
-    // sources (SourceIndependence) and the panel says how many there are.
+    // 19-11-26: 26 outlets running one wire story are one source (SourceIndependence), and the panel
+    // says how many independent sources there are. Pins were sized by that count until the Mac look
+    // (26-11-26), where every news pin is the Mac's fixed-size disc.
     [Fact]
-    public void WorldNewsPins_ShouldBeSizedByIndependentSources()
+    public void WorldNewsPanel_ShouldCountIndependentSources()
     {
         var js = File.ReadAllText(Path.Combine(RepoRoot, "src/GwsBusinessSuite.Web/wwwroot/js/tactical-globe.js"));
         var map = File.ReadAllText(Path.Combine(RepoRoot, "src/GwsBusinessSuite.Infrastructure/Services/WorldNewsMapService.cs"));
-        js.Should().Contain("Number(signal.independentCount) || Number(signal.outletCount)")
-            .And.Contain("' INDEPENDENT'");
+        js.Should().Contain("' INDEPENDENT'");
         map.Should().Contain("SourceIndependence.Assess(events.SelectMany(e => store.ArticlesForEvent(e.Id)).ToList()).Independent");
     }
 }

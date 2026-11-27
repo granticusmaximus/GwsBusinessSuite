@@ -86,7 +86,7 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
                margin shifts .tg-shell (and therefore the canvas) 8px away from the (0,0) every
                hardcoded click coordinate in this file assumes - close enough that a 14px `point`
                entity's pick tolerance happened to absorb it, but a same-sized `billboard` entity's
-               tighter pick precision (see tactical-globe.js's own comment on pinBillboardImage)
+               tighter pick precision
                does not, surfacing as click/pick timeouts across most of this file's tests. */
             body { margin: 0; }
             .tg-modal-backdrop { position: absolute; inset: 0; }

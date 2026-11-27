@@ -652,6 +652,9 @@ public partial class MainPage : ContentPage
                     webView.ReloadFromOrigin();
                     return;
                 }
+#if DEBUG
+                if (!IsSentinelWindow) OverwatchSelfTest.OnNavigated(webView, args.Url);
+#endif
             }
 #endif
             if (!IsSentinelWindow) _ = OfferTouchIdOnceAsync(args.Url);

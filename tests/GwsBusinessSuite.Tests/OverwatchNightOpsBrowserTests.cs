@@ -1,40 +1,24 @@
 using FluentAssertions;
+using GwsBusinessSuite.Application.Overwatch;
 using Microsoft.Playwright;
 using static GwsBusinessSuite.Tests.OverwatchGridScriptBrowserTests;
 
 namespace GwsBusinessSuite.Tests;
 
-// Night Ops x Apple, combined (20-11-26) on the real script and pinned Cesium build: the kit glyph per
-// layer, target brackets, thermal tint, line of sight and the quality setting.
+// Night Ops x Apple, combined (20-11-26) on the real script and pinned Cesium build: the Mac's disc per
+// layer (Mac look, 26-11-26), target brackets, thermal tint, line of sight and the quality setting.
 [Collection("PlaywrightOverwatchB")]
 public sealed class OverwatchNightOpsBrowserTests(PlaywrightBrowserFixture fixture)
 {
-    // Layer -> the kit glyph its markers use (name, variant). Layers that keep their lines or fills
-    // (city traffic, news coverage, routes, measure, notes) aren't listed.
-    private static readonly Dictionary<string, (string Name, string? Variant)> Expected = new()
+    // The Mac look (26-11-26, Grant: the Mac app is the reference). Every layer sample, sent to the real
+    // script, draws the very disc the Mac draws for it: the style comes from the Mac's own code
+    // (NativeShapes.Payload/Items/Marker on the same arguments) and the image from the web's macDisc.
+    // Layers drawn as lines, fills or tool marks (alerts, news shading, city traffic, routes, measure)
+    // and pins that are a callout box are left out; camera alert highlights restyle existing pins.
+    private static readonly HashSet<string> NotDiscs = new(StringComparer.Ordinal)
     {
-        ["Cameras"] = ("lens", null),
-        ["Traffic incidents"] = ("wedge", null),
-        ["World News"] = ("hexagon", null),
-        ["Road weather"] = ("snowflake", null),
-        ["Message signs"] = ("plate", null),
-        ["Aircraft"] = ("chevron", null),
-        ["Air quality"] = ("aqi", null),
-        ["Power outages"] = ("bolt", null),
-        ["Internet outages"] = ("arcs", null),
-        ["Signals converging"] = ("rings", null),
-        ["Chokepoints"] = ("diamond-outline", null),
-        ["Weather warnings"] = ("outline", null),
-        ["Airport delays"] = ("ring-dot", "major"),
-        ["Travel advice"] = ("shield", "3"),
-        ["Fire hotspots"] = ("heat", null),
-        ["Conflict"] = ("crossed", null),
-        ["Humanitarian"] = ("cross-circle", null),
-        ["Hazards"] = ("triangle", "C:major"),
-        ["Satellites"] = ("dot", null),
-        ["Ships"] = ("diamond", null),
-        ["Camera coverage"] = ("cone", null),
-        ["Street view marker"] = ("viewer", null),
+        "setWeatherAlerts", "setNewsShading", "setRoadTraffic", "setRoute", "setRouteHighlights", "setRouteConditions",
+        "setMeasure", "setCameraAlertHighlights",
     };
 
     // The harness page has no server behind it: layers that fetch map tiles (radar, traffic, imagery,
@@ -43,7 +27,7 @@ public sealed class OverwatchNightOpsBrowserTests(PlaywrightBrowserFixture fixtu
         consoleErrors.Where(error => !error.StartsWith("Failed to load resource", StringComparison.Ordinal));
 
     [Fact]
-    public async Task EveryMarkerLayer_ShouldDrawItsNightOpsGlyph_AndAlertsShouldBeHatched()
+    public async Task EveryMarkerLayer_ShouldDrawTheMacsDisc_AndAlertsShouldBeHatched()
     {
         var (page, consoleErrors) = await OpenHarnessAsync(fixture.Browser);
         await using var pageScope = page;
@@ -66,6 +50,7 @@ public sealed class OverwatchNightOpsBrowserTests(PlaywrightBrowserFixture fixtu
             """);
 
         var wrong = new List<string>();
+        var checkedLayers = 0;
         foreach (var sample in OverwatchLayerSample.All)
         {
             await page.EvaluateAsync("() => { window.__images = []; window.__lines = 0; }");
@@ -75,17 +60,26 @@ public sealed class OverwatchNightOpsBrowserTests(PlaywrightBrowserFixture fixtu
                 (await page.EvaluateAsync<int>("() => window.__lines")).Should().BeGreaterThan(3, "a weather alert is a hatched area");
                 continue;
             }
-            if (!Expected.TryGetValue(sample.Layer, out var glyph)) continue;
-            var drawn = await page.EvaluateAsync<bool>("([name, variant]) => window.__images.includes(window.tacticalGlobe.markerGlyph(name, variant || undefined))",
-                new object?[] { glyph.Name, glyph.Variant });
-            if (!drawn) wrong.Add($"{sample.Layer} (expected {glyph.Name})");
+            if (NotDiscs.Contains(sample.Op)) continue;
+            var payload = NativeShapes.Payload(sample.Op, sample.MacArguments());
+            var styles = NativeShapes.Items(payload)
+                .Where(item => NativeShapes.TryPoint(item, out _, out _) && !(item.TryGetValue("callout", out var c) && c is string { Length: > 0 }))
+                .Select(item => NativeShapes.Marker(sample.Op, item)).Distinct().ToList();
+            if (styles.Count == 0) { wrong.Add($"{sample.Layer}: the Mac draws no pin for the sample"); continue; }
+            checkedLayers++;
+            foreach (var style in styles)
+            {
+                var drawn = await page.EvaluateAsync<bool>("([symbol, tone, prominent]) => window.__images.includes(window.tacticalGlobe.macDisc(symbol, tone, prominent, false))",
+                    new object[] { style.Symbol, style.Tone.ToString(), style.Prominent });
+                if (!drawn) wrong.Add($"{sample.Layer} (expected the Mac's {style.Symbol} {style.Tone}{(style.Prominent ? " prominent" : "")} disc)");
+            }
         }
 
-        wrong.Should().BeEmpty("every layer draws its kit glyph");
-        (await page.EvaluateAsync<int>("""
-            () => new Set(['chevron', 'diamond', 'dot', 'lens', 'cone', 'wedge', 'snowflake', 'plate', 'viewer', 'outline', 'heat', 'aqi',
-              'hexagon', 'rings', 'crossed', 'cross-circle', 'diamond-outline', 'bolt', 'arcs'].map(n => window.tacticalGlobe.markerGlyph(n))).size
-            """)).Should().Be(19, "each glyph is its own drawing");
+        wrong.Should().BeEmpty("every layer draws the Mac's disc");
+        checkedLayers.Should().BeGreaterThan(18, "the check covers the pin layers");
+        (await page.EvaluateAsync<string[]>("() => ['Red', 'Orange', 'Yellow', 'Gray', 'Green', 'Teal', 'Cyan', 'Blue', 'Purple', 'Pink'].map(t => window.tacticalGlobe.macToneHex(t))"))
+            .Should().Equal(new[] { "Red", "Orange", "Yellow", "Gray", "Green", "Teal", "Cyan", "Blue", "Purple", "Pink" }
+                .Select(t => NativeShapes.ToneHex(Enum.Parse<NativeShapes.MarkerTone>(t))), "the web's tones are the Mac's");
         ScriptErrors(consoleErrors).Should().BeEmpty();
     }
 
@@ -136,23 +130,25 @@ public sealed class OverwatchNightOpsBrowserTests(PlaywrightBrowserFixture fixtu
         ScriptErrors(consoleErrors).Should().BeEmpty();
     }
 
-    // Looks (21-11-26): Satellite lays Esri's real aerial imagery over the globe and hides the holo
-    // land; switching back hides the imagery again, and an unknown look changes nothing.
+    // Looks (21-11-26; the Mac look 26-11-26): every look is real Earth imagery, as on the Mac's Apple
+    // map. Standard and Night Ops keep the green coastlines over it with the road overlay faint;
+    // Satellite drops the coastlines and shows roads at full strength (Apple's hybrid). An unknown look
+    // changes nothing.
     [Fact]
-    public async Task SatelliteLook_ShouldShowAerialImagery_AndHideTheHoloLand_UntilSwitchedBack()
+    public async Task Looks_ShouldShowRealImagery_WithCoastlinesOrRoadsByLook()
     {
         var (page, consoleErrors) = await OpenHarnessAsync(fixture.Browser);
         await using var pageScope = page;
         await InitAsync(page);
         const string Look = "() => JSON.stringify(window.tacticalGlobe.nightOpsState().look)";
-        (await page.EvaluateAsync<string>(Look)).Should().Be("{\"name\":\"night-ops\",\"imagery\":false,\"land\":true}");
+        (await page.EvaluateAsync<string>(Look)).Should().Be("{\"name\":\"night-ops\",\"imagery\":false,\"land\":true,\"roads\":false}");
 
         (await page.EvaluateAsync<string>("() => window.tacticalGlobe.setLook('tg-viewport', 'satellite')")).Should().Be("satellite");
-        (await page.EvaluateAsync<string>(Look)).Should().Be("{\"name\":\"satellite\",\"imagery\":true,\"land\":false}");
+        (await page.EvaluateAsync<string>(Look)).Should().Be("{\"name\":\"satellite\",\"imagery\":true,\"land\":false,\"roads\":true}");
 
         (await page.EvaluateAsync<string>("() => window.tacticalGlobe.setLook('tg-viewport', 'nonsense')")).Should().Be("satellite");
         (await page.EvaluateAsync<string>("() => window.tacticalGlobe.setLook('tg-viewport', 'standard')")).Should().Be("standard");
-        (await page.EvaluateAsync<string>(Look)).Should().Be("{\"name\":\"standard\",\"imagery\":false,\"land\":true}");
+        (await page.EvaluateAsync<string>(Look)).Should().Be("{\"name\":\"standard\",\"imagery\":true,\"land\":true,\"roads\":false}");
         ScriptErrors(consoleErrors).Should().BeEmpty();
     }
 
