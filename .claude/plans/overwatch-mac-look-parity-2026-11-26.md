@@ -109,3 +109,17 @@ and every single version of the app." Continues .claude/plans/responsive-full-au
   Apple POIs. Web: tablet toolbar title hidden <=900 (no overlap); phone sheets --ow-glass-sheet.
 - Progress: units 1-4 done; 5 (tests/gate/guide) in progress; 6 done (Chromium 1440, WebKit 1440/820/390);
   7 done with the crash open; 8: report + commit message next, then Phase 2 (responsive).
+- Phase 2 addition (27-11-26, Grant): NO overlap in any format, especially on his phone. Extend
+  ResponsiveAuditTests with an overlap check (visible elements whose boxes intersect when they shouldn't:
+  text/text, control/control, fixed bars or panels over content), every page, every device, Chromium +
+  WebKit. Keep a phone screenshot of every page as visual proof, and before/after pairs for each fix.
+- Crash ROOT CAUSE found (27-11-26 late): kept pins were moved in place (NativeAnnotation.Coordinate set
+  from .NET); MapKit's quad trie never saw the move, the pin couldn't be removed later (probe log just
+  before each crash: "kept 10 onMap 11"), and the next AddAnnotations crashed. Group discs re-centre on
+  every regroup, hence the crash after country-scale -> city zooms. Fix: a pin is kept only at the same
+  spot; a moved pin is replaced. Fast repro (ONLY=layer-health,coverage,healthy) went from crashing every
+  time to 4/4 clean, counts always equal. Removed again: tilt-only 3D stays (no configuration switching),
+  motion hold and keep-alive (didn't help).
+- Also done this round: web lens narrows at orbit (globe size like the Mac), globe lighting night side in
+  Chrome/Edge/Firefox (no city lights: the Black Marble nightAlpha layer didn't render; removed), the look
+  is applied at start-up (first visit had no imagery in the default look).

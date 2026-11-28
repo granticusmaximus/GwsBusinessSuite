@@ -48,6 +48,16 @@ public sealed class OverwatchNightOpsMarkerTests
             "contours and slope stay the only globe materials, and they fail soft in onRenderError");
         js.Should().NotContain("new Cesium.ImageMaterialProperty")
             .And.NotContain("enableLighting = true");
+        // The night side (27-11-26): globe lighting only where it compiles (Chrome, Edge, Firefox; never
+        // WebKit, so not Safari, iOS, the PWA on an iPhone or the Mac app), and it fails soft.
+        js.Should().Contain("function canLightGlobe()")
+            .And.Contain("if (window.__gwsMacCatalystWebView === true) return false;")
+            .And.Contain("if (/CriOS|FxiOS|EdgiOS/.test(ua)) return false;")
+            .And.Contain("scene.globe.enableLighting = lightGlobe;");
+        var renderError = js[js.IndexOf("const onRenderError = function (scene, error) {", StringComparison.Ordinal)..];
+        renderError.IndexOf("scene.globe.enableLighting = false;", StringComparison.Ordinal)
+            .Should().BeLessThan(renderError.IndexOf("handleShaderFailure(containerId, error)", StringComparison.Ordinal),
+                "a browser that can't light the globe loses only the night side");
     }
 
     [Fact]

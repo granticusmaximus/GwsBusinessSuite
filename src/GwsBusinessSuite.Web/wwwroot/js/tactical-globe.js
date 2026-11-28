@@ -206,6 +206,25 @@ window.tacticalGlobe = (function () {
         entry.viewer.scene.requestRender();
     }
 
+    const ORBIT_FOV = { nearMetres: 3000000, farMetres: 12000000, nearDegrees: 60, farDegrees: 42 };
+    function orbitFov(height) {
+        const t = Math.min(1, Math.max(0, (height - ORBIT_FOV.nearMetres) / (ORBIT_FOV.farMetres - ORBIT_FOV.nearMetres)));
+        return Cesium.Math.toRadians(ORBIT_FOV.nearDegrees + (ORBIT_FOV.farDegrees - ORBIT_FOV.nearDegrees) * t);
+    }
+
+    // The night side (27-11-26, Grant: like the Mac's Apple globe). Cesium's globe lighting darkens
+    // the side of the Earth away from the sun. (City lights over it, a Black Marble layer with
+    // nightAlpha, didn't show in this Cesium build; not done.)
+    // Only in Chrome, Edge and Firefox: WebKit (Safari, every iOS browser, the PWA on an iPhone and
+    // the Mac app's web view) can't compile Cesium's lighting shaders. If a browser still can't,
+    // onRenderError switches it off and keeps the globe.
+    function canLightGlobe() {
+        if (window.__gwsMacCatalystWebView === true) return false;
+        const ua = navigator.userAgent || '';
+        if (/CriOS|FxiOS|EdgiOS/.test(ua)) return false;
+        return /Chrome\/|Chromium\/|Edg\/|Firefox\//.test(ua);
+    }
+
     async function applyHoloLook(viewer, streets) {
         const scene = viewer.scene;
         const green = Cesium.Color.fromCssColorString(HOLO.green);
@@ -213,7 +232,13 @@ window.tacticalGlobe = (function () {
             scene.backgroundColor = Cesium.Color.fromCssColorString('#020604');
             scene.globe.baseColor = Cesium.Color.fromCssColorString(HOLO.globe);
             scene.globe.showGroundAtmosphere = false;
-            scene.globe.enableLighting = false;
+            // Lighting fades in from the regional stage out (cities stay the plain street map).
+            const lightGlobe = canLightGlobe();
+            scene.globe.enableLighting = lightGlobe;
+            if (lightGlobe) {
+                scene.globe.lightingFadeOutDistance = 600000;
+                scene.globe.lightingFadeInDistance = 3000000;
+            }
             if (scene.skyBox) scene.skyBox.show = false;
             if (scene.sun) scene.sun.show = false;
             if (scene.moon) scene.moon.show = false;
@@ -268,6 +293,12 @@ window.tacticalGlobe = (function () {
             const height = viewer.camera.positionCartographic.height;
             const share = holoStreetShare(height);
             const stage = zoomStage(height);
+            // The Mac look (27-11-26): seen from orbit, Apple's globe fills about 1.5 times as much of the
+            // view as Cesium's at the same height (city views already match). The lens narrows from 60
+            // degrees at 3,000 km to 42 at 12,000 km and above, so the whole Earth looks the same size.
+            if (viewer.camera.frustum && viewer.camera.frustum.fov !== undefined) {
+                viewer.camera.frustum.fov = orbitFov(height);
+            }
             onStageChanged(stage);
             if (shell && shell.dataset.owStage !== stage) {
                 shell.dataset.owStage = stage;
@@ -295,6 +326,7 @@ window.tacticalGlobe = (function () {
             if (streets) streets.alpha = (satellite || holoEarth) ? 0 : share * HOLO.streetAlpha;
             // The street map is the base layer, under the imagery: the imagery fades out as it fades in.
             if (holo.imagery) holo.imagery.alpha = (satellite || holoEarth) ? 1 : 1 - share;
+            if (scene.globe.enableLighting) viewer.clock.currentTime = Cesium.JulianDate.now(); // the sun where it is now
             if (wash) wash.alpha = satellite ? 0 : holoEarth ? 0.08 + share * 0.12 : share * HOLO.washAlpha;
             land.show = !satellite && (holoEarth || share < 0.98);
             // Names and roads as Apple's map shows them over its globe: place names until the street map
@@ -1251,6 +1283,13 @@ window.tacticalGlobe = (function () {
         // later globe/material variant. Cesium reports that path through Scene.renderError; it
         // is not guaranteed to become an uncaught window error.
         const onRenderError = function (scene, error) {
+            // The night side is optional too: a browser that can't draw it loses only that (27-11-26).
+            if (scene.globe && scene.globe.enableLighting) {
+                scene.globe.enableLighting = false;
+                console.warn('Overwatch: the night side isn\'t supported in this browser; it was switched off.', error);
+                scene.requestRender();
+                return;
+            }
             // Terrain shading (contours, slope) is the one optional globe shader: when a browser
             // can't draw it, only the shading goes, never the globe (Night Ops phase 3, 20-11-26).
             if (scene.globe && scene.globe.material) {

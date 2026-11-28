@@ -1801,7 +1801,8 @@
         _globeStartedMs = _opening!.ElapsedMilliseconds;
         _ = MarkBootCompleteAsync();
         await LoadQualityAsync();
-        if (_look != "night-ops") await ApplyLookToGlobeAsync();
+        // Every look lays the real-Earth imagery (Mac look, 26-11-26), the default Night Ops included.
+        await ApplyLookToGlobeAsync();
 
         if (IonToken is not null)
         {

@@ -106,7 +106,7 @@ public sealed class NativeOverwatchMacMapBridgeTests
         bridge.Should().Contain("if (previous.TryGetValue(key, out var kept) && kept is NativeAnnotation native")
             .And.Contain("NativeShapes.Marker(operation, native.Payload) == NativeShapes.Marker(operation, item)", "a pin whose symbol changes is replaced, since MapKit keeps the drawn view");
         bridge.Should().Contain("NativeShapes.Identity(operation, item)");
-        bridge.Should().Contain("native.Update(item, coordinate)");
+        bridge.Should().Contain("native.Update(item);", "a kept pin keeps its spot; one that moves is replaced (27-11-26)");
         bridge.Should().Contain("_annotationsByHandle.GetValueOrDefault(handle)");
         bridge.Should().Contain("_map.AddOverlays(overlays.ToArray())");
         bridge.Should().NotContain("_map.AddAnnotation(annotation)");
@@ -204,14 +204,15 @@ public sealed class NativeOverwatchMacMapBridgeTests
     }
 
     // 27-11-26, found by the Overwatch visual tour: turning 3D on during a fly-to stopped the flight
-    // halfway, and 3D showed Apple's shop and landmark pins that the flat map hides.
+    // halfway, and 3D (a configuration switch then) showed Apple's shop and landmark pins.
     [Fact]
     public void MacMap_3D_ShouldFinishTheFlight_AndHideApplesPlaces()
     {
         var bridge = File.ReadAllText(Path.Combine(RepoRoot, "src/GwsBusinessSuite.App/Platforms/MacCatalyst/MacNativeOverwatchBridge.cs"));
         var threeD = bridge[bridge.IndexOf("private void SetThreeD(", StringComparison.Ordinal)..bridge.IndexOf("private void MapTap(", StringComparison.Ordinal)];
         threeD.Should().Contain("var (centre, distance) = _flyTarget ?? (_map.CenterCoordinate, camera.CenterCoordinateDistance);")
-            .And.Contain("PointOfInterestFilter = MKPointOfInterestFilter.FilterExcludingAllCategories");
+            .And.NotContain("PreferredConfiguration", "3D only tilts the camera, so the map's own filter keeps Apple's places hidden");
+        bridge.Should().Contain("_map.PointOfInterestFilter = MKPointOfInterestFilter.FilterExcludingAllCategories;");
         bridge.Should().Contain("_flyTarget = (new CLLocationCoordinate2D(latitude, longitude), height);")
             .And.Contain("owner.ArrivedIfFlying();");
     }
@@ -246,14 +247,21 @@ public sealed class NativeOverwatchMacMapBridgeTests
             .And.Contain("OverwatchMapLook.Dim(OverwatchMapLook.Night(sun.Elevation))")
             .And.Contain("_map.AddSubview(_nightShade);")
             .And.Contain("UserInteractionEnabled = false")
-            .And.Contain("new MKHybridMapConfiguration(enabled ? MKMapElevationStyle.Realistic : MKMapElevationStyle.Flat)")
+            // 3D is the camera's tilt over Apple's hybrid flyover map: switching the map configuration
+            // broke MapKit's pin index (crash in MKQuadTrie insert, 27-11-26).
+            .And.NotContain("PreferredConfiguration")
+            .And.Contain("(nfloat)(enabled ? ThreeDPitch : 0)")
             .And.Contain("case NativeOverwatchOperations.SetTerrainShading: return;")
             // Satellite (21-11-26): Apple's satellite map is always underneath; the look hides the holo overlays.
             .And.Contain("MapType = MKMapType.HybridFlyover,")
             .And.Contain("case NativeOverwatchOperations.SetLook: SetLook(arguments); return;")
-            // A moved pin must go through MapKit's own coordinate setter (KVO), or its quad trie goes
-            // stale and the next AddAnnotations crashes (21-11-26).
+            // A pin is never moved in place (27-11-26): from .NET, setting Coordinate on our subclass
+            // didn't reach MapKit's pin index, a moved pin then couldn't be removed, and the next
+            // AddAnnotations crashed in MKQuadTrie insert. A pin whose spot changes is replaced.
             .And.NotContain("override CLLocationCoordinate2D Coordinate")
+            .And.Contain("&& native.Coordinate.Latitude == coordinate.Latitude && native.Coordinate.Longitude == coordinate.Longitude")
+            .And.Contain("public void Update(Dictionary<string, object?> next)")
+            .And.NotContain(") Coordinate = coordinate;")
             .And.Contain("private sealed class NativeAnnotation : MKPointAnnotation")
             .And.Contain("_holoShown = OverwatchMapLook.ShowsHolo(arguments.LastOrDefault() as string);")
             .And.Contain("_landRenderer.Alpha = !_holoShown || share >= 0.98 ? 0 : 1;");

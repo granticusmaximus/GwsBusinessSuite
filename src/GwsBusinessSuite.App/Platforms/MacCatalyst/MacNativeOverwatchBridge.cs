@@ -429,12 +429,18 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
                 while (next.ContainsKey(key)) key += "#";
                 // A pin whose symbol changes (a camera found not working, say) is replaced: MapKit
                 // doesn't restyle a view it has already drawn.
+                // A pin is kept only where it already is (27-11-26). Moving one in place (Coordinate on
+                // our MKPointAnnotation subclass) didn't reach MapKit's pin index from .NET: the index kept
+                // the old spot, the pin then couldn't be removed ("kept 10, on map 11" just before every
+                // crash), and the next AddAnnotations crashed in MKQuadTrie insert (EXC_BAD_ACCESS at
+                // 0x20). Group discs re-centre as the grid moves, so a moved pin is replaced instead.
                 if (previous.TryGetValue(key, out var kept) && kept is NativeAnnotation native
+                    && native.Coordinate.Latitude == coordinate.Latitude && native.Coordinate.Longitude == coordinate.Longitude
                     && NativeShapes.Marker(operation, native.Payload) == NativeShapes.Marker(operation, item)
                     && Face(native.Payload) == Face(item))
                 {
                     previous.Remove(key);
-                    native.Update(item, coordinate);
+                    native.Update(item);
                     next[key] = native;
                 }
                 else
@@ -462,8 +468,7 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
         if (lines.Count > 0) overlays.Add(new MKMultiPolyline(lines.ToArray()) { Title = operation });
         if (previous.Count > 0)
         {
-            _map.RemoveAnnotations(previous.Values.ToArray());
-            foreach (var removed in previous.Values.OfType<NativeAnnotation>()) _annotationsByHandle.Remove(removed.Handle);
+            RemovePins(previous.Values.ToArray());
         }
         if (added.Count > 0) _map.AddAnnotations(added.ToArray());
         if (next.Count > 0) _annotations[operation] = next;
@@ -573,12 +578,11 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
     private void SetThreeD(object?[] arguments)
     {
         var enabled = arguments.LastOrDefault() is true;
-        // The configuration carries its own points-of-interest filter: without it, 3D showed Apple's
-        // restaurant and landmark pins that the flat map and the web leave out (27-11-26).
-        _map.PreferredConfiguration = new MKHybridMapConfiguration(enabled ? MKMapElevationStyle.Realistic : MKMapElevationStyle.Flat)
-        {
-            PointOfInterestFilter = MKPointOfInterestFilter.FilterExcludingAllCategories
-        };
+        // 3D is only the camera's tilt (27-11-26). The map is Apple's hybrid flyover, which already has
+        // realistic terrain and 3D buildings when tilted. Switching the map's configuration to a
+        // realistic/flat hybrid configuration on every 3D switch left MapKit's pin index broken: every
+        // full Overwatch tour then crashed in MKQuadTrie insert (EXC_BAD_ACCESS at 0x20) on the next big
+        // batch of pins. It also brought back Apple's points of interest, which the map hides.
         var camera = _map.Camera;
         // Mid-flight, tilt at where the flight is going, not where it is now (27-11-26: turning 3D on
         // during a fly-to stopped the flight halfway, over New Mexico on the way to San Francisco).
@@ -827,13 +831,18 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
     private const double StreetLevelMetres = 1500;
     private const int MaximumChoices = 30;
 
+    private void RemovePins(IMKAnnotation[] pins)
+    {
+        _map.RemoveAnnotations(pins);
+        foreach (var pin in pins.OfType<NativeAnnotation>()) _annotationsByHandle.Remove(pin.Handle);
+    }
+
     private void Clear(string operation)
     {
         _signatures.Remove(operation);
         if (_annotations.Remove(operation, out var annotations) && annotations.Count > 0)
         {
-            _map.RemoveAnnotations(annotations.Values.ToArray());
-            foreach (var annotation in annotations.Values.OfType<NativeAnnotation>()) _annotationsByHandle.Remove(annotation.Handle);
+            RemovePins(annotations.Values.ToArray());
         }
         if (_overlays.Remove(operation, out var overlays) && overlays.Count > 0) _map.RemoveOverlays(overlays.ToArray());
     }
@@ -1307,11 +1316,10 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
         public string Operation { get; }
         public Dictionary<string, object?> Payload { get; private set; }
 
-        public void Update(Dictionary<string, object?> next, CLLocationCoordinate2D coordinate)
+        // The payload and labels only: a pin that moves is replaced (see Render).
+        public void Update(Dictionary<string, object?> next)
         {
             Payload = next;
-            var current = Coordinate;
-            if (current.Latitude != coordinate.Latitude || current.Longitude != coordinate.Longitude) Coordinate = coordinate;
             Title = ReadString(next, "title", "name", "label", "callsign", "code", "id") ?? Operation[3..];
             Subtitle = ReadString(next, "summary", "description", "status", "source", "kind");
         }
